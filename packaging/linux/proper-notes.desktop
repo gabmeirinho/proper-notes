@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Proper Notes
+Comment=Local-first notes for Linux and Android
+Exec=__EXEC_PATH__
+Icon=accessories-text-editor
+Terminal=false
+Categories=Office;Utility;
+StartupWMClass=proper_notes
+StartupNotify=true

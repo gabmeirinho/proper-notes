@@ -1,0 +1,24 @@
+import 'note.dart';
+import '../../sync/domain/remote_note.dart';
+
+abstract interface class NoteRepository {
+  Stream<List<Note>> watchActiveNotes();
+  Stream<List<Note>> watchDeletedNotes();
+  Future<List<Note>> searchNotes(String query);
+  Future<List<Note>> getActiveNotesForSync();
+  Future<List<Note>> getDeletedNotesForSync();
+  Future<Note?> getById(String id);
+  Future<void> create(Note note);
+  Future<void> update(Note note);
+  Future<void> softDelete(String id, DateTime deletedAt);
+  Future<void> restore(String id);
+  Future<void> markSynced({
+    required String id,
+    required DateTime syncedAt,
+    required String baseContentHash,
+    String? remoteFileId,
+  });
+  Future<void> upsertRemoteNote(RemoteNote remoteNote);
+  Future<void> markConflict(String id);
+  Future<void> applyRemoteDeletion(RemoteNote remoteNote);
+}

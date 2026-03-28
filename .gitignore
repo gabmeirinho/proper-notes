@@ -1,0 +1,25 @@
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub/
+.idea/
+.vscode/
+build/
+coverage/
+android/key.properties
+android/*.jks
+android/*.keystore
+
+# Flutter/Dart generated
+**/*.g.dart
+**/*.freezed.dart
+
+# Platform build output
+android/.gradle/
+android/app/build/
+ios/Pods/
+linux/flutter/ephemeral/
+linux/flutter/generated_plugin_registrant.*
+macos/Flutter/ephemeral/
+windows/flutter/ephemeral/
