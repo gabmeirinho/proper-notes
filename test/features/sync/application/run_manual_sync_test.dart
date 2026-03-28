@@ -579,6 +579,9 @@ class _FakeSyncStateRepository implements SyncStateRepository {
   String? savedToken;
 
   @override
+  Future<String> getOrCreateDeviceId() async => 'test-device';
+
+  @override
   Future<String?> getDriveSyncToken() async => initialToken;
 
   @override

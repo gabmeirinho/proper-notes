@@ -33,12 +33,13 @@ class ProperNotesApp extends StatefulWidget {
 }
 
 class _ProperNotesAppState extends State<ProperNotesApp> {
-  static const _deviceId = 'local-device';
   late final AuthController _authController;
   late final SyncController _syncController;
   late final GoogleAuthConfig _googleAuthConfig;
   late final SharedPreferencesOAuthSessionStore _sessionStore;
   late final GoogleOAuthTokenClient _tokenClient;
+  late final DriftSyncStateRepository _syncStateRepository;
+  String? _deviceId;
 
   @override
   void initState() {
@@ -46,6 +47,7 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
     _googleAuthConfig = GoogleAuthConfig.fromEnvironment();
     _sessionStore = SharedPreferencesOAuthSessionStore();
     _tokenClient = GoogleOAuthTokenClient();
+    _syncStateRepository = DriftSyncStateRepository(widget.database);
     _authController = AuthController(
       authService: GoogleAuthService(
         config: _googleAuthConfig,
@@ -61,9 +63,20 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
           sessionStore: _sessionStore,
           tokenClient: _tokenClient,
         ),
-        syncStateRepository: DriftSyncStateRepository(widget.database),
+        syncStateRepository: _syncStateRepository,
       ),
     );
+    _restoreBootstrapState();
+  }
+
+  Future<void> _restoreBootstrapState() async {
+    final deviceId = await _syncStateRepository.getOrCreateDeviceId();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _deviceId = deviceId;
+    });
     _authController.restore();
   }
 
@@ -77,6 +90,22 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
 
   @override
   Widget build(BuildContext context) {
+    final deviceId = _deviceId;
+    if (deviceId == null) {
+      return MaterialApp(
+        title: 'Proper Notes',
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
+          useMaterial3: true,
+        ),
+        home: const Scaffold(
+          body: Center(
+            child: CircularProgressIndicator(),
+          ),
+        ),
+      );
+    }
+
     return MaterialApp(
       title: 'Proper Notes',
       theme: ThemeData(
@@ -86,11 +115,11 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
       home: NotesHomePage(
         createNote: CreateNote(
           repository: widget.noteRepository,
-          deviceId: _deviceId,
+          deviceId: deviceId,
         ),
         updateNote: UpdateNote(
           repository: widget.noteRepository,
-          deviceId: _deviceId,
+          deviceId: deviceId,
         ),
         deleteNote: DeleteNote(repository: widget.noteRepository),
         restoreNote: RestoreNote(repository: widget.noteRepository),
