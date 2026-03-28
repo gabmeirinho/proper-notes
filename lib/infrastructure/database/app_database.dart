@@ -49,6 +49,18 @@ class AppDatabase extends _$AppDatabase {
 
   @override
   int get schemaVersion => 1;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (migrator) async {
+          await migrator.createAll();
+        },
+        onUpgrade: (migrator, from, to) async {
+          throw UnsupportedError(
+            'No migration path registered for schema upgrade $from -> $to.',
+          );
+        },
+      );
 }
 
 LazyDatabase _openConnection() {

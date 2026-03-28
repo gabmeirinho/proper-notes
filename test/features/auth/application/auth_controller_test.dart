@@ -72,6 +72,21 @@ void main() {
     expect(controller.errorMessage, contains('sign-in failed'));
   });
 
+  test('summarizes common auth configuration errors', () async {
+    final controller = AuthController(
+      authService: _FakeAuthService(
+        signInError: Exception('Missing Google client id for this build'),
+      ),
+    );
+
+    await controller.signIn();
+
+    expect(
+      controller.errorMessage,
+      'Google sign-in is not configured correctly for this build.',
+    );
+  });
+
   test('restore resolves initial session state even when restore fails',
       () async {
     final controller = AuthController(

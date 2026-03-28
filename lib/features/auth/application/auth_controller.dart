@@ -55,10 +55,30 @@ class AuthController extends ChangeNotifier {
     try {
       await action();
     } catch (error) {
-      _errorMessage = error.toString();
+      _errorMessage = _summarizeError(error.toString());
     } finally {
       _isBusy = false;
       notifyListeners();
     }
+  }
+
+  String _summarizeError(String rawError) {
+    final normalized = rawError.trim();
+    final withoutExceptionPrefix = normalized.startsWith('Exception: ')
+        ? normalized.substring('Exception: '.length)
+        : normalized;
+    final message = withoutExceptionPrefix.toLowerCase();
+
+    if (message.contains('client id') || message.contains('client secret')) {
+      return 'Google sign-in is not configured correctly for this build.';
+    }
+    if (message.contains('cancelled') || message.contains('canceled')) {
+      return 'Google sign-in was cancelled.';
+    }
+    if (message.contains('network')) {
+      return 'Network error during sign-in. Check your connection and try again.';
+    }
+
+    return withoutExceptionPrefix;
   }
 }

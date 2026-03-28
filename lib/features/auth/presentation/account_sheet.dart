@@ -88,7 +88,8 @@ class AccountSheet extends StatelessWidget {
                             await authController.signOut();
                           }
 
-                          if (context.mounted) {
+                          if (context.mounted &&
+                              authController.errorMessage == null) {
                             Navigator.of(context).pop();
                           }
                         },

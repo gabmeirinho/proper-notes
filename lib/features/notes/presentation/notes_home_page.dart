@@ -115,12 +115,17 @@ class _NotesHomePageState extends State<NotesHomePage>
                     final isCheckingAccount =
                         !widget.authController.hasResolvedInitialSession &&
                             widget.authController.isBusy;
+                    final syncReady = widget.authController.isSignedIn;
                     return IconButton(
                       onPressed:
-                          widget.syncController.isSyncing || isCheckingAccount
+                          widget.syncController.isSyncing ||
+                                  isCheckingAccount ||
+                                  !syncReady
                               ? null
                               : _runSync,
-                      tooltip: 'Sync',
+                      tooltip: isCheckingAccount
+                          ? 'Checking account'
+                          : (syncReady ? 'Sync' : 'Sign in to sync'),
                       icon: widget.syncController.isSyncing
                           ? const SizedBox(
                               width: 18,
