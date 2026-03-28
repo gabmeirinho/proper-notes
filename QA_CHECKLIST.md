@@ -30,7 +30,7 @@ Use at least two real devices/environments:
 - [X] Reopen the app on Linux and confirm the previously signed-in account still appears.
 - [X] Reopen the app on Android and confirm the previously signed-in account still appears.
 - [X] Sync does not ask to sign in again when an existing session is already valid.
-- [X] Sign out removes visible account state on both platforms. // DIDNT UNDERSTOOD
+- [X] Sign out removes visible account state on both platforms.
 - [X] Sign in again after sign-out and confirm sync still works.
 
 ## 3. Local Notes
@@ -65,8 +65,8 @@ Use at least two real devices/environments:
 
 ### Restore
 
-- [X] Restore a deleted note on Android, sync Android, sync Linux, and verify the note becomes active again on Linux. - NOT WORKING, AFTER SYNC IN LINUX, NOTHING HAPPEN AND THEN AFTER SYNC IN ANDROID THE NOTE IS DEELTED
-- [X] Restore a deleted note on Linux, sync Linux, sync Android, and verify the note becomes active again on Android.NOT WORKING, AFTER SYNC IN ANDROID, NOTHING HAPPEN AND THEN AFTER SYNC IN LINUX THE NOTE IS DEELTED
+- [X] Restore a deleted note on Android, sync Android, sync Linux, and verify the note becomes active again on Linux.
+- [X] Restore a deleted note on Linux, sync Linux, sync Android, and verify the note becomes active again on Android.
 
 ## 5. No-Op Sync Behavior
 
@@ -80,9 +80,9 @@ Use at least two real devices/environments:
 - [X] Start from a synced note on both devices.
 - [X] Turn off network on one device or avoid syncing it.
 - [X] Edit the same note differently on Linux and Android.
-- [X] Sync one device, then sync the other. - NETWORK ERROR
+- [X] Sync one device, then sync the other.
 - [X] Confirm the app preserves both versions instead of overwriting silently.
-- [X] Confirm conflict state is visible and understandable in the UI. - YES UNDERSTANDABLE
+- [X] Confirm conflict state is visible and understandable in the UI.
 
 ## 7. Stale Device Scenarios
 
@@ -92,7 +92,7 @@ Use at least two real devices/environments:
 - [X] Confirm no data is silently lost.
 - [X] Delete a note on one device while the other device remains offline.
 - [X] Bring the stale device online and sync both devices.
-- [X] Confirm the delete does not silently resurrect or destroy newer content incorrectly. - IF I DELETE IN LINUX, AND EDIT THE SAME NOTE IN ANDROID, WHEN I SYNC THE NOTE DISAPPEAR
+- [X] Confirm the delete does not silently resurrect or destroy newer content incorrectly.
 
 ## 8. Restart And Persistence
 
