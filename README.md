@@ -34,9 +34,6 @@ What is still worth doing before calling v1 complete:
 - tighten some small sync/account UX details
 - decide the exact first release-candidate version/tag and release notes
 
-Immediate handoff for the next chat/agent:
-- use `NEXT_STEPS.md`
-
 ## Identity
 
 - App name: `Proper Notes`
