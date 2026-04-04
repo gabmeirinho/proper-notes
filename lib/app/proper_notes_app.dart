@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 
 import '../features/auth/application/auth_controller.dart';
+import '../features/notes/application/create_folder.dart';
 import '../features/notes/application/create_note.dart';
+import '../features/notes/application/delete_folder.dart';
 import '../features/notes/application/delete_note.dart';
+import '../features/notes/application/move_note.dart';
+import '../features/notes/application/rename_folder.dart';
 import '../features/notes/application/restore_note.dart';
 import '../features/notes/application/search_notes.dart';
 import '../features/notes/application/update_note.dart';
+import '../features/notes/domain/folder_repository.dart';
 import '../features/notes/domain/note_repository.dart';
 import '../features/notes/presentation/notes_home_page.dart';
 import '../features/sync/application/run_manual_sync.dart';
@@ -15,6 +20,7 @@ import '../infrastructure/auth/google_auth_service.dart';
 import '../infrastructure/auth/google_oauth_token_client.dart';
 import '../infrastructure/auth/oauth_session_store.dart';
 import '../infrastructure/database/app_database.dart';
+import '../infrastructure/repositories/drift_folder_repository.dart';
 import '../infrastructure/repositories/drift_sync_state_repository.dart';
 import '../infrastructure/sync/google_drive_sync_gateway.dart';
 
@@ -39,6 +45,7 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
   late final SharedPreferencesOAuthSessionStore _sessionStore;
   late final GoogleOAuthTokenClient _tokenClient;
   late final DriftSyncStateRepository _syncStateRepository;
+  late final FolderRepository _folderRepository;
   String? _deviceId;
 
   @override
@@ -48,6 +55,7 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
     _sessionStore = SharedPreferencesOAuthSessionStore();
     _tokenClient = GoogleOAuthTokenClient();
     _syncStateRepository = DriftSyncStateRepository(widget.database);
+    _folderRepository = DriftFolderRepository(widget.database);
     _authController = AuthController(
       authService: GoogleAuthService(
         config: _googleAuthConfig,
@@ -117,6 +125,13 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
           repository: widget.noteRepository,
           deviceId: deviceId,
         ),
+        createFolder: CreateFolder(repository: _folderRepository),
+        deleteFolder: DeleteFolder(repository: _folderRepository),
+        renameFolder: RenameFolder(repository: _folderRepository),
+        moveNote: MoveNote(
+          repository: widget.noteRepository,
+          deviceId: deviceId,
+        ),
         updateNote: UpdateNote(
           repository: widget.noteRepository,
           deviceId: deviceId,
@@ -124,6 +139,7 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
         deleteNote: DeleteNote(repository: widget.noteRepository),
         restoreNote: RestoreNote(repository: widget.noteRepository),
         searchNotes: SearchNotes(repository: widget.noteRepository),
+        folderRepository: _folderRepository,
         noteRepository: widget.noteRepository,
         authController: _authController,
         syncController: _syncController,

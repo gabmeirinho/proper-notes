@@ -2,9 +2,9 @@ import 'note.dart';
 import '../../sync/domain/remote_note.dart';
 
 abstract interface class NoteRepository {
-  Stream<List<Note>> watchActiveNotes();
-  Stream<List<Note>> watchDeletedNotes();
-  Future<List<Note>> searchNotes(String query);
+  Stream<List<Note>> watchActiveNotes({String? folderPath});
+  Stream<List<Note>> watchDeletedNotes({String? folderPath});
+  Future<List<Note>> searchNotes(String query, {String? folderPath});
   Future<List<Note>> getActiveNotesForSync();
   Future<List<Note>> getDeletedNotesForSync();
   Future<Note?> getById(String id);

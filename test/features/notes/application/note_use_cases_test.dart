@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:proper_notes/core/utils/content_hash.dart';
 import 'package:proper_notes/features/notes/application/create_note.dart';
 import 'package:proper_notes/features/notes/application/delete_note.dart';
+import 'package:proper_notes/features/notes/application/move_note.dart';
 import 'package:proper_notes/features/notes/application/restore_note.dart';
 import 'package:proper_notes/features/notes/application/search_notes.dart';
 import 'package:proper_notes/features/notes/application/update_note.dart';
@@ -27,6 +28,7 @@ void main() {
       final created = await useCase(
         title: 'Markdown note',
         content: markdown,
+        folderPath: 'Projects/Proper Notes',
       );
 
       expect(created.id, 'note-123');
@@ -34,6 +36,7 @@ void main() {
       expect(created.content, markdown);
       expect(created.syncStatus, SyncStatus.pendingUpload);
       expect(created.deviceId, 'device-a');
+      expect(created.folderPath, 'Projects/Proper Notes');
       expect(created.contentHash, computeContentHash(markdown));
       expect(created.createdAt.isUtc, isTrue);
       expect(created.updatedAt.isUtc, isTrue);
@@ -69,6 +72,7 @@ void main() {
       expect(updated.contentHash, computeContentHash(markdown));
       expect(updated.syncStatus, SyncStatus.pendingUpload);
       expect(updated.deviceId, 'device-b');
+      expect(updated.folderPath, original.folderPath);
       expect(updated.updatedAt.isAfter(original.updatedAt), isTrue);
       expect(repository.updatedNotes.single.content, markdown);
     });
@@ -83,6 +87,34 @@ void main() {
 
       expect(repository.softDeletedIds.single, 'note-delete');
       expect(repository.softDeleteTimestamps.single.isUtc, isTrue);
+    });
+  });
+
+  group('MoveNote', () {
+    test('moves a note to a new folder and marks it pending upload', () async {
+      final repository = _FakeNoteRepository();
+      final useCase = MoveNote(
+        repository: repository,
+        deviceId: 'device-b',
+      );
+      final original = _buildNote(
+        id: 'note-move',
+        title: 'Move me',
+        content: 'body',
+        syncStatus: SyncStatus.synced,
+        deviceId: 'device-a',
+        folderPath: 'Projects',
+      );
+
+      final moved = await useCase(
+        original: original,
+        folderPath: 'Archive',
+      );
+
+      expect(moved.folderPath, 'Archive');
+      expect(moved.syncStatus, SyncStatus.pendingUpload);
+      expect(moved.deviceId, 'device-b');
+      expect(repository.updatedNotes.single.folderPath, 'Archive');
     });
   });
 
@@ -167,7 +199,7 @@ class _FakeNoteRepository implements NoteRepository {
   }
 
   @override
-  Future<List<Note>> searchNotes(String query) async {
+  Future<List<Note>> searchNotes(String query, {String? folderPath}) async {
     searchQueries.add(query);
     return _searchResults;
   }
@@ -187,10 +219,12 @@ class _FakeNoteRepository implements NoteRepository {
   Future<void> upsertRemoteNote(RemoteNote remoteNote) async {}
 
   @override
-  Stream<List<Note>> watchActiveNotes() => const Stream.empty();
+  Stream<List<Note>> watchActiveNotes({String? folderPath}) =>
+      const Stream.empty();
 
   @override
-  Stream<List<Note>> watchDeletedNotes() => const Stream.empty();
+  Stream<List<Note>> watchDeletedNotes({String? folderPath}) =>
+      const Stream.empty();
 }
 
 class _FixedUuid extends Uuid {
@@ -212,6 +246,7 @@ Note _buildNote({
   required String content,
   required SyncStatus syncStatus,
   required String deviceId,
+  String? folderPath,
 }) {
   final timestamp = DateTime.utc(2026, 3, 24, 12);
 
@@ -224,5 +259,6 @@ Note _buildNote({
     syncStatus: syncStatus,
     contentHash: computeContentHash(content),
     deviceId: deviceId,
+    folderPath: folderPath,
   );
 }

@@ -11,7 +11,14 @@ Current stack:
 Current capabilities:
 - markdown/plain-text notes
 - local create, edit, delete, restore
+- conservative local autosave for note create/edit flows
 - local search
+- nested folders with notes grouped in a collapsible desktop sidebar tree
+- folder deletion with immediate delete for empty folders and confirmation for non-empty folder trees
+- desktop trash access inside the workspace sidebar
+- Obsidian-like desktop workspace with a slim top bar and optional sidebar collapse
+- compact per-note sync-state indicators in the sidebar
+- calmer mobile layout with folder context moved into the app bar instead of large status banners
 - Google sign-in on Linux and Android
 - manual sync with conflict preservation
 - cross-device create, edit, delete, restore, and conflict-copy sync between Linux and Android
@@ -22,7 +29,13 @@ Current capabilities:
 
 What is already working:
 - local-first note editing
+- local-first autosave with flush-on-close/lifecycle handling
+- current desktop workspace direction with collapsible folder tree and nested notes
+- desktop embedded editor with a flatter, less boxed writing surface
 - deleted-notes and restore flow
+- folder create/delete flows with subtree-aware delete confirmation
+- sidebar sync-state UI and dismissible sync notices
+- lighter mobile chrome without the older large folder/sync/shortcut panels
 - repeated no-op sync without the earlier upload loop
 - restore propagation across devices
 - delete-vs-edit conflict preservation with conflict copies
@@ -31,7 +44,9 @@ What is already working:
 
 What is still worth doing before calling v1 complete:
 - add more automated tests for stale-device, restore, and migration scenarios
-- tighten some small sync/account UX details
+- finish folder management with reliable rename and note-move flows
+- persist desktop sidebar collapse and expansion state locally
+- tighten some remaining sync/account UX details
 - decide the exact first release-candidate version/tag and release notes
 
 ## Identity

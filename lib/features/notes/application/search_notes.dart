@@ -8,7 +8,7 @@ class SearchNotes {
 
   final NoteRepository _repository;
 
-  Future<List<Note>> call(String query) {
-    return _repository.searchNotes(query);
+  Future<List<Note>> call(String query, {String? folderPath}) {
+    return _repository.searchNotes(query, folderPath: folderPath);
   }
 }

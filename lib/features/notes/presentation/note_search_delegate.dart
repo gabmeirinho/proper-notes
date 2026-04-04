@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 
-import '../application/search_notes.dart';
 import '../domain/note.dart';
 
 class NoteSearchDelegate extends SearchDelegate<Note?> {
   NoteSearchDelegate({
-    required SearchNotes searchNotes,
+    required Future<List<Note>> Function(String query) searchNotes,
   }) : _searchNotes = searchNotes;
 
-  final SearchNotes _searchNotes;
+  final Future<List<Note>> Function(String query) _searchNotes;
 
   @override
   List<Widget>? buildActions(BuildContext context) {
@@ -60,7 +59,7 @@ class _SearchResults extends StatelessWidget {
   });
 
   final String query;
-  final SearchNotes searchNotes;
+  final Future<List<Note>> Function(String query) searchNotes;
   final ValueChanged<Note> onSelected;
 
   @override

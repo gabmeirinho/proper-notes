@@ -174,7 +174,6 @@ Prefer small, boring, well-maintained packages.
 
 When making meaningful architectural changes:
 - update the relevant docs
-- record important tradeoffs in `DECISIONS.md` when that file exists
 - keep implementation aligned with `PLAN.MD`
 
 If code and plan diverge, call it out explicitly instead of silently drifting the architecture.

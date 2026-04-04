@@ -181,6 +181,7 @@ class GoogleDriveSyncGateway implements SyncGateway {
       'updated_at': note.updatedAt.millisecondsSinceEpoch,
       'deleted_at': note.deletedAt?.millisecondsSinceEpoch,
       'device_id': note.deviceId,
+      'folder_path': note.folderPath,
       'content_hash': note.contentHash,
     });
 
@@ -238,6 +239,7 @@ class GoogleDriveSyncGateway implements SyncGateway {
       deletedAt: note.deletedAt,
       contentHash: note.contentHash,
       deviceId: note.deviceId,
+      folderPath: note.folderPath,
       remoteFileId: responsePayload['id'] as String?,
     );
   }
@@ -397,6 +399,7 @@ class GoogleDriveSyncGateway implements SyncGateway {
             ),
       contentHash: jsonPayload['content_hash'] as String,
       deviceId: jsonPayload['device_id'] as String,
+      folderPath: jsonPayload['folder_path'] as String?,
       remoteFileId: fileId,
     );
   }

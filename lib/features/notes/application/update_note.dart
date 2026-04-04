@@ -17,6 +17,7 @@ class UpdateNote {
     required Note original,
     required String title,
     required String content,
+    String? folderPath,
   }) async {
     final now = DateTime.now().toUtc();
     final updatedNote = original.copyWith(
@@ -26,6 +27,7 @@ class UpdateNote {
       contentHash: computeContentHash(content),
       syncStatus: SyncStatus.pendingUpload,
       deviceId: _deviceId,
+      folderPath: folderPath ?? original.folderPath,
       clearDeletedAt: true,
     );
 

@@ -77,6 +77,12 @@ class $NotesTableTable extends NotesTable
   late final GeneratedColumn<String> deviceId = GeneratedColumn<String>(
       'device_id', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _folderPathMeta =
+      const VerificationMeta('folderPath');
+  @override
+  late final GeneratedColumn<String> folderPath = GeneratedColumn<String>(
+      'folder_path', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _remoteFileIdMeta =
       const VerificationMeta('remoteFileId');
   @override
@@ -96,6 +102,7 @@ class $NotesTableTable extends NotesTable
         contentHash,
         baseContentHash,
         deviceId,
+        folderPath,
         remoteFileId
       ];
   @override
@@ -171,6 +178,12 @@ class $NotesTableTable extends NotesTable
     } else if (isInserting) {
       context.missing(_deviceIdMeta);
     }
+    if (data.containsKey('folder_path')) {
+      context.handle(
+          _folderPathMeta,
+          folderPath.isAcceptableOrUnknown(
+              data['folder_path']!, _folderPathMeta));
+    }
     if (data.containsKey('remote_file_id')) {
       context.handle(
           _remoteFileIdMeta,
@@ -208,6 +221,8 @@ class $NotesTableTable extends NotesTable
           DriftSqlType.string, data['${effectivePrefix}base_content_hash']),
       deviceId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}device_id'])!,
+      folderPath: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}folder_path']),
       remoteFileId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}remote_file_id']),
     );
@@ -231,6 +246,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
   final String contentHash;
   final String? baseContentHash;
   final String deviceId;
+  final String? folderPath;
   final String? remoteFileId;
   const NotesTableData(
       {required this.id,
@@ -244,6 +260,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       required this.contentHash,
       this.baseContentHash,
       required this.deviceId,
+      this.folderPath,
       this.remoteFileId});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -265,6 +282,9 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       map['base_content_hash'] = Variable<String>(baseContentHash);
     }
     map['device_id'] = Variable<String>(deviceId);
+    if (!nullToAbsent || folderPath != null) {
+      map['folder_path'] = Variable<String>(folderPath);
+    }
     if (!nullToAbsent || remoteFileId != null) {
       map['remote_file_id'] = Variable<String>(remoteFileId);
     }
@@ -290,6 +310,9 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
           ? const Value.absent()
           : Value(baseContentHash),
       deviceId: Value(deviceId),
+      folderPath: folderPath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(folderPath),
       remoteFileId: remoteFileId == null && nullToAbsent
           ? const Value.absent()
           : Value(remoteFileId),
@@ -311,6 +334,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       contentHash: serializer.fromJson<String>(json['contentHash']),
       baseContentHash: serializer.fromJson<String?>(json['baseContentHash']),
       deviceId: serializer.fromJson<String>(json['deviceId']),
+      folderPath: serializer.fromJson<String?>(json['folderPath']),
       remoteFileId: serializer.fromJson<String?>(json['remoteFileId']),
     );
   }
@@ -329,6 +353,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       'contentHash': serializer.toJson<String>(contentHash),
       'baseContentHash': serializer.toJson<String?>(baseContentHash),
       'deviceId': serializer.toJson<String>(deviceId),
+      'folderPath': serializer.toJson<String?>(folderPath),
       'remoteFileId': serializer.toJson<String?>(remoteFileId),
     };
   }
@@ -345,6 +370,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
           String? contentHash,
           Value<String?> baseContentHash = const Value.absent(),
           String? deviceId,
+          Value<String?> folderPath = const Value.absent(),
           Value<String?> remoteFileId = const Value.absent()}) =>
       NotesTableData(
         id: id ?? this.id,
@@ -361,6 +387,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
             ? baseContentHash.value
             : this.baseContentHash,
         deviceId: deviceId ?? this.deviceId,
+        folderPath: folderPath.present ? folderPath.value : this.folderPath,
         remoteFileId:
             remoteFileId.present ? remoteFileId.value : this.remoteFileId,
       );
@@ -383,6 +410,8 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
           ? data.baseContentHash.value
           : this.baseContentHash,
       deviceId: data.deviceId.present ? data.deviceId.value : this.deviceId,
+      folderPath:
+          data.folderPath.present ? data.folderPath.value : this.folderPath,
       remoteFileId: data.remoteFileId.present
           ? data.remoteFileId.value
           : this.remoteFileId,
@@ -403,6 +432,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
           ..write('contentHash: $contentHash, ')
           ..write('baseContentHash: $baseContentHash, ')
           ..write('deviceId: $deviceId, ')
+          ..write('folderPath: $folderPath, ')
           ..write('remoteFileId: $remoteFileId')
           ..write(')'))
         .toString();
@@ -421,6 +451,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       contentHash,
       baseContentHash,
       deviceId,
+      folderPath,
       remoteFileId);
   @override
   bool operator ==(Object other) =>
@@ -437,6 +468,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
           other.contentHash == this.contentHash &&
           other.baseContentHash == this.baseContentHash &&
           other.deviceId == this.deviceId &&
+          other.folderPath == this.folderPath &&
           other.remoteFileId == this.remoteFileId);
 }
 
@@ -452,6 +484,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
   final Value<String> contentHash;
   final Value<String?> baseContentHash;
   final Value<String> deviceId;
+  final Value<String?> folderPath;
   final Value<String?> remoteFileId;
   final Value<int> rowid;
   const NotesTableCompanion({
@@ -466,6 +499,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
     this.contentHash = const Value.absent(),
     this.baseContentHash = const Value.absent(),
     this.deviceId = const Value.absent(),
+    this.folderPath = const Value.absent(),
     this.remoteFileId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -481,6 +515,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
     required String contentHash,
     this.baseContentHash = const Value.absent(),
     required String deviceId,
+    this.folderPath = const Value.absent(),
     this.remoteFileId = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
@@ -501,6 +536,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
     Expression<String>? contentHash,
     Expression<String>? baseContentHash,
     Expression<String>? deviceId,
+    Expression<String>? folderPath,
     Expression<String>? remoteFileId,
     Expression<int>? rowid,
   }) {
@@ -516,6 +552,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
       if (contentHash != null) 'content_hash': contentHash,
       if (baseContentHash != null) 'base_content_hash': baseContentHash,
       if (deviceId != null) 'device_id': deviceId,
+      if (folderPath != null) 'folder_path': folderPath,
       if (remoteFileId != null) 'remote_file_id': remoteFileId,
       if (rowid != null) 'rowid': rowid,
     });
@@ -533,6 +570,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
       Value<String>? contentHash,
       Value<String?>? baseContentHash,
       Value<String>? deviceId,
+      Value<String?>? folderPath,
       Value<String?>? remoteFileId,
       Value<int>? rowid}) {
     return NotesTableCompanion(
@@ -547,6 +585,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
       contentHash: contentHash ?? this.contentHash,
       baseContentHash: baseContentHash ?? this.baseContentHash,
       deviceId: deviceId ?? this.deviceId,
+      folderPath: folderPath ?? this.folderPath,
       remoteFileId: remoteFileId ?? this.remoteFileId,
       rowid: rowid ?? this.rowid,
     );
@@ -588,6 +627,9 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
     if (deviceId.present) {
       map['device_id'] = Variable<String>(deviceId.value);
     }
+    if (folderPath.present) {
+      map['folder_path'] = Variable<String>(folderPath.value);
+    }
     if (remoteFileId.present) {
       map['remote_file_id'] = Variable<String>(remoteFileId.value);
     }
@@ -611,7 +653,246 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
           ..write('contentHash: $contentHash, ')
           ..write('baseContentHash: $baseContentHash, ')
           ..write('deviceId: $deviceId, ')
+          ..write('folderPath: $folderPath, ')
           ..write('remoteFileId: $remoteFileId, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $FoldersTableTable extends FoldersTable
+    with TableInfo<$FoldersTableTable, FoldersTableData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $FoldersTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _pathMeta = const VerificationMeta('path');
+  @override
+  late final GeneratedColumn<String> path = GeneratedColumn<String>(
+      'path', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _parentPathMeta =
+      const VerificationMeta('parentPath');
+  @override
+  late final GeneratedColumn<String> parentPath = GeneratedColumn<String>(
+      'parent_path', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+      'created_at', aliasedName, false,
+      type: DriftSqlType.int, requiredDuringInsert: true);
+  @override
+  List<GeneratedColumn> get $columns => [path, parentPath, createdAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'folders_table';
+  @override
+  VerificationContext validateIntegrity(Insertable<FoldersTableData> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('path')) {
+      context.handle(
+          _pathMeta, path.isAcceptableOrUnknown(data['path']!, _pathMeta));
+    } else if (isInserting) {
+      context.missing(_pathMeta);
+    }
+    if (data.containsKey('parent_path')) {
+      context.handle(
+          _parentPathMeta,
+          parentPath.isAcceptableOrUnknown(
+              data['parent_path']!, _parentPathMeta));
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {path};
+  @override
+  FoldersTableData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return FoldersTableData(
+      path: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}path'])!,
+      parentPath: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}parent_path']),
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}created_at'])!,
+    );
+  }
+
+  @override
+  $FoldersTableTable createAlias(String alias) {
+    return $FoldersTableTable(attachedDatabase, alias);
+  }
+}
+
+class FoldersTableData extends DataClass
+    implements Insertable<FoldersTableData> {
+  final String path;
+  final String? parentPath;
+  final int createdAt;
+  const FoldersTableData(
+      {required this.path, this.parentPath, required this.createdAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['path'] = Variable<String>(path);
+    if (!nullToAbsent || parentPath != null) {
+      map['parent_path'] = Variable<String>(parentPath);
+    }
+    map['created_at'] = Variable<int>(createdAt);
+    return map;
+  }
+
+  FoldersTableCompanion toCompanion(bool nullToAbsent) {
+    return FoldersTableCompanion(
+      path: Value(path),
+      parentPath: parentPath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(parentPath),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory FoldersTableData.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return FoldersTableData(
+      path: serializer.fromJson<String>(json['path']),
+      parentPath: serializer.fromJson<String?>(json['parentPath']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'path': serializer.toJson<String>(path),
+      'parentPath': serializer.toJson<String?>(parentPath),
+      'createdAt': serializer.toJson<int>(createdAt),
+    };
+  }
+
+  FoldersTableData copyWith(
+          {String? path,
+          Value<String?> parentPath = const Value.absent(),
+          int? createdAt}) =>
+      FoldersTableData(
+        path: path ?? this.path,
+        parentPath: parentPath.present ? parentPath.value : this.parentPath,
+        createdAt: createdAt ?? this.createdAt,
+      );
+  FoldersTableData copyWithCompanion(FoldersTableCompanion data) {
+    return FoldersTableData(
+      path: data.path.present ? data.path.value : this.path,
+      parentPath:
+          data.parentPath.present ? data.parentPath.value : this.parentPath,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FoldersTableData(')
+          ..write('path: $path, ')
+          ..write('parentPath: $parentPath, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(path, parentPath, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is FoldersTableData &&
+          other.path == this.path &&
+          other.parentPath == this.parentPath &&
+          other.createdAt == this.createdAt);
+}
+
+class FoldersTableCompanion extends UpdateCompanion<FoldersTableData> {
+  final Value<String> path;
+  final Value<String?> parentPath;
+  final Value<int> createdAt;
+  final Value<int> rowid;
+  const FoldersTableCompanion({
+    this.path = const Value.absent(),
+    this.parentPath = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  FoldersTableCompanion.insert({
+    required String path,
+    this.parentPath = const Value.absent(),
+    required int createdAt,
+    this.rowid = const Value.absent(),
+  })  : path = Value(path),
+        createdAt = Value(createdAt);
+  static Insertable<FoldersTableData> custom({
+    Expression<String>? path,
+    Expression<String>? parentPath,
+    Expression<int>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (path != null) 'path': path,
+      if (parentPath != null) 'parent_path': parentPath,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  FoldersTableCompanion copyWith(
+      {Value<String>? path,
+      Value<String?>? parentPath,
+      Value<int>? createdAt,
+      Value<int>? rowid}) {
+    return FoldersTableCompanion(
+      path: path ?? this.path,
+      parentPath: parentPath ?? this.parentPath,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (path.present) {
+      map['path'] = Variable<String>(path.value);
+    }
+    if (parentPath.present) {
+      map['parent_path'] = Variable<String>(parentPath.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FoldersTableCompanion(')
+          ..write('path: $path, ')
+          ..write('parentPath: $parentPath, ')
+          ..write('createdAt: $createdAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -992,6 +1273,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $NotesTableTable notesTable = $NotesTableTable(this);
+  late final $FoldersTableTable foldersTable = $FoldersTableTable(this);
   late final $AppMetadataTableTable appMetadataTable =
       $AppMetadataTableTable(this);
   @override
@@ -999,7 +1281,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
   List<DatabaseSchemaEntity> get allSchemaEntities =>
-      [notesTable, appMetadataTable];
+      [notesTable, foldersTable, appMetadataTable];
 }
 
 typedef $$NotesTableTableCreateCompanionBuilder = NotesTableCompanion Function({
@@ -1014,6 +1296,7 @@ typedef $$NotesTableTableCreateCompanionBuilder = NotesTableCompanion Function({
   required String contentHash,
   Value<String?> baseContentHash,
   required String deviceId,
+  Value<String?> folderPath,
   Value<String?> remoteFileId,
   Value<int> rowid,
 });
@@ -1029,6 +1312,7 @@ typedef $$NotesTableTableUpdateCompanionBuilder = NotesTableCompanion Function({
   Value<String> contentHash,
   Value<String?> baseContentHash,
   Value<String> deviceId,
+  Value<String?> folderPath,
   Value<String?> remoteFileId,
   Value<int> rowid,
 });
@@ -1075,6 +1359,9 @@ class $$NotesTableTableFilterComposer
 
   ColumnFilters<String> get deviceId => $composableBuilder(
       column: $table.deviceId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get folderPath => $composableBuilder(
+      column: $table.folderPath, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get remoteFileId => $composableBuilder(
       column: $table.remoteFileId, builder: (column) => ColumnFilters(column));
@@ -1124,6 +1411,9 @@ class $$NotesTableTableOrderingComposer
   ColumnOrderings<String> get deviceId => $composableBuilder(
       column: $table.deviceId, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get folderPath => $composableBuilder(
+      column: $table.folderPath, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<String> get remoteFileId => $composableBuilder(
       column: $table.remoteFileId,
       builder: (column) => ColumnOrderings(column));
@@ -1171,6 +1461,9 @@ class $$NotesTableTableAnnotationComposer
   GeneratedColumn<String> get deviceId =>
       $composableBuilder(column: $table.deviceId, builder: (column) => column);
 
+  GeneratedColumn<String> get folderPath => $composableBuilder(
+      column: $table.folderPath, builder: (column) => column);
+
   GeneratedColumn<String> get remoteFileId => $composableBuilder(
       column: $table.remoteFileId, builder: (column) => column);
 }
@@ -1212,6 +1505,7 @@ class $$NotesTableTableTableManager extends RootTableManager<
             Value<String> contentHash = const Value.absent(),
             Value<String?> baseContentHash = const Value.absent(),
             Value<String> deviceId = const Value.absent(),
+            Value<String?> folderPath = const Value.absent(),
             Value<String?> remoteFileId = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
@@ -1227,6 +1521,7 @@ class $$NotesTableTableTableManager extends RootTableManager<
             contentHash: contentHash,
             baseContentHash: baseContentHash,
             deviceId: deviceId,
+            folderPath: folderPath,
             remoteFileId: remoteFileId,
             rowid: rowid,
           ),
@@ -1242,6 +1537,7 @@ class $$NotesTableTableTableManager extends RootTableManager<
             required String contentHash,
             Value<String?> baseContentHash = const Value.absent(),
             required String deviceId,
+            Value<String?> folderPath = const Value.absent(),
             Value<String?> remoteFileId = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
@@ -1257,6 +1553,7 @@ class $$NotesTableTableTableManager extends RootTableManager<
             contentHash: contentHash,
             baseContentHash: baseContentHash,
             deviceId: deviceId,
+            folderPath: folderPath,
             remoteFileId: remoteFileId,
             rowid: rowid,
           ),
@@ -1281,6 +1578,149 @@ typedef $$NotesTableTableProcessedTableManager = ProcessedTableManager<
       BaseReferences<_$AppDatabase, $NotesTableTable, NotesTableData>
     ),
     NotesTableData,
+    PrefetchHooks Function()>;
+typedef $$FoldersTableTableCreateCompanionBuilder = FoldersTableCompanion
+    Function({
+  required String path,
+  Value<String?> parentPath,
+  required int createdAt,
+  Value<int> rowid,
+});
+typedef $$FoldersTableTableUpdateCompanionBuilder = FoldersTableCompanion
+    Function({
+  Value<String> path,
+  Value<String?> parentPath,
+  Value<int> createdAt,
+  Value<int> rowid,
+});
+
+class $$FoldersTableTableFilterComposer
+    extends Composer<_$AppDatabase, $FoldersTableTable> {
+  $$FoldersTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get path => $composableBuilder(
+      column: $table.path, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get parentPath => $composableBuilder(
+      column: $table.parentPath, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$FoldersTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $FoldersTableTable> {
+  $$FoldersTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get path => $composableBuilder(
+      column: $table.path, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get parentPath => $composableBuilder(
+      column: $table.parentPath, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$FoldersTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $FoldersTableTable> {
+  $$FoldersTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get path =>
+      $composableBuilder(column: $table.path, builder: (column) => column);
+
+  GeneratedColumn<String> get parentPath => $composableBuilder(
+      column: $table.parentPath, builder: (column) => column);
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$FoldersTableTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $FoldersTableTable,
+    FoldersTableData,
+    $$FoldersTableTableFilterComposer,
+    $$FoldersTableTableOrderingComposer,
+    $$FoldersTableTableAnnotationComposer,
+    $$FoldersTableTableCreateCompanionBuilder,
+    $$FoldersTableTableUpdateCompanionBuilder,
+    (
+      FoldersTableData,
+      BaseReferences<_$AppDatabase, $FoldersTableTable, FoldersTableData>
+    ),
+    FoldersTableData,
+    PrefetchHooks Function()> {
+  $$FoldersTableTableTableManager(_$AppDatabase db, $FoldersTableTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$FoldersTableTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$FoldersTableTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$FoldersTableTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> path = const Value.absent(),
+            Value<String?> parentPath = const Value.absent(),
+            Value<int> createdAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              FoldersTableCompanion(
+            path: path,
+            parentPath: parentPath,
+            createdAt: createdAt,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String path,
+            Value<String?> parentPath = const Value.absent(),
+            required int createdAt,
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              FoldersTableCompanion.insert(
+            path: path,
+            parentPath: parentPath,
+            createdAt: createdAt,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$FoldersTableTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $FoldersTableTable,
+    FoldersTableData,
+    $$FoldersTableTableFilterComposer,
+    $$FoldersTableTableOrderingComposer,
+    $$FoldersTableTableAnnotationComposer,
+    $$FoldersTableTableCreateCompanionBuilder,
+    $$FoldersTableTableUpdateCompanionBuilder,
+    (
+      FoldersTableData,
+      BaseReferences<_$AppDatabase, $FoldersTableTable, FoldersTableData>
+    ),
+    FoldersTableData,
     PrefetchHooks Function()>;
 typedef $$AppMetadataTableTableCreateCompanionBuilder
     = AppMetadataTableCompanion Function({
@@ -1480,6 +1920,8 @@ class $AppDatabaseManager {
   $AppDatabaseManager(this._db);
   $$NotesTableTableTableManager get notesTable =>
       $$NotesTableTableTableManager(_db, _db.notesTable);
+  $$FoldersTableTableTableManager get foldersTable =>
+      $$FoldersTableTableTableManager(_db, _db.foldersTable);
   $$AppMetadataTableTableTableManager get appMetadataTable =>
       $$AppMetadataTableTableTableManager(_db, _db.appMetadataTable);
 }

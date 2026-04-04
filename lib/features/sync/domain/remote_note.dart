@@ -7,6 +7,7 @@ class RemoteNote {
     required this.updatedAt,
     required this.contentHash,
     required this.deviceId,
+    this.folderPath,
     this.deletedAt,
     this.remoteFileId,
   });
@@ -19,5 +20,6 @@ class RemoteNote {
   final DateTime? deletedAt;
   final String contentHash;
   final String deviceId;
+  final String? folderPath;
   final String? remoteFileId;
 }

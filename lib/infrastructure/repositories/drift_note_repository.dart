@@ -13,6 +13,7 @@ class DriftNoteRepository implements NoteRepository {
 
   @override
   Future<void> create(Note note) async {
+    await _ensureFolderPathExists(note.folderPath);
     await _database.into(_database.notesTable).insert(_toCompanion(note));
   }
 
@@ -66,6 +67,7 @@ class DriftNoteRepository implements NoteRepository {
         contentHash: remoteNote.contentHash,
         baseContentHash: remoteNote.contentHash,
         deviceId: remoteNote.deviceId,
+        folderPath: remoteNote.folderPath,
         remoteFileId: remoteNote.remoteFileId,
       );
       await create(tombstone);
@@ -82,6 +84,7 @@ class DriftNoteRepository implements NoteRepository {
       contentHash: remoteNote.contentHash,
       baseContentHash: remoteNote.contentHash,
       deviceId: remoteNote.deviceId,
+      folderPath: remoteNote.folderPath,
       remoteFileId: remoteNote.remoteFileId,
     );
     await update(updated);
@@ -130,13 +133,14 @@ class DriftNoteRepository implements NoteRepository {
   }
 
   @override
-  Future<List<Note>> searchNotes(String query) async {
+  Future<List<Note>> searchNotes(String query, {String? folderPath}) async {
     final pattern = '%${query.trim()}%';
 
     final rows = await (_database.select(_database.notesTable)
           ..where(
             (tbl) =>
                 tbl.deletedAt.isNull() &
+                _folderFilter(tbl, folderPath) &
                 (tbl.title.like(pattern) | tbl.content.like(pattern)),
           )
           ..orderBy([(tbl) => OrderingTerm.desc(tbl.updatedAt)]))
@@ -159,6 +163,7 @@ class DriftNoteRepository implements NoteRepository {
 
   @override
   Future<void> update(Note note) async {
+    await _ensureFolderPathExists(note.folderPath);
     await (_database.update(_database.notesTable)
           ..where((tbl) => tbl.id.equals(note.id)))
         .write(_toCompanion(note));
@@ -179,6 +184,7 @@ class DriftNoteRepository implements NoteRepository {
       contentHash: remoteNote.contentHash,
       baseContentHash: remoteNote.contentHash,
       deviceId: remoteNote.deviceId,
+      folderPath: remoteNote.folderPath,
       remoteFileId: remoteNote.remoteFileId,
     );
 
@@ -192,9 +198,9 @@ class DriftNoteRepository implements NoteRepository {
   }
 
   @override
-  Stream<List<Note>> watchActiveNotes() {
+  Stream<List<Note>> watchActiveNotes({String? folderPath}) {
     final query = _database.select(_database.notesTable)
-      ..where((tbl) => tbl.deletedAt.isNull())
+      ..where((tbl) => tbl.deletedAt.isNull() & _folderFilter(tbl, folderPath))
       ..orderBy([(tbl) => OrderingTerm.desc(tbl.updatedAt)]);
 
     return query.watch().map(
@@ -203,9 +209,9 @@ class DriftNoteRepository implements NoteRepository {
   }
 
   @override
-  Stream<List<Note>> watchDeletedNotes() {
+  Stream<List<Note>> watchDeletedNotes({String? folderPath}) {
     final query = _database.select(_database.notesTable)
-      ..where((tbl) => tbl.deletedAt.isNotNull())
+      ..where((tbl) => tbl.deletedAt.isNotNull() & _folderFilter(tbl, folderPath))
       ..orderBy([(tbl) => OrderingTerm.desc(tbl.deletedAt)]);
 
     return query.watch().map(
@@ -230,6 +236,7 @@ class DriftNoteRepository implements NoteRepository {
       contentHash: row.contentHash,
       baseContentHash: row.baseContentHash,
       deviceId: row.deviceId,
+      folderPath: row.folderPath,
       remoteFileId: row.remoteFileId,
     );
   }
@@ -247,7 +254,46 @@ class DriftNoteRepository implements NoteRepository {
       contentHash: Value(note.contentHash),
       baseContentHash: Value(note.baseContentHash),
       deviceId: Value(note.deviceId),
+      folderPath: Value(note.folderPath),
       remoteFileId: Value(note.remoteFileId),
     );
+  }
+
+  Expression<bool> _folderFilter($NotesTableTable tbl, String? folderPath) {
+    if (folderPath == null) {
+      return const Constant(true);
+    }
+
+    return tbl.folderPath.equals(folderPath) |
+        tbl.folderPath.like('$folderPath/%');
+  }
+
+  Future<void> _ensureFolderPathExists(String? folderPath) async {
+    if (folderPath == null || folderPath.trim().isEmpty) {
+      return;
+    }
+
+    final normalizedSegments = folderPath
+        .split('/')
+        .map((segment) => segment.trim())
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    if (normalizedSegments.isEmpty) {
+      return;
+    }
+
+    final now = DateTime.now().toUtc().millisecondsSinceEpoch;
+    for (var depth = 0; depth < normalizedSegments.length; depth++) {
+      final currentPath = normalizedSegments.take(depth + 1).join('/');
+      final parentPath =
+          depth == 0 ? null : normalizedSegments.take(depth).join('/');
+      await _database.into(_database.foldersTable).insertOnConflictUpdate(
+            FoldersTableCompanion(
+              path: Value(currentPath),
+              parentPath: Value(parentPath),
+              createdAt: Value(now),
+            ),
+          );
+    }
   }
 }

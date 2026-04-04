@@ -4,29 +4,28 @@ An implementation plan for a private, offline-first note-taking app targeting Li
 
 ## 0. Status Snapshot
 
-Current project state as of March 2026:
+Current project state as of April 2026:
 
-Completed:
-- local CRUD for notes
-- deleted-notes flow and restore
-- local search
-- Linux sign-in flow
-- Android sign-in flow
-- manual sync between Linux and Android
-- Drive delta sync with stored change tokens
-- cross-device create, edit, delete, restore, and conflict-copy preservation
-- release build validation on Linux and Android
-- QA checklist for v1 release gating
-- full manual QA checklist pass on Linux and Android release builds
+Working baseline:
+- local-first notes with create, edit, delete, restore, and search
+- conservative local autosave with lifecycle/close flushing
+- Linux and Android sign-in
+- manual sync with Drive delta tokens and conflict-copy preservation
+- nested folders with folder-based filtering and subtree-aware deletion
+- single-surface markdown editor with inactive-line rendering for headings, bullets, quotes, and fenced code blocks
+- desktop workspace with notes nested in a collapsible folder tree, trash in the sidebar, and a slim top toolbar
+- sidebar sync-state indicators and dismissible sync notices
+- lighter mobile layout with oversized status banners removed
+- release-candidate baseline already validated on Linux and Android
 
 Still remaining before calling v1 done:
-- add more automated coverage for stale-device and restore scenarios
+- persist desktop sidebar collapse state and expanded-folder state locally
+- continue tightening the desktop editor spacing and typography
+- add markdown task-list support in a way that does not destabilize the editor
+- add more automated coverage for stale-device and broader integration scenarios
+- complete folder management with stable rename / move flows
 - decide the minimum release packaging/distribution process
-- tighten a few UX rough edges around sync/account status
-- tag and document the first release candidate
-
-Primary handoff file for the next chat/agent:
-- see `NEXT_STEPS.md`
+- decide whether to cut `v0.1.0-rc2` or finalize `0.1.0`
 
 Explicitly deferred until after the first usable v1:
 - background sync
@@ -43,6 +42,7 @@ Primary goals:
 - Local-first behavior
 - Private per-user sync
 - Simple markdown/plain text notes
+- Markdown-first writing experience with stronger desktop note-taking ergonomics
 - Robust enough to trust with real notes
 
 Non-goals for v1:
@@ -123,6 +123,32 @@ Known limitations:
 
 Use the app's own UUID as the canonical note identity. Do not depend on the remote file id as the primary identity.
 
+Near-term product direction:
+- keep SQLite as the local source of truth
+- keep markdown as the note body format
+- move the UX toward an Obsidian-like workspace feel
+- add logical folders in app state instead of switching v1 to a filesystem vault model
+- keep the editing surface as a normal text editor, not a block editor
+- allow selective live rendering only where caret behavior stays reliable
+
+### Current editor direction
+
+The current editor direction is intentionally narrower than a full Obsidian clone:
+
+- keep one plain markdown text editor as the editing surface
+- do not use a split preview pane as the main editing experience
+- do not use line-by-line block editing
+- live-render only markdown constructs that behave reliably inside Flutter text editing
+
+Current implementation status:
+
+- headings, simple bullet markers, quote markers, and fenced code blocks are rendered in-place on inactive lines
+- the active line remains raw markdown while editing
+- note persistence is now local-first autosave rather than explicit-save-driven
+- autosave should remain local-only; sync must stay outside the editing loop
+
+This is a pragmatic v1 tradeoff. If richer in-editor rendering is revisited later, it should happen only with proof that caret, selection, and platform IME behavior remain stable.
+
 ### Notes table
 
 | Field | Type | Purpose |
@@ -152,11 +178,13 @@ Stores:
 
 ### Optional future tables
 
+- `folders`
+- `folder_tree`
 - `note_revisions`
 - `tags`
 - `note_tags`
 
-These are not required for v1 but the schema should not block them.
+These are not required for the current sync baseline, but the schema should not block them.
 
 ## 6. Remote File Format
 
@@ -296,7 +324,7 @@ This is a deliberate tradeoff for v1. The stronger long-term model is explicit d
 ### Linux
 
 - Store app data under the standard app data directory for Linux.
-- Support keyboard shortcuts, context menus, and desktop-friendly list navigation.
+- Support keyboard shortcuts, context menus, desktop-friendly list navigation, and a sidebar-oriented workspace feel.
 - Start with foreground/manual sync only.
 - Packaging is a late milestone, not an early dependency.
 - Use system-browser OAuth as the main flow.
@@ -316,88 +344,225 @@ This is a deliberate tradeoff for v1. The stronger long-term model is explicit d
 
 Build the product in layers and do not start with sync complexity before the local app is trustworthy.
 
-### Phase 1: Local app foundation
+### Completed baseline
 
-Status: Completed
+These areas are already implemented enough to stop planning them as open work:
 
-- Flutter app shell
-- Drift schema and migrations
-- Note list and editor
-- Create, update, delete, restore
-- Search and ordering by recent update
+- local app foundation
+- current Linux and Android auth flows
+- manual sync baseline with Drive delta sync
+- first release-candidate baseline for `v0.1.0-rc1`
+- initial folder model and folder filtering
+- current single-surface markdown editor direction
 
-### Phase 2: Authentication and account linking
-
-Status: Completed for the current v1 auth model
-
-- Google Cloud project setup
-- Secure local credential storage for visible account metadata
-- OAuth flow for Linux desktop via system browser
-- Google Sign-In flow for Android
-- Loopback redirect capture for Linux
-- Manual fallback auth-code entry for Linux
-- Session restore and sign-out
-- Silent credential reuse for sync where platform APIs allow it
-
-### Phase 3: Manual sync engine
-
-Status: Completed as the current baseline, with further hardening still useful
-
-- Remote file serialization
-- Baseline-hash reconciliation logic
-- Upload/download/delete operations
-- Drive delta sync via change tokens
-- Reconciliation logic
-- Sync status in UI
-- Retry handling and partial failure recovery
-
-### Phase 4: Conflict and reliability hardening
+### Phase 1: Editor UX hardening
 
 Status: In progress
 
-- Conflict copy flow
-  Status: Completed for current create/edit/delete/restore conflict handling
-- Tombstone cleanup
-  Status: Not started
-- Tombstone retention policy
-  Status: Designed, not fully implemented as an automated cleanup flow
-- Crash-safe sync transitions
-  Status: Partially addressed, still worth more testing
-- Schema migration testing
-  Status: Not started
-- Multi-device sync testing
-  Status: Completed for the current release-candidate pass, worth repeating only when new sync logic changes land
-- Automated regression coverage for restore and stale-device cases
-  Status: In progress
-- Final v1 bug bash against `QA_CHECKLIST.md`
-  Status: Completed on current Linux and Android release builds
+Goal:
+- make everyday markdown writing feel more intentional without reintroducing caret instability
 
-### Phase 5: Background sync and packaging
+Scope:
+- keep the current single-surface editor as the primary writing experience
+- keep the active line raw markdown while editing
+- replace manual-save-only persistence with conservative local autosave to SQLite
+- tighten typography, spacing, and inactive-line rendering polish
+- verify cross-platform caret behavior for headings, bullets, quotes, and fenced code blocks
+- decide whether automatic list continuation on `Enter` is desirable or whether explicit toolbar/shortcut insertion is safer
 
-Status: Partially deferred
+Acceptance:
+- a user can type, pause briefly, and trust that the note is persisted locally without pressing `Save`
+- closing the editor, popping the route, or backgrounding the app flushes pending local edits before the view is discarded where platform constraints allow it
+- autosave never creates duplicate notes from one editing session
+- opening and closing a blank new-note editor without typing does not create empty note records
+- no new cursor-jump, selection, or IME regressions on Linux or Android
+- the editor remains trustworthy for long notes, multiline lists, and fenced code blocks
 
-- Android WorkManager integration
-  Status: Deferred until after first stable v1
-- Sync throttling rules
-  Status: Deferred with background sync work
-- Linux packaging
-  Status: Basic launcher/install flow exists
-- Release pipeline
-  Status: Manual build/install flow exists, automation not started
+Concrete implementation order:
+1. Introduce an editor-local autosave coordinator inside `NoteEditorPage` that tracks dirty state, last persisted snapshot, debounce timer, and in-flight save state.
+   This should be a local UI/application concern, not sync logic, and it should not require a schema migration because the current notes table already stores the needed note state.
+2. Define the autosave trigger policy before wiring persistence:
+   use a short inactivity debounce for normal typing, plus immediate flush on editor close, route pop, focus loss where reliable, and app lifecycle transitions such as `inactive` / `paused`.
+3. Split persistence behavior between existing notes and brand-new notes:
+   existing notes should call `updateNote` when the current snapshot differs from the last persisted snapshot;
+   new notes should call `createNote` only after the draft becomes meaningfully non-empty so the app does not generate junk empty notes.
+4. After the first autosave of a new note, promote the editor session from "draft" to "persisted note" state using the returned `Note`.
+   This is required so later autosaves call `updateNote` instead of creating duplicates, and so the desktop workspace can keep the correct selected note identity.
+5. Serialize save operations and coalesce edits made during an in-flight save.
+   If the user keeps typing while a save is running, the editor should mark itself dirty again and run one more save afterward instead of overlapping writes.
+6. Keep sync out of the autosave loop.
+   Autosave writes only to SQLite and updates normal note metadata such as `updated_at`, `content_hash`, and `sync_status`; remote sync remains manual and continues to read from the local database afterward.
+7. Replace the current primary `Save` affordance with autosave status UI once the persistence path is stable.
+   During rollout it is acceptable to keep an explicit save/flush or retry action, but it should stop being the user's primary responsibility.
+8. Run a focused manual regression pass for autosave, headings, bullets, quotes, and fenced code on Linux and Android.
+9. Clean up editor spacing, typography, and save-status presentation only after autosave semantics are stable.
+10. Decide and document the `Enter` behavior for lists and quotes before implementing task lists.
+11. Add targeted widget/unit coverage for autosave and any new editor rendering paths before broadening markdown support.
 
-### Phase 6: First v1 release candidate
+Deliverables:
+- a conservative local autosave system for create and edit flows
+- an editor session model that can safely transition from unsaved draft to persisted note
+- save-status feedback that is quiet in normal operation and explicit on failure
+- a stable editor baseline with documented caret behavior
+- tests covering the known cursor-jump failure cases already found during development
+
+### Phase 2: Workspace UX and folders
 
 Status: In progress
 
-- Rebuild Linux and Android release builds from the latest code
-- Run the full `QA_CHECKLIST.md`
-  Status: Completed
-- Fix any remaining reproducible data-loss or restore/sync regressions
-  Status: Completed for the current release-candidate pass
-- Freeze architecture changes
-- Tag a first release candidate build
-- Write short release notes
-- Record the tested build/version against the QA pass
+Goal:
+- make Proper Notes feel like a real desktop note workspace, not just a list plus editor
+
+Desktop workspace plan:
+- keep the folder sidebar visible while editing notes on desktop
+- add a clear collapse/expand control for the sidebar instead of forcing a separate navigation step
+- show notes inside the desktop sidebar tree under their current folder so the workspace feels navigable while writing
+- allow each folder section to collapse and expand
+- persist sidebar open state and expanded-folder state locally
+- keep folder rows unselected so the active note, not the active folder, carries the main visual highlight
+
+Folder clarity plan:
+- make the current location obvious with a breadcrumb or path chip near the editor title instead of relying on a large top banner
+- highlight the selected folder more strongly in the sidebar and the note list
+- show empty-state copy that clearly reflects the current folder context
+
+Folder management still missing:
+- rename folders
+- move notes between folders
+- consider move/rename affordances that work on both desktop and Android without duplicating logic
+
+Acceptance:
+- a desktop user can understand where they are, navigate folders while editing, and collapse unused parts of the tree without losing context
+
+Concrete implementation order:
+1. Restructure the desktop layout so the sidebar can remain visible while a note editor is open.
+   Current state: done.
+2. Add a desktop-only sidebar collapse/expand control and persist its state locally.
+   Current state: collapse/expand control exists; persistence is still pending.
+3. Replace the current flat folder list behavior with expandable folder groups that can remember expanded state.
+   Current state: expandable folder groups exist; remembering state across launches is still pending.
+4. Add note rows under the active folder sections in the desktop sidebar so the tree reflects both folders and notes.
+   Current state: done.
+5. Strengthen current-folder highlighting and add a compact breadcrumb/path treatment near the note list or editor header.
+   Current state: desktop and mobile no longer use the older large folder banners; mobile folder context now lives in the app bar.
+6. Add rename-folder and move-note flows only after the navigation structure is stable.
+   Current state: implementation has started in the worktree, but it is not yet complete and should be treated as in-progress until tests are green.
+
+Dependencies:
+- Phase 2 should land before the broader status/chrome redesign because the new workspace header needs to know where folder context lives.
+
+Deliverables:
+- persistent sidebar visibility/collapse state
+- collapsible folder tree with note visibility
+- clearer current-folder context in both navigation and content areas
+
+### Phase 3: Status and chrome redesign
+
+Status: In progress
+
+Goal:
+- reduce the current top-of-screen warning-strip feel and replace it with calmer, denser status UI
+
+Design direction:
+- remove the large full-width sync and folder banners from the main content column
+- move sync state into a compact status row, toolbar badge, or contextual header chip set
+- move folder context into the note list/editor header as part of navigation, not as a warning panel
+- reserve stronger surfaces or banners only for exceptional states such as sync errors, conflicts, or auth problems
+
+Suggested target layout:
+- top app bar keeps global actions
+- below it, a compact workspace header carries current folder, sync state, and maybe note count
+- regular background surfaces stay visually quiet so notes remain the focus
+
+Acceptance:
+- normal states such as "Sync ready" or "Folder: X" should no longer dominate the screen
+- error states should still remain explicit and hard to miss
+
+Concrete implementation order:
+1. Remove the large folder banner and move folder context into a compact workspace header.
+   Current state: done for the current UI direction. Desktop uses a slim workspace top bar, and mobile now carries folder context in the app bar instead of a full-width banner.
+2. Replace the passive "Sync ready" container with a compact status chip/badge near the toolbar or workspace header.
+   Current state: still pending.
+3. Keep success/info states visually quiet and reserve larger surfaces for errors, conflicts, or auth blockers.
+   Current state: partly done on desktop, still heavier on mobile.
+4. Review the desktop and narrow/mobile layouts so the new header scales without adding clutter.
+   Current state: significantly better on mobile than the earlier banner-heavy version, but the small-screen navigation model still needs refinement.
+   Current state: ongoing.
+5. Only after the structure is stable, refine color, spacing, and iconography.
+
+Dependencies:
+- Phase 3 should build on the Phase 2 workspace shell rather than redesigning the current temporary banners in place.
+
+Deliverables:
+- compact workspace header
+- reduced top-of-screen noise
+- clearer separation between normal status and exceptional status
+
+### Phase 4: Markdown task lists
+
+Status: Planned
+
+Goal:
+- support checkbox-style markdown without turning the editor into a block editor
+
+Scope:
+- support `- [ ] item` and `- [x] item` syntax as stored markdown text
+- render inactive task-list lines with clear checked and unchecked visuals
+- render task lists in note previews and read surfaces
+- decide whether tapping a checkbox should directly rewrite markdown text or whether v1 should keep interaction keyboard/text-first
+
+Safety rules:
+- the underlying stored content must remain plain markdown text
+- toggling checkbox state must be deterministic and test-covered
+- task-list rendering must not break caret movement, especially around `Enter`, Backspace, and multiline items
+
+Acceptance:
+- task lists display clearly in list previews and in the editor on inactive lines
+- task-list edits round-trip cleanly through sync and conflict handling because they are still just markdown text
+
+Concrete implementation order:
+1. Extend markdown parsing/rendering in previews for `- [ ]` and `- [x]`.
+2. Extend inactive-line editor rendering for task-list lines while keeping the active line raw markdown.
+3. Add parser and rendering tests for checked, unchecked, and multiline task-list items.
+4. Decide whether checkbox tapping is in scope for v1 or whether task lists remain text-edited only.
+5. If tapping is allowed, implement deterministic markdown text rewriting with explicit tests for cursor and selection safety.
+
+Dependencies:
+- task lists should start only after the editor baseline from Phase 1 is considered stable.
+
+Deliverables:
+- task-list preview support
+- task-list editor rendering support
+- a documented decision on interactive checkbox toggling
+
+### Phase 5: Reliability hardening before final v1
+
+Status: In progress
+
+- automated regression coverage for restore, stale-device, and tombstone-retention scenarios
+- more integration-level coverage for cross-device editing and auth/session recovery
+- repeat targeted manual QA only when sync/editor logic changes land
+
+Concrete implementation order:
+1. Add the highest-risk missing sync tests before any release decision.
+2. Add regression coverage for the new workspace and editor UX where behavior can break silently.
+   Autosave coverage should include debounce save, flush-on-close, flush-on-lifecycle-change, no-empty-note creation, and no-duplicate creation after the first persisted draft save.
+3. Re-run targeted manual QA on Linux and Android after each user-facing markdown/editor or navigation milestone.
+
+### Phase 6: Packaging and release decision
+
+Status: Planned
+
+- define the minimum Linux install/distribution flow to support the first stable release
+- decide whether the current scope is enough for `v0.1.0-rc2` or final `0.1.0`
+- keep background sync and heavier release automation out of scope until the core workspace/editor UX is stable
+
+Release gate for the current UX roadmap:
+1. Phase 1 editor stability is clean on Linux and Android.
+2. Phase 2 desktop workspace/navigation is implemented and feels coherent.
+3. Phase 3 status/chrome redesign removes the current banner-heavy feel.
+4. Phase 4 task lists are either implemented safely or explicitly deferred with the decision recorded.
+5. Reliability coverage is good enough that the new UX work has not weakened data safety.
 
 ## 12. Quality Requirements
 
@@ -436,7 +601,8 @@ Current status:
 - sync reconciliation tests exist
 - auth/session storage tests exist
 - gateway-level regression tests exist
-- migration tests are still missing
+- migration test groundwork now exists for the current schema
+- focused autosave widget coverage now exists, but broader editor regression coverage is still limited
 - broader integration coverage is still mostly manual via the QA checklist, and the latest full manual pass succeeded on release builds
 
 ## 14. Future Extensions
@@ -448,6 +614,8 @@ Possible post-v1 features:
 - attachments
 - optional end-to-end encryption
 - pluggable sync backends
+- richer inline markdown editing if the simpler editor still feels too limited
+- optional filesystem vault import/export if the product later needs Obsidian interoperability
 
 ## 15. Final Recommendation
 

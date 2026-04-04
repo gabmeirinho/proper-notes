@@ -10,6 +10,7 @@ class Note {
     required this.syncStatus,
     required this.contentHash,
     required this.deviceId,
+    this.folderPath,
     this.deletedAt,
     this.lastSyncedAt,
     this.baseContentHash,
@@ -27,6 +28,7 @@ class Note {
   final String contentHash;
   final String? baseContentHash;
   final String deviceId;
+  final String? folderPath;
   final String? remoteFileId;
 
   bool get isDeleted => deletedAt != null;
@@ -46,6 +48,8 @@ class Note {
     String? baseContentHash,
     bool clearBaseContentHash = false,
     String? deviceId,
+    String? folderPath,
+    bool clearFolderPath = false,
     String? remoteFileId,
     bool clearRemoteFileId = false,
   }) {
@@ -65,6 +69,7 @@ class Note {
           ? null
           : (baseContentHash ?? this.baseContentHash),
       deviceId: deviceId ?? this.deviceId,
+      folderPath: clearFolderPath ? null : (folderPath ?? this.folderPath),
       remoteFileId: clearRemoteFileId
           ? null
           : (remoteFileId ?? this.remoteFileId),

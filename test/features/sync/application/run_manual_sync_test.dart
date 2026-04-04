@@ -491,7 +491,8 @@ class _FakeNoteRepository implements NoteRepository {
   Future<void> restore(String id) async {}
 
   @override
-  Future<List<Note>> searchNotes(String query) async => const [];
+  Future<List<Note>> searchNotes(String query, {String? folderPath}) async =>
+      const [];
 
   @override
   Future<void> softDelete(String id, DateTime deletedAt) async {}
@@ -505,10 +506,12 @@ class _FakeNoteRepository implements NoteRepository {
   }
 
   @override
-  Stream<List<Note>> watchActiveNotes() => const Stream.empty();
+  Stream<List<Note>> watchActiveNotes({String? folderPath}) =>
+      const Stream.empty();
 
   @override
-  Stream<List<Note>> watchDeletedNotes() => const Stream.empty();
+  Stream<List<Note>> watchDeletedNotes({String? folderPath}) =>
+      const Stream.empty();
 }
 
 class _FixedUuid extends Uuid {

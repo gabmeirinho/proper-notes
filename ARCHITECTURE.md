@@ -4,18 +4,22 @@ This document defines the intended system architecture for Proper Notes v1.
 
 It exists to keep implementation aligned with the product plan and architectural decisions already recorded in:
 - `PLAN.MD`
-- `DECISIONS.md`
 - `AGENTS.md`
 
 ## 0. Current Implementation Status
 
-Current implementation status as of March 2026:
+Current implementation status as of April 2026:
 - the local-first note model is implemented
 - Linux and Android both run from the same Flutter codebase
 - notes, deleted notes, restore, and search are implemented
+- local-first autosave is implemented for editor create/edit flows
 - manual sync with Google Drive `appDataFolder` is implemented
 - delta sync via Drive change tokens is implemented
 - conflict preservation is implemented via duplicate conflict-copy notes
+- logical folders are implemented in app state and stored in SQLite
+- folder deletion is subtree-aware and keeps note deletion soft-delete semantics
+- the desktop workspace now uses a sidebar-first layout with nested folder and note navigation
+- per-note sync-state UI is surfaced from local sync metadata in the sidebar
 - the architecture below is no longer only aspirational in the main v1 areas; most of the remaining work is reliability hardening, test coverage, and release discipline
 
 ## 1. Architectural Goals
@@ -256,6 +260,7 @@ For v1, the simplest acceptable implementation is a duplicate note copy plus `co
 Important:
 - editing must succeed without network access
 - sync is not part of the edit transaction
+- autosave must persist to SQLite first and only change local sync metadata; it must not trigger Drive sync directly
 
 ### 6.2 Manual Sync Flow
 

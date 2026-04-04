@@ -21,6 +21,7 @@ class CreateNote {
   Future<Note> call({
     required String title,
     String content = '',
+    String? folderPath,
   }) async {
     final now = DateTime.now().toUtc();
     final note = Note(
@@ -32,6 +33,7 @@ class CreateNote {
       syncStatus: SyncStatus.pendingUpload,
       contentHash: computeContentHash(content),
       deviceId: _deviceId,
+      folderPath: folderPath,
     );
 
     await _repository.create(note);

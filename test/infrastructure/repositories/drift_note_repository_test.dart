@@ -157,6 +157,53 @@ void main() {
 
     expect(results.map((note) => note.id), ['note-5']);
   });
+
+  test('folder-filtered active notes include notes in nested folders', () async {
+    final parent = _buildNote(
+      id: 'note-parent',
+      title: 'Parent',
+      content: 'folder root',
+      updatedAt: DateTime.utc(2026, 3, 24, 10),
+      folderPath: 'Projects',
+    );
+    final child = _buildNote(
+      id: 'note-child',
+      title: 'Child',
+      content: 'folder child',
+      updatedAt: DateTime.utc(2026, 3, 24, 11),
+      folderPath: 'Projects/Proper Notes',
+    );
+    final elsewhere = _buildNote(
+      id: 'note-elsewhere',
+      title: 'Elsewhere',
+      content: 'other folder',
+      updatedAt: DateTime.utc(2026, 3, 24, 12),
+      folderPath: 'Ideas',
+    );
+
+    await repository.create(parent);
+    await repository.create(child);
+    await repository.create(elsewhere);
+
+    final results = await repository.watchActiveNotes(folderPath: 'Projects').first;
+
+    expect(results.map((note) => note.id), ['note-child', 'note-parent']);
+  });
+
+  test('create persists the folder path', () async {
+    final note = _buildNote(
+      id: 'note-foldered',
+      title: 'Foldered',
+      content: 'Inside a folder',
+      updatedAt: DateTime.utc(2026, 3, 24, 10),
+      folderPath: 'Projects/Proper Notes',
+    );
+
+    await repository.create(note);
+    final stored = await repository.getById(note.id);
+
+    expect(stored?.folderPath, 'Projects/Proper Notes');
+  });
 }
 
 Note _buildNote({
@@ -164,6 +211,7 @@ Note _buildNote({
   required String title,
   required String content,
   required DateTime updatedAt,
+  String? folderPath,
 }) {
   final createdAt = DateTime.utc(2026, 3, 24, 8);
 
@@ -176,5 +224,6 @@ Note _buildNote({
     syncStatus: SyncStatus.pendingUpload,
     contentHash: computeContentHash(content),
     deviceId: 'test-device',
+    folderPath: folderPath,
   );
 }

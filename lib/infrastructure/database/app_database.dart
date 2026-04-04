@@ -19,10 +19,20 @@ class NotesTable extends Table {
   TextColumn get contentHash => text()();
   TextColumn get baseContentHash => text().nullable()();
   TextColumn get deviceId => text()();
+  TextColumn get folderPath => text().nullable()();
   TextColumn get remoteFileId => text().nullable()();
 
   @override
   Set<Column<Object>> get primaryKey => {id};
+}
+
+class FoldersTable extends Table {
+  TextColumn get path => text()();
+  TextColumn get parentPath => text().nullable()();
+  IntColumn get createdAt => integer()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {path};
 }
 
 class AppMetadataTable extends Table {
@@ -40,6 +50,7 @@ class AppMetadataTable extends Table {
 @DriftDatabase(
   tables: [
     NotesTable,
+    FoldersTable,
     AppMetadataTable,
   ],
 )
@@ -48,7 +59,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -56,9 +67,10 @@ class AppDatabase extends _$AppDatabase {
           await migrator.createAll();
         },
         onUpgrade: (migrator, from, to) async {
-          throw UnsupportedError(
-            'No migration path registered for schema upgrade $from -> $to.',
-          );
+          if (from < 2) {
+            await migrator.addColumn(notesTable, notesTable.folderPath);
+            await migrator.createTable(foldersTable);
+          }
         },
       );
 }
