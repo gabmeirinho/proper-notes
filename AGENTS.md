@@ -12,6 +12,8 @@ Current v1 direction:
 - Drift over SQLite for local persistence
 - Google Drive `appDataFolder` as the initial sync backend
 - Manual sync first, background sync later
+- Logical folders in local app state
+- A single text-note model, with copy-friendly code snippets planned as an editor/presentation feature rather than a rich block editor
 
 Core product goal:
 - build a note app that is trustworthy offline
@@ -33,10 +35,12 @@ These principles are not optional:
 In scope:
 - plain text or markdown note content
 - note create, edit, delete, restore
+- nested folders with move and rename flows
 - local search and ordering
 - Google account linking
 - manual sync
 - conflict-safe sync behavior
+- code snippets as text-preserving note content, if implemented without turning v1 into a rich block editor
 
 Out of scope for v1 unless explicitly requested:
 - collaboration
@@ -59,6 +63,7 @@ Agents must preserve these constraints:
 - Sync decisions should be based on state such as `content_hash`, `base_content_hash`, sync metadata, and explicit deletion state.
 - Deletions must use tombstone semantics before any final purge.
 - Missing remote files must be treated cautiously because absence is ambiguous.
+- New code snippet behavior should stay over the existing note content string unless `PLAN.MD` explicitly introduces a reviewed migration.
 
 ## 5. Data Safety Rules
 
@@ -99,6 +104,7 @@ Expected note metadata includes:
 - `content_hash`
 - `base_content_hash`
 - `device_id`
+- `folder_path`
 - `remote_file_id`
 
 ## 7. Sync Rules

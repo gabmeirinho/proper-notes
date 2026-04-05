@@ -29,4 +29,16 @@ Intro text
 
     expect(title, 'Useful title');
   });
+
+  test('ignores headings inside code snippets', () {
+    final title = deriveTitleFromMarkdown('''
+[code]
+# Not a title
+[/code]
+
+## Actual title
+''');
+
+    expect(title, 'Actual title');
+  });
 }

@@ -1,6 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proper_notes/core/utils/content_hash.dart';
+import 'package:proper_notes/core/utils/note_document.dart';
 import 'package:proper_notes/features/notes/domain/note.dart';
 import 'package:proper_notes/features/notes/domain/sync_status.dart';
 import 'package:proper_notes/infrastructure/database/app_database.dart';
@@ -35,6 +36,10 @@ void main() {
     expect(stored!.id, note.id);
     expect(stored.title, 'First note');
     expect(stored.content, 'Hello local-first world');
+    expect(
+      stored.documentJson,
+      legacyDocumentFromContent('Hello local-first world'),
+    );
     expect(stored.syncStatus, SyncStatus.pendingUpload);
     expect(stored.contentHash, computeContentHash('Hello local-first world'));
   });
@@ -73,6 +78,7 @@ void main() {
     final updated = original.copyWith(
       title: 'Final',
       content: 'Updated content',
+      documentJson: legacyDocumentFromContent('Updated content'),
       updatedAt: DateTime.utc(2026, 3, 24, 12),
       contentHash: computeContentHash('Updated content'),
     );
@@ -84,11 +90,13 @@ void main() {
     expect(stored, isNotNull);
     expect(stored!.title, 'Final');
     expect(stored.content, 'Updated content');
+    expect(stored.documentJson, legacyDocumentFromContent('Updated content'));
     expect(stored.updatedAt, DateTime.utc(2026, 3, 24, 12));
     expect(stored.contentHash, computeContentHash('Updated content'));
   });
 
-  test('softDelete removes note from active list and exposes it in deleted list',
+  test(
+      'softDelete removes note from active list and exposes it in deleted list',
       () async {
     final note = _buildNote(
       id: 'note-3',
@@ -158,7 +166,8 @@ void main() {
     expect(results.map((note) => note.id), ['note-5']);
   });
 
-  test('folder-filtered active notes include notes in nested folders', () async {
+  test('folder-filtered active notes include notes in nested folders',
+      () async {
     final parent = _buildNote(
       id: 'note-parent',
       title: 'Parent',
@@ -185,7 +194,8 @@ void main() {
     await repository.create(child);
     await repository.create(elsewhere);
 
-    final results = await repository.watchActiveNotes(folderPath: 'Projects').first;
+    final results =
+        await repository.watchActiveNotes(folderPath: 'Projects').first;
 
     expect(results.map((note) => note.id), ['note-child', 'note-parent']);
   });
@@ -219,6 +229,7 @@ Note _buildNote({
     id: id,
     title: title,
     content: content,
+    documentJson: legacyDocumentFromContent(content),
     createdAt: createdAt,
     updatedAt: updatedAt,
     syncStatus: SyncStatus.pendingUpload,

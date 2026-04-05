@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:proper_notes/core/utils/note_document.dart';
 import 'package:proper_notes/features/notes/presentation/markdown_preview.dart';
 
 void main() {
@@ -7,6 +8,14 @@ void main() {
     return MaterialApp(
       home: Scaffold(
         body: MarkdownPreview(content: content),
+      ),
+    );
+  }
+
+  Widget buildDocumentPreview(NoteDocument document) {
+    return MaterialApp(
+      home: Scaffold(
+        body: MarkdownPreview(document: document),
       ),
     );
   }
@@ -68,7 +77,7 @@ Standalone paragraph
     expect(richTextContents(tester), contains('[ ] Next'));
   });
 
-  testWidgets('keeps fenced code isolated from surrounding markdown',
+  testWidgets('treats fenced code markers as plain paragraph text',
       (tester) async {
     await tester.pumpWidget(
       buildPreview('''
@@ -83,7 +92,10 @@ After *italic*
     );
 
     expect(richTextContents(tester), contains('Before bold'));
-    expect(find.text("final value = '**not bold**';"), findsOneWidget);
+    expect(
+      richTextContents(tester),
+      contains("```dart final value = 'not bold'; ```"),
+    );
     expect(richTextContents(tester), contains('After italic'));
   });
 
@@ -97,5 +109,85 @@ After *italic*
       richTextContents(tester),
       contains('Prefix ```not a fence``` suffix'),
     );
+  });
+
+  testWidgets('renders code snippets as isolated snippet blocks',
+      (tester) async {
+    await tester.pumpWidget(
+      buildPreview('''
+Before **bold**
+
+[code:dart]
+final value = '**not bold**';
+[/code]
+
+After *italic*
+'''),
+    );
+
+    expect(richTextContents(tester), contains('Before bold'));
+    expect(find.text('DART'), findsOneWidget);
+    expect(find.text("final value = '**not bold**';"), findsOneWidget);
+    expect(richTextContents(tester), contains('After italic'));
+  });
+
+  testWidgets('treats malformed code snippets as plain paragraph text',
+      (tester) async {
+    await tester.pumpWidget(
+      buildPreview('''
+[code:dart]
+final value = '**still markdown**';
+'''),
+    );
+
+    expect(
+      richTextContents(tester),
+      contains("[code:dart] final value = 'still markdown';"),
+    );
+  });
+
+  testWidgets('renders paragraph blocks from a note document', (tester) async {
+    await tester.pumpWidget(
+      buildDocumentPreview(
+        NoteDocument(
+          version: 1,
+          blocks: const <NoteBlock>[
+            ParagraphBlock(
+              id: 'blk-1',
+              text: '# Title\n\nParagraph body',
+            ),
+          ],
+        ),
+      ),
+    );
+
+    expect(find.text('Title'), findsOneWidget);
+    expect(richTextContents(tester), contains('Paragraph body'));
+  });
+
+  testWidgets('renders unknown code blocks safely from a note document',
+      (tester) async {
+    await tester.pumpWidget(
+      buildDocumentPreview(
+        NoteDocument(
+          version: 1,
+          blocks: const <NoteBlock>[
+            UnknownBlock(
+              id: 'blk-code',
+              type: 'code',
+              data: <String, Object?>{
+                'id': 'blk-code',
+                'type': 'code',
+                'language': 'dart',
+                'code': 'final value = 1;',
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+
+    expect(find.text('DART'), findsOneWidget);
+    expect(find.text('final value = 1;'), findsOneWidget);
   });
 }

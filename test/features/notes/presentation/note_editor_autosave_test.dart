@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:proper_notes/core/utils/note_document.dart';
 import 'package:proper_notes/features/notes/application/create_note.dart';
 import 'package:proper_notes/features/notes/application/update_note.dart';
 import 'package:proper_notes/features/notes/domain/note.dart';
@@ -33,6 +34,10 @@ void main() {
 
       expect(repository.createdNotes, hasLength(1));
       expect(repository.updatedNotes, isEmpty);
+      expect(
+        repository.createdNotes.single.documentJson,
+        documentJsonFromEditableText('# Hello'),
+      );
       expect(find.text('All changes saved'), findsOneWidget);
 
       await tester.enterText(find.byType(TextField).at(1), '# Hello\nWorld');
@@ -44,6 +49,40 @@ void main() {
       expect(
           repository.updatedNotes.single.id, repository.createdNotes.single.id);
       expect(repository.updatedNotes.single.content, '# Hello\nWorld');
+      expect(
+        repository.updatedNotes.single.documentJson,
+        documentJsonFromEditableText('# Hello\nWorld'),
+      );
+    },
+  );
+
+  testWidgets(
+    'autosaves code snippets as structured code blocks',
+    (tester) async {
+      final repository = _RecordingNoteRepository();
+
+      await tester.pumpWidget(
+        _buildEditor(
+          repository: repository,
+          embedded: true,
+          onClose: () {},
+        ),
+      );
+
+      await tester.enterText(
+        find.byType(TextField).at(1),
+        '[code:dart]\nfinal value = 42;\n[/code]',
+      );
+      await tester.pump(const Duration(milliseconds: 800));
+      await tester.pumpAndSettle();
+
+      expect(repository.createdNotes, hasLength(1));
+      expect(
+        repository.createdNotes.single.documentJson,
+        documentJsonFromEditableText(
+          '[code:dart]\nfinal value = 42;\n[/code]',
+        ),
+      );
     },
   );
 

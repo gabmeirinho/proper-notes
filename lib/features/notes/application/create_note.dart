@@ -1,6 +1,7 @@
 import 'package:uuid/uuid.dart';
 
 import '../../../core/utils/content_hash.dart';
+import '../../../core/utils/note_document.dart';
 import '../domain/note.dart';
 import '../domain/note_repository.dart';
 import '../domain/sync_status.dart';
@@ -28,6 +29,7 @@ class CreateNote {
       id: _uuid.v4(),
       title: title,
       content: content,
+      documentJson: documentJsonFromEditableText(content),
       createdAt: now,
       updatedAt: now,
       syncStatus: SyncStatus.pendingUpload,

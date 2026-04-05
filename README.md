@@ -2,52 +2,51 @@
 
 Proper Notes is a local-first note-taking app for Linux desktop and Android.
 
-Current stack:
-- Flutter
-- Dart 3.x
-- Drift + SQLite
-- Google Drive `appDataFolder` sync
+## Current Snapshot
 
-Current capabilities:
-- markdown/plain-text notes
-- local create, edit, delete, restore
-- conservative local autosave for note create/edit flows
-- local search
-- nested folders with notes grouped in a collapsible desktop sidebar tree
-- folder deletion with immediate delete for empty folders and confirmation for non-empty folder trees
-- desktop trash access inside the workspace sidebar
-- Obsidian-like desktop workspace with a slim top bar and optional sidebar collapse
-- compact per-note sync-state indicators in the sidebar
-- calmer mobile layout with folder context moved into the app bar instead of large status banners
-- Google sign-in on Linux and Android
-- manual sync with conflict preservation
-- cross-device create, edit, delete, restore, and conflict-copy sync between Linux and Android
-- Linux launcher install flow
-- Android release APK install/update workflow
+Current implementation state as of April 2026:
+- Flutter + Dart 3.x
+- Drift over SQLite as the local source of truth
+- schema version `2` with logical folders stored locally
+- Google Drive `appDataFolder` manual sync with delta-token support
+- Linux and Android sign-in flows are implemented
+- full `flutter test` currently passes in this workspace
 
-## Current Status
+Current user-facing capabilities:
+- create, edit, delete, restore, and search notes locally
+- local autosave with debounce plus lifecycle/close flushing
+- nested folders with rename, move, drag-and-drop, and subtree-aware delete flows
+- desktop workspace with a collapsible sidebar, trash in the workspace, and an embedded editor
+- lighter mobile layout with folder context moved into the app bar
+- per-note sync-state indicators and dismissible sync notices
+- cross-device create, edit, delete, restore, and conflict-copy preservation
+- Linux launcher install flow and Android release APK workflow
 
-What is already working:
-- local-first note editing
-- local-first autosave with flush-on-close/lifecycle handling
-- current desktop workspace direction with collapsible folder tree and nested notes
-- desktop embedded editor with a flatter, less boxed writing surface
-- deleted-notes and restore flow
-- folder create/delete flows with subtree-aware delete confirmation
-- sidebar sync-state UI and dismissible sync notices
-- lighter mobile chrome without the older large folder/sync/shortcut panels
-- repeated no-op sync without the earlier upload loop
-- restore propagation across devices
-- delete-vs-edit conflict preservation with conflict copies
-- release-build validation on Linux and Android
-- full manual QA checklist pass on Linux and Android release builds
+## Editor And Markdown State
 
-What is still worth doing before calling v1 complete:
-- add more automated tests for stale-device, restore, and migration scenarios
-- finish folder management with reliable rename and note-move flows
-- persist desktop sidebar collapse and expansion state locally
-- tighten some remaining sync/account UX details
-- decide the exact first release-candidate version/tag and release notes
+The note body is still stored as one plain text/markdown field.
+
+Current editor behavior:
+- one text editor remains the canonical editing surface
+- inactive lines render headings, bullets, and quotes in a friendlier way
+- the editor still has fence-based code insertion and inactive-line fenced-code styling
+
+Current preview behavior:
+- note list previews render headings, paragraphs, lists, quotes, dividers, bold, italic, and inline code
+- dedicated fenced code block preview support was removed
+- triple backticks now fall through as normal text in the preview layer
+
+Important current gap:
+- the app does not yet have a first-class, copy-friendly code snippet mechanism
+- the planned replacement for fenced code blocks is documented in `PLAN.MD`
+
+## Current Priorities
+
+The most important near-term product work is:
+- replace fence-based code insertion with a first-class code snippet workflow
+- persist desktop sidebar collapse and expanded-folder state locally
+- add more stale-device, migration, and broader integration coverage
+- tighten release packaging and release discipline for the first stable build
 
 ## Identity
 
@@ -171,7 +170,7 @@ flutter build apk --release \
   --dart-define=GOOGLE_ANDROID_SERVER_CLIENT_ID=YOUR_WEB_CLIENT_ID.apps.googleusercontent.com
 ```
 
-### Android release signing
+### Android Release Signing
 
 Create a release keystore:
 
@@ -215,25 +214,19 @@ cd android
 
 Then add the `release` SHA-1 fingerprint to the Android OAuth client in Google Cloud.
 
-## Cross-Device Test Checklist
+## Verification
 
-Run these before trusting the app with important notes:
+Current verification state:
+- the full automated Flutter test suite is green in this workspace
+- the last tagged release candidate is `v0.1.0-rc1`
+- the current worktree has moved beyond that tag
 
-1. Create on Android, sync to Linux.
-2. Create on Linux, sync to Android.
-3. Edit on one device, sync to the other.
-4. Delete and restore across both devices.
-5. Create a deliberate conflict and verify both versions are preserved.
-6. Sign out, sign back in, and verify sync still works.
-
-For the full release gate, use `QA_CHECKLIST.md`.
-
-Current QA status:
-- latest full manual QA pass completed successfully on Linux and Android release builds
+For manual release validation and cross-device checks, use `QA_CHECKLIST.md`.
 
 ## Current Caveats
 
-- This is still an early-stage app, not a polished production release.
-- Sync is manual-first by design.
+- This is still pre-`0.1.0`.
+- Sync is manual/foreground first by design.
 - Background sync is intentionally deferred.
-- Keep backups for important notes until the project has gone through a first tagged release candidate and broader real-world usage.
+- The code snippet UX is not finished yet; fence-based insertion is still present in the editor until the replacement lands.
+- Keep backups for important notes until the project has gone through a stable release and more real-world usage.

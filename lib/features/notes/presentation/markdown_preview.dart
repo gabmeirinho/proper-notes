@@ -1,20 +1,26 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/note_document.dart';
+
 class MarkdownPreview extends StatelessWidget {
   const MarkdownPreview({
-    required this.content,
+    this.content,
+    this.document,
     this.maxBlocks,
     this.compact = false,
     super.key,
-  });
+  }) : assert(content != null || document != null);
 
-  final String content;
+  final String? content;
+  final NoteDocument? document;
   final int? maxBlocks;
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    final blocks = _parseMarkdownBlocks(content);
+    final blocks = document != null
+        ? _parseDocumentBlocks(document!)
+        : _parseMarkdownBlocks(content!);
     final visibleBlocks = maxBlocks == null
         ? blocks
         : blocks.take(maxBlocks!).toList(growable: false);
@@ -85,8 +91,8 @@ class _QuoteBlock extends _MarkdownBlock {
   final String text;
 }
 
-class _CodeBlock extends _MarkdownBlock {
-  const _CodeBlock({
+class _CodeSnippetBlock extends _MarkdownBlock {
+  const _CodeSnippetBlock({
     required this.language,
     required this.code,
   });
@@ -229,7 +235,7 @@ class _MarkdownBlockView extends StatelessWidget {
             ),
           ),
         ),
-      _CodeBlock(:final language, :final code) => Container(
+      _CodeSnippetBlock(:final language, :final code) => Container(
           width: double.infinity,
           padding: EdgeInsets.all(compact ? 10 : 14),
           decoration: BoxDecoration(
@@ -250,13 +256,17 @@ class _MarkdownBlockView extends StatelessWidget {
                 ),
                 SizedBox(height: compact ? 6 : 8),
               ],
-              Text(
-                code,
-                maxLines: compact ? 5 : null,
-                overflow: compact ? TextOverflow.ellipsis : null,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontFamily: 'monospace',
-                  height: compact ? 1.35 : 1.5,
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Text(
+                  code,
+                  maxLines: compact ? 5 : null,
+                  overflow: compact ? TextOverflow.ellipsis : null,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontFamily: 'monospace',
+                    height: compact ? 1.35 : 1.5,
+                    color: colorScheme.onSurface,
+                  ),
                 ),
               ),
             ],
@@ -342,24 +352,30 @@ List<_MarkdownBlock> _parseMarkdownBlocks(String content) {
       continue;
     }
 
-    if (_isCodeFenceLine(line)) {
-      final language = _codeFenceLanguage(line);
+    final snippetLanguage = _codeSnippetLanguage(trimmed);
+    if (snippetLanguage != null) {
+      final snippetStartIndex = index;
       final codeLines = <String>[];
       index++;
-      while (index < lines.length && !_isCodeFenceLine(lines[index])) {
+
+      while (index < lines.length &&
+          !_isCodeSnippetClosingTag(lines[index].trim())) {
         codeLines.add(lines[index]);
         index++;
       }
+
       if (index < lines.length) {
         index++;
+        blocks.add(
+          _CodeSnippetBlock(
+            language: snippetLanguage,
+            code: codeLines.join('\n'),
+          ),
+        );
+        continue;
       }
-      blocks.add(
-        _CodeBlock(
-          language: language,
-          code: codeLines.join('\n').trimRight(),
-        ),
-      );
-      continue;
+
+      index = snippetStartIndex;
     }
 
     final headingMatch = RegExp(r'^(#{1,3})\s+(.*)$').firstMatch(trimmed);
@@ -423,7 +439,6 @@ List<_MarkdownBlock> _parseMarkdownBlocks(String content) {
     while (index < lines.length) {
       final candidate = lines[index].trim();
       if (candidate.isEmpty ||
-          _isCodeFenceLine(lines[index]) ||
           RegExp(r'^(#{1,3})\s+').hasMatch(candidate) ||
           candidate.startsWith('> ') ||
           _isListItem(candidate) ||
@@ -445,6 +460,58 @@ List<_MarkdownBlock> _parseMarkdownBlocks(String content) {
   return blocks;
 }
 
+List<_MarkdownBlock> _parseDocumentBlocks(NoteDocument document) {
+  final blocks = <_MarkdownBlock>[];
+
+  for (final block in document.blocks) {
+    switch (block) {
+      case ParagraphBlock(:final text):
+        blocks.addAll(_parseMarkdownBlocks(text));
+      case CodeBlock(:final language, :final code):
+        blocks.add(
+          _CodeSnippetBlock(
+            language: language,
+            code: code,
+          ),
+        );
+      case UnknownBlock():
+        blocks.addAll(_parseUnknownDocumentBlock(block));
+    }
+  }
+
+  return blocks;
+}
+
+List<_MarkdownBlock> _parseUnknownDocumentBlock(UnknownBlock block) {
+  final text = block.data['text'];
+  if (text is String) {
+    return _parseMarkdownBlocks(text);
+  }
+
+  if (block.type == 'code') {
+    final code = block.data['code'];
+    if (code is String) {
+      final language = block.data['language'];
+      return <_MarkdownBlock>[
+        _CodeSnippetBlock(
+          language: language is String ? language : '',
+          code: code,
+        ),
+      ];
+    }
+  }
+
+  if (block.type == 'image') {
+    return const <_MarkdownBlock>[
+      _ParagraphBlock('[Image]'),
+    ];
+  }
+
+  return <_MarkdownBlock>[
+    _ParagraphBlock('[${block.type}]'),
+  ];
+}
+
 bool _isListItem(String line) {
   return line.startsWith('- ') ||
       line.startsWith('* ') ||
@@ -453,7 +520,7 @@ bool _isListItem(String line) {
 }
 
 bool _startsNewMarkdownBlock(String line) {
-  return _isCodeFenceLine(line) ||
+  return _codeSnippetLanguage(line) != null ||
       RegExp(r'^(#{1,3})\s+').hasMatch(line) ||
       line.startsWith('> ') ||
       _isListItem(line) ||
@@ -461,13 +528,13 @@ bool _startsNewMarkdownBlock(String line) {
       line == '***';
 }
 
-bool _isCodeFenceLine(String line) {
-  return RegExp(r'^\s*```(?:\S+)?\s*$').hasMatch(line);
+bool _isCodeSnippetClosingTag(String line) {
+  return line == '[/code]';
 }
 
-String _codeFenceLanguage(String line) {
-  final match = RegExp(r'^\s*```(?:\s*(\S+))?\s*$').firstMatch(line);
-  return match?.group(1)?.trim() ?? '';
+String? _codeSnippetLanguage(String line) {
+  final match = RegExp(r'^\[code(?::([^\]\s]+))?\]$').firstMatch(line);
+  return match?.group(1)?.trim() ?? (match != null ? '' : null);
 }
 
 String _stripListMarker(String line) {

@@ -5,12 +5,15 @@ import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/utils/note_document.dart';
+
 part 'app_database.g.dart';
 
 class NotesTable extends Table {
   TextColumn get id => text()();
   TextColumn get title => text().withDefault(const Constant(''))();
   TextColumn get content => text().withDefault(const Constant(''))();
+  TextColumn get documentJson => text().withDefault(const Constant(''))();
   IntColumn get createdAt => integer()();
   IntColumn get updatedAt => integer()();
   IntColumn get deletedAt => integer().nullable()();
@@ -59,7 +62,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -70,6 +73,18 @@ class AppDatabase extends _$AppDatabase {
           if (from < 2) {
             await migrator.addColumn(notesTable, notesTable.folderPath);
             await migrator.createTable(foldersTable);
+          }
+          if (from < 3) {
+            await migrator.addColumn(notesTable, notesTable.documentJson);
+            final notes = await select(notesTable).get();
+            for (final note in notes) {
+              await (update(notesTable)..where((tbl) => tbl.id.equals(note.id)))
+                  .write(
+                NotesTableCompanion(
+                  documentJson: Value(legacyDocumentFromContent(note.content)),
+                ),
+              );
+            }
           }
         },
       );

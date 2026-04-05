@@ -1,4 +1,5 @@
 import '../../../core/utils/content_hash.dart';
+import '../../../core/utils/note_document.dart';
 import '../domain/note.dart';
 import '../domain/note_repository.dart';
 import '../domain/sync_status.dart';
@@ -23,6 +24,7 @@ class UpdateNote {
     final updatedNote = original.copyWith(
       title: title,
       content: content,
+      documentJson: documentJsonFromEditableText(content),
       updatedAt: now,
       contentHash: computeContentHash(content),
       syncStatus: SyncStatus.pendingUpload,

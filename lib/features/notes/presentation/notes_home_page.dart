@@ -2404,7 +2404,7 @@ class _NotesList extends StatelessWidget {
                           const SizedBox(height: 8),
                         ],
                         MarkdownPreview(
-                          content: note.content,
+                          document: note.document,
                           compact: true,
                           maxBlocks: 2,
                         ),

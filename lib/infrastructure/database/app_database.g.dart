@@ -29,6 +29,14 @@ class $NotesTableTable extends NotesTable
       type: DriftSqlType.string,
       requiredDuringInsert: false,
       defaultValue: const Constant(''));
+  static const VerificationMeta _documentJsonMeta =
+      const VerificationMeta('documentJson');
+  @override
+  late final GeneratedColumn<String> documentJson = GeneratedColumn<String>(
+      'document_json', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(''));
   static const VerificationMeta _createdAtMeta =
       const VerificationMeta('createdAt');
   @override
@@ -94,6 +102,7 @@ class $NotesTableTable extends NotesTable
         id,
         title,
         content,
+        documentJson,
         createdAt,
         updatedAt,
         deletedAt,
@@ -127,6 +136,12 @@ class $NotesTableTable extends NotesTable
     if (data.containsKey('content')) {
       context.handle(_contentMeta,
           content.isAcceptableOrUnknown(data['content']!, _contentMeta));
+    }
+    if (data.containsKey('document_json')) {
+      context.handle(
+          _documentJsonMeta,
+          documentJson.isAcceptableOrUnknown(
+              data['document_json']!, _documentJsonMeta));
     }
     if (data.containsKey('created_at')) {
       context.handle(_createdAtMeta,
@@ -205,6 +220,8 @@ class $NotesTableTable extends NotesTable
           .read(DriftSqlType.string, data['${effectivePrefix}title'])!,
       content: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}content'])!,
+      documentJson: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}document_json'])!,
       createdAt: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}created_at'])!,
       updatedAt: attachedDatabase.typeMapping
@@ -238,6 +255,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
   final String id;
   final String title;
   final String content;
+  final String documentJson;
   final int createdAt;
   final int updatedAt;
   final int? deletedAt;
@@ -252,6 +270,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       {required this.id,
       required this.title,
       required this.content,
+      required this.documentJson,
       required this.createdAt,
       required this.updatedAt,
       this.deletedAt,
@@ -268,6 +287,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
     map['id'] = Variable<String>(id);
     map['title'] = Variable<String>(title);
     map['content'] = Variable<String>(content);
+    map['document_json'] = Variable<String>(documentJson);
     map['created_at'] = Variable<int>(createdAt);
     map['updated_at'] = Variable<int>(updatedAt);
     if (!nullToAbsent || deletedAt != null) {
@@ -296,6 +316,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       id: Value(id),
       title: Value(title),
       content: Value(content),
+      documentJson: Value(documentJson),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
       deletedAt: deletedAt == null && nullToAbsent
@@ -326,6 +347,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       id: serializer.fromJson<String>(json['id']),
       title: serializer.fromJson<String>(json['title']),
       content: serializer.fromJson<String>(json['content']),
+      documentJson: serializer.fromJson<String>(json['documentJson']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
       deletedAt: serializer.fromJson<int?>(json['deletedAt']),
@@ -345,6 +367,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       'id': serializer.toJson<String>(id),
       'title': serializer.toJson<String>(title),
       'content': serializer.toJson<String>(content),
+      'documentJson': serializer.toJson<String>(documentJson),
       'createdAt': serializer.toJson<int>(createdAt),
       'updatedAt': serializer.toJson<int>(updatedAt),
       'deletedAt': serializer.toJson<int?>(deletedAt),
@@ -362,6 +385,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
           {String? id,
           String? title,
           String? content,
+          String? documentJson,
           int? createdAt,
           int? updatedAt,
           Value<int?> deletedAt = const Value.absent(),
@@ -376,6 +400,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
         id: id ?? this.id,
         title: title ?? this.title,
         content: content ?? this.content,
+        documentJson: documentJson ?? this.documentJson,
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
         deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
@@ -396,6 +421,9 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       id: data.id.present ? data.id.value : this.id,
       title: data.title.present ? data.title.value : this.title,
       content: data.content.present ? data.content.value : this.content,
+      documentJson: data.documentJson.present
+          ? data.documentJson.value
+          : this.documentJson,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
@@ -424,6 +452,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
           ..write('id: $id, ')
           ..write('title: $title, ')
           ..write('content: $content, ')
+          ..write('documentJson: $documentJson, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('deletedAt: $deletedAt, ')
@@ -443,6 +472,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       id,
       title,
       content,
+      documentJson,
       createdAt,
       updatedAt,
       deletedAt,
@@ -460,6 +490,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
           other.id == this.id &&
           other.title == this.title &&
           other.content == this.content &&
+          other.documentJson == this.documentJson &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
           other.deletedAt == this.deletedAt &&
@@ -476,6 +507,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
   final Value<String> id;
   final Value<String> title;
   final Value<String> content;
+  final Value<String> documentJson;
   final Value<int> createdAt;
   final Value<int> updatedAt;
   final Value<int?> deletedAt;
@@ -491,6 +523,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
     this.id = const Value.absent(),
     this.title = const Value.absent(),
     this.content = const Value.absent(),
+    this.documentJson = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.deletedAt = const Value.absent(),
@@ -507,6 +540,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
     required String id,
     this.title = const Value.absent(),
     this.content = const Value.absent(),
+    this.documentJson = const Value.absent(),
     required int createdAt,
     required int updatedAt,
     this.deletedAt = const Value.absent(),
@@ -528,6 +562,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
     Expression<String>? id,
     Expression<String>? title,
     Expression<String>? content,
+    Expression<String>? documentJson,
     Expression<int>? createdAt,
     Expression<int>? updatedAt,
     Expression<int>? deletedAt,
@@ -544,6 +579,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
       if (id != null) 'id': id,
       if (title != null) 'title': title,
       if (content != null) 'content': content,
+      if (documentJson != null) 'document_json': documentJson,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (deletedAt != null) 'deleted_at': deletedAt,
@@ -562,6 +598,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
       {Value<String>? id,
       Value<String>? title,
       Value<String>? content,
+      Value<String>? documentJson,
       Value<int>? createdAt,
       Value<int>? updatedAt,
       Value<int?>? deletedAt,
@@ -577,6 +614,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
       id: id ?? this.id,
       title: title ?? this.title,
       content: content ?? this.content,
+      documentJson: documentJson ?? this.documentJson,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: deletedAt ?? this.deletedAt,
@@ -602,6 +640,9 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
     }
     if (content.present) {
       map['content'] = Variable<String>(content.value);
+    }
+    if (documentJson.present) {
+      map['document_json'] = Variable<String>(documentJson.value);
     }
     if (createdAt.present) {
       map['created_at'] = Variable<int>(createdAt.value);
@@ -645,6 +686,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
           ..write('id: $id, ')
           ..write('title: $title, ')
           ..write('content: $content, ')
+          ..write('documentJson: $documentJson, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('deletedAt: $deletedAt, ')
@@ -1288,6 +1330,7 @@ typedef $$NotesTableTableCreateCompanionBuilder = NotesTableCompanion Function({
   required String id,
   Value<String> title,
   Value<String> content,
+  Value<String> documentJson,
   required int createdAt,
   required int updatedAt,
   Value<int?> deletedAt,
@@ -1304,6 +1347,7 @@ typedef $$NotesTableTableUpdateCompanionBuilder = NotesTableCompanion Function({
   Value<String> id,
   Value<String> title,
   Value<String> content,
+  Value<String> documentJson,
   Value<int> createdAt,
   Value<int> updatedAt,
   Value<int?> deletedAt,
@@ -1334,6 +1378,9 @@ class $$NotesTableTableFilterComposer
 
   ColumnFilters<String> get content => $composableBuilder(
       column: $table.content, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get documentJson => $composableBuilder(
+      column: $table.documentJson, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<int> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnFilters(column));
@@ -1384,6 +1431,10 @@ class $$NotesTableTableOrderingComposer
 
   ColumnOrderings<String> get content => $composableBuilder(
       column: $table.content, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get documentJson => $composableBuilder(
+      column: $table.documentJson,
+      builder: (column) => ColumnOrderings(column));
 
   ColumnOrderings<int> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnOrderings(column));
@@ -1436,6 +1487,9 @@ class $$NotesTableTableAnnotationComposer
 
   GeneratedColumn<String> get content =>
       $composableBuilder(column: $table.content, builder: (column) => column);
+
+  GeneratedColumn<String> get documentJson => $composableBuilder(
+      column: $table.documentJson, builder: (column) => column);
 
   GeneratedColumn<int> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -1497,6 +1551,7 @@ class $$NotesTableTableTableManager extends RootTableManager<
             Value<String> id = const Value.absent(),
             Value<String> title = const Value.absent(),
             Value<String> content = const Value.absent(),
+            Value<String> documentJson = const Value.absent(),
             Value<int> createdAt = const Value.absent(),
             Value<int> updatedAt = const Value.absent(),
             Value<int?> deletedAt = const Value.absent(),
@@ -1513,6 +1568,7 @@ class $$NotesTableTableTableManager extends RootTableManager<
             id: id,
             title: title,
             content: content,
+            documentJson: documentJson,
             createdAt: createdAt,
             updatedAt: updatedAt,
             deletedAt: deletedAt,
@@ -1529,6 +1585,7 @@ class $$NotesTableTableTableManager extends RootTableManager<
             required String id,
             Value<String> title = const Value.absent(),
             Value<String> content = const Value.absent(),
+            Value<String> documentJson = const Value.absent(),
             required int createdAt,
             required int updatedAt,
             Value<int?> deletedAt = const Value.absent(),
@@ -1545,6 +1602,7 @@ class $$NotesTableTableTableManager extends RootTableManager<
             id: id,
             title: title,
             content: content,
+            documentJson: documentJson,
             createdAt: createdAt,
             updatedAt: updatedAt,
             deletedAt: deletedAt,

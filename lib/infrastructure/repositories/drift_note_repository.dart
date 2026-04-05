@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../../core/utils/note_document.dart';
 import '../../features/notes/domain/note.dart';
 import '../../features/notes/domain/note_repository.dart';
 import '../../features/notes/domain/sync_status.dart';
@@ -59,6 +60,7 @@ class DriftNoteRepository implements NoteRepository {
         id: remoteNote.id,
         title: remoteNote.title,
         content: remoteNote.content,
+        documentJson: legacyDocumentFromContent(remoteNote.content),
         createdAt: remoteNote.createdAt,
         updatedAt: remoteNote.updatedAt,
         deletedAt: deletedAt,
@@ -176,6 +178,7 @@ class DriftNoteRepository implements NoteRepository {
       id: remoteNote.id,
       title: remoteNote.title,
       content: remoteNote.content,
+      documentJson: legacyDocumentFromContent(remoteNote.content),
       createdAt: remoteNote.createdAt,
       updatedAt: remoteNote.updatedAt,
       deletedAt: remoteNote.deletedAt,
@@ -211,7 +214,8 @@ class DriftNoteRepository implements NoteRepository {
   @override
   Stream<List<Note>> watchDeletedNotes({String? folderPath}) {
     final query = _database.select(_database.notesTable)
-      ..where((tbl) => tbl.deletedAt.isNotNull() & _folderFilter(tbl, folderPath))
+      ..where(
+          (tbl) => tbl.deletedAt.isNotNull() & _folderFilter(tbl, folderPath))
       ..orderBy([(tbl) => OrderingTerm.desc(tbl.deletedAt)]);
 
     return query.watch().map(
@@ -224,8 +228,13 @@ class DriftNoteRepository implements NoteRepository {
       id: row.id,
       title: row.title,
       content: row.content,
-      createdAt: DateTime.fromMillisecondsSinceEpoch(row.createdAt, isUtc: true),
-      updatedAt: DateTime.fromMillisecondsSinceEpoch(row.updatedAt, isUtc: true),
+      documentJson: row.documentJson.isEmpty
+          ? legacyDocumentFromContent(row.content)
+          : row.documentJson,
+      createdAt:
+          DateTime.fromMillisecondsSinceEpoch(row.createdAt, isUtc: true),
+      updatedAt:
+          DateTime.fromMillisecondsSinceEpoch(row.updatedAt, isUtc: true),
       deletedAt: row.deletedAt == null
           ? null
           : DateTime.fromMillisecondsSinceEpoch(row.deletedAt!, isUtc: true),
@@ -246,6 +255,11 @@ class DriftNoteRepository implements NoteRepository {
       id: Value(note.id),
       title: Value(note.title),
       content: Value(note.content),
+      documentJson: Value(
+        note.documentJson.isEmpty
+            ? legacyDocumentFromContent(note.content)
+            : note.documentJson,
+      ),
       createdAt: Value(note.createdAt.millisecondsSinceEpoch),
       updatedAt: Value(note.updatedAt.millisecondsSinceEpoch),
       deletedAt: Value(note.deletedAt?.millisecondsSinceEpoch),

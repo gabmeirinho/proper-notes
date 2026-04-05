@@ -1,3 +1,4 @@
+import '../../../core/utils/note_document.dart';
 import 'sync_status.dart';
 
 class Note {
@@ -5,6 +6,7 @@ class Note {
     required this.id,
     required this.title,
     required this.content,
+    this.documentJson = '',
     required this.createdAt,
     required this.updatedAt,
     required this.syncStatus,
@@ -20,6 +22,7 @@ class Note {
   final String id;
   final String title;
   final String content;
+  final String documentJson;
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? deletedAt;
@@ -33,10 +36,17 @@ class Note {
 
   bool get isDeleted => deletedAt != null;
 
+  NoteDocument get document {
+    return documentJson.isEmpty
+        ? NoteDocument.legacyParagraph(content)
+        : NoteDocument.fromJsonString(documentJson);
+  }
+
   Note copyWith({
     String? id,
     String? title,
     String? content,
+    String? documentJson,
     DateTime? createdAt,
     DateTime? updatedAt,
     DateTime? deletedAt,
@@ -57,12 +67,12 @@ class Note {
       id: id ?? this.id,
       title: title ?? this.title,
       content: content ?? this.content,
+      documentJson: documentJson ?? this.documentJson,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: clearDeletedAt ? null : (deletedAt ?? this.deletedAt),
-      lastSyncedAt: clearLastSyncedAt
-          ? null
-          : (lastSyncedAt ?? this.lastSyncedAt),
+      lastSyncedAt:
+          clearLastSyncedAt ? null : (lastSyncedAt ?? this.lastSyncedAt),
       syncStatus: syncStatus ?? this.syncStatus,
       contentHash: contentHash ?? this.contentHash,
       baseContentHash: clearBaseContentHash
@@ -70,9 +80,8 @@ class Note {
           : (baseContentHash ?? this.baseContentHash),
       deviceId: deviceId ?? this.deviceId,
       folderPath: clearFolderPath ? null : (folderPath ?? this.folderPath),
-      remoteFileId: clearRemoteFileId
-          ? null
-          : (remoteFileId ?? this.remoteFileId),
+      remoteFileId:
+          clearRemoteFileId ? null : (remoteFileId ?? this.remoteFileId),
     );
   }
 }
