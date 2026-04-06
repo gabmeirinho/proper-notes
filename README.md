@@ -162,6 +162,36 @@ This installs a user-local launcher in:
 
 Re-run the script after rebuilding the Linux release if the bundle path changes.
 
+## Obsidian Import
+
+There is no in-app vault importer yet, but you can import `.md` files from an
+Obsidian vault with the CLI script below.
+
+Dry run preview:
+
+```bash
+cd /path/to/proper-notes
+dart run scripts/import_obsidian.dart \
+  --vault ~/Documents/MyVault
+```
+
+Apply the import:
+
+```bash
+cd /path/to/proper-notes
+dart run scripts/import_obsidian.dart \
+  --vault ~/Documents/MyVault \
+  --folder-prefix Imported/Obsidian \
+  --apply
+```
+
+Notes:
+- the script skips hidden paths such as `.obsidian/` by default
+- exact duplicates already in Proper Notes are skipped
+- conflicting folder/title pairs are imported as extra local notes rather than overwritten
+- by default the script targets `~/.local/share/com.gabriel.propernotes/proper_notes.sqlite`
+- use `--db /absolute/path/to/proper_notes.sqlite` if your database lives elsewhere
+
 Android release APK:
 
 ```bash

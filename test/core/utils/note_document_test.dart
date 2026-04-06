@@ -24,7 +24,8 @@ void main() {
     expect(document.toJsonString(), source);
   });
 
-  test('preserves unknown non-code blocks during parsing and serialization', () {
+  test('preserves unknown non-code blocks during parsing and serialization',
+      () {
     const source =
         '{"version":1,"blocks":[{"id":"img-1","type":"image","url":"local://one"}]}';
 
@@ -66,7 +67,7 @@ void main() {
   test('mixed editable text becomes paragraph and code blocks', () {
     final document = NoteDocument.fromJsonString(
       documentJsonFromEditableText(
-        'Intro paragraph\n\n[code:dart]\nfinal value = 42;\n[/code]\n\nTail',
+        'Intro paragraph\n\n```dart\nfinal value = 42;\n```\n\nTail',
       ),
     );
 
@@ -89,7 +90,20 @@ void main() {
 
     expect(
       editableTextFromDocument(document),
-      'Intro\n\n[code:dart]\nprint("hi");\n[/code]',
+      'Intro\n\n```dart\nprint("hi");\n```',
+    );
+  });
+
+  test('legacy code tags stay as plain paragraph text', () {
+    final document = NoteDocument.fromJsonString(
+      documentJsonFromEditableText('[code]\nprint("hi");\n[/code]'),
+    );
+
+    expect(document.blocks, hasLength(1));
+    expect(document.blocks.single, isA<ParagraphBlock>());
+    expect(
+      (document.blocks.single as ParagraphBlock).text,
+      '[code]\nprint("hi");\n[/code]',
     );
   });
 }

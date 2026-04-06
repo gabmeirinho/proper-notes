@@ -32,9 +32,9 @@ Intro text
 
   test('ignores headings inside code snippets', () {
     final title = deriveTitleFromMarkdown('''
-[code]
+```
 # Not a title
-[/code]
+```
 
 ## Actual title
 ''');

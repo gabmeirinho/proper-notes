@@ -331,6 +331,87 @@ void main() {
   );
 
   testWidgets(
+    'desktop sidebar shows root folders before root notes',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final folderRepository = _FakeFolderRepository(
+        initialFolders: [
+          Folder(
+            path: 'Projects',
+            parentPath: null,
+            createdAt: DateTime(2026, 1, 1),
+          ),
+        ],
+      );
+      final noteRepository = _FakeNoteRepository(
+        initialActiveNotes: [
+          Note(
+            id: 'note-1',
+            title: 'Roadmap',
+            content: 'Plan the next release',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 2),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'hash-1',
+            deviceId: 'device-1',
+            folderPath: null,
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NotesHomePage(
+            createNote: CreateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            createFolder: CreateFolder(repository: folderRepository),
+            deleteFolder: DeleteFolder(repository: folderRepository),
+            renameFolder: RenameFolder(repository: folderRepository),
+            moveNote: MoveNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            updateNote: UpdateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            deleteNote: DeleteNote(repository: noteRepository),
+            restoreNote: RestoreNote(repository: noteRepository),
+            searchNotes: SearchNotes(repository: noteRepository),
+            folderRepository: folderRepository,
+            noteRepository: noteRepository,
+            authController: AuthController(authService: _FakeAuthService()),
+            syncController: SyncController(
+              runManualSync: RunManualSync(
+                noteRepository: noteRepository,
+                syncGateway: _FakeSyncGateway(),
+                syncStateRepository: _FakeSyncStateRepository(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      final folderTop = tester.getTopLeft(
+        find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+      );
+      final noteTop = tester.getTopLeft(
+        find.byKey(const ValueKey('sidebar-note-note-1')),
+      );
+
+      expect(folderTop.dy, lessThan(noteTop.dy));
+    },
+  );
+
+  testWidgets(
     'desktop folder menu offers new note and opens the editor in that folder',
     (tester) async {
       tester.view.physicalSize = const Size(1400, 900);
@@ -1347,6 +1428,153 @@ void main() {
           find.widgetWithText(FloatingActionButton, 'New note'), findsNothing);
     },
   );
+
+  testWidgets(
+    'desktop empty workspace context menu can create a folder',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final noteRepository = _FakeNoteRepository();
+      final folderRepository = _FakeFolderRepository();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NotesHomePage(
+            createNote: CreateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            createFolder: CreateFolder(repository: folderRepository),
+            deleteFolder: DeleteFolder(repository: folderRepository),
+            renameFolder: RenameFolder(repository: folderRepository),
+            moveNote: MoveNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            updateNote: UpdateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            deleteNote: DeleteNote(repository: noteRepository),
+            restoreNote: RestoreNote(repository: noteRepository),
+            searchNotes: SearchNotes(repository: noteRepository),
+            folderRepository: folderRepository,
+            noteRepository: noteRepository,
+            authController: AuthController(authService: _FakeAuthService()),
+            syncController: SyncController(
+              runManualSync: RunManualSync(
+                noteRepository: noteRepository,
+                syncGateway: _FakeSyncGateway(),
+                syncStateRepository: _FakeSyncStateRepository(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      final emptyWorkspace = find.byKey(
+        const ValueKey('desktop-sidebar-empty-space'),
+      );
+      final gesture = await tester.startGesture(
+        tester.getCenter(emptyWorkspace),
+        kind: PointerDeviceKind.mouse,
+        buttons: kSecondaryMouseButton,
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('New folder'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'Projects');
+      await tester.tap(find.text('Create'));
+      await tester.pumpAndSettle();
+
+      expect(folderRepository.createdPaths, contains('Projects'));
+      expect(find.text('Projects'), findsAtLeastNWidgets(1));
+    },
+  );
+
+  testWidgets(
+    'desktop sidebar empty space opens root menu even when notes exist',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final noteRepository = _FakeNoteRepository(
+        initialActiveNotes: [
+          Note(
+            id: 'note-1',
+            title: 'Existing note',
+            content: 'Body',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 1),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'hash',
+            deviceId: 'device-1',
+          ),
+        ],
+      );
+      final folderRepository = _FakeFolderRepository();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NotesHomePage(
+            createNote: CreateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            createFolder: CreateFolder(repository: folderRepository),
+            deleteFolder: DeleteFolder(repository: folderRepository),
+            renameFolder: RenameFolder(repository: folderRepository),
+            moveNote: MoveNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            updateNote: UpdateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            deleteNote: DeleteNote(repository: noteRepository),
+            restoreNote: RestoreNote(repository: noteRepository),
+            searchNotes: SearchNotes(repository: noteRepository),
+            folderRepository: folderRepository,
+            noteRepository: noteRepository,
+            authController: AuthController(authService: _FakeAuthService()),
+            syncController: SyncController(
+              runManualSync: RunManualSync(
+                noteRepository: noteRepository,
+                syncGateway: _FakeSyncGateway(),
+                syncStateRepository: _FakeSyncStateRepository(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      final emptySpace = find.byKey(
+        const ValueKey('desktop-sidebar-empty-space'),
+      );
+      final gesture = await tester.startGesture(
+        tester.getCenter(emptySpace),
+        kind: PointerDeviceKind.mouse,
+        buttons: kSecondaryMouseButton,
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(find.text('New note'), findsAtLeastNWidgets(1));
+      expect(find.text('New folder'), findsAtLeastNWidgets(1));
+    },
+  );
 }
 
 class _FakeAuthService implements AuthService {
@@ -1384,6 +1612,7 @@ class _FakeFolderRepository implements FolderRepository {
   final List<Folder> _folders;
   final DeleteFolderResult deleteResult;
   final FolderDeleteImpact? deleteImpact;
+  final List<String> createdPaths = <String>[];
   final List<String> deletedPaths = <String>[];
   final List<(String, String)> renamedPaths = <(String, String)>[];
   final StreamController<List<Folder>> _foldersController =
@@ -1391,7 +1620,18 @@ class _FakeFolderRepository implements FolderRepository {
   bool? lastDeleteWasRecursive;
 
   @override
-  Future<void> createFolder(String path) async {}
+  Future<void> createFolder(String path) async {
+    createdPaths.add(path);
+    _folders.add(
+      Folder(
+        path: path,
+        parentPath: _parentPath(path),
+        createdAt: DateTime(2026, 1, 1),
+      ),
+    );
+    _folders.sort((a, b) => a.path.compareTo(b.path));
+    _foldersController.add(List<Folder>.unmodifiable(_folders));
+  }
 
   @override
   Future<RenameFolderResult> renameFolder(

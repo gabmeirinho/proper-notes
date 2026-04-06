@@ -234,9 +234,8 @@ String editableTextFromDocument(NoteDocument document) {
   return document.blocks
       .map((block) => switch (block) {
             ParagraphBlock(:final text) => text,
-            CodeBlock(:final language, :final code) => language.isEmpty
-                ? '[code]\n$code\n[/code]'
-                : '[code:$language]\n$code\n[/code]',
+            CodeBlock(:final language, :final code) =>
+              language.isEmpty ? '```\n$code\n```' : '```$language\n$code\n```',
             _ => '',
           })
       .join('\n\n');
@@ -346,6 +345,16 @@ List<NoteBlock> blocksFromEditableText(String text) {
 
   flushParagraphBuffer();
 
+  if (normalizedText.endsWith('\n\n') &&
+      (blocks.isEmpty || blocks.last is! ParagraphBlock)) {
+    blocks.add(
+      ParagraphBlock(
+        id: 'paragraph-${blocks.length + 1}',
+        text: '',
+      ),
+    );
+  }
+
   return blocks.isEmpty
       ? const <NoteBlock>[
           ParagraphBlock(
@@ -358,7 +367,7 @@ List<NoteBlock> blocksFromEditableText(String text) {
 
 List<String> paragraphTextsFromEditableText(String text) {
   final normalizedText = text.replaceAll('\r\n', '\n');
-  if (normalizedText.contains('[code') || normalizedText.contains('[/code]')) {
+  if (normalizedText.contains('```')) {
     return <String>[normalizedText];
   }
   return normalizedText.isEmpty
@@ -367,10 +376,13 @@ List<String> paragraphTextsFromEditableText(String text) {
 }
 
 bool _isCodeSnippetClosingTag(String line) {
-  return line == '[/code]';
+  return line == '```';
 }
 
 String? _codeSnippetLanguage(String line) {
-  final match = RegExp(r'^\[code(?::([^\]\s]+))?\]$').firstMatch(line);
-  return match?.group(1)?.trim() ?? (match != null ? '' : null);
+  final fencedMatch = RegExp(r'^```([^\s`]+)?$').firstMatch(line);
+  if (fencedMatch != null) {
+    return fencedMatch.group(1)?.trim() ?? '';
+  }
+  return null;
 }

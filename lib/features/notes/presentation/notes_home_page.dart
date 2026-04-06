@@ -1174,6 +1174,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
                 _selectWorkspaceSection(section);
                 Navigator.of(context).pop();
               },
+              onShowRootMenu: _showDesktopRootMenu,
               onCreateNoteInFolder: (path) async {
                 Navigator.of(context).pop();
                 _selectFolder(path);
@@ -1704,6 +1705,17 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
       ),
     ];
 
+    final rootFolders = foldersByParent[null] ?? const <Folder>[];
+    for (final folder in rootFolders) {
+      children.addAll(
+        _buildFolderBranch(
+          folder: folder,
+          foldersByParent: foldersByParent,
+          notesByFolder: notesByFolder,
+        ),
+      );
+    }
+
     final rootNotes = notesByFolder[null] ?? const <Note>[];
     for (final note in rootNotes) {
       children.add(
@@ -1714,17 +1726,6 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
           onOpen: onOpenNote,
           onShowContextMenu: onShowNoteMenu,
           dragData: _DesktopSidebarDragDataNote(note),
-        ),
-      );
-    }
-
-    final rootFolders = foldersByParent[null] ?? const <Folder>[];
-    for (final folder in rootFolders) {
-      children.addAll(
-        _buildFolderBranch(
-          folder: folder,
-          foldersByParent: foldersByParent,
-          notesByFolder: notesByFolder,
         ),
       );
     }
@@ -1741,9 +1742,22 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
       );
     }
 
-    return ListView(
-      padding: const EdgeInsets.only(bottom: 12),
-      children: children,
+    return CustomScrollView(
+      slivers: [
+        SliverList.list(children: children),
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: GestureDetector(
+            key: const ValueKey('desktop-sidebar-empty-space'),
+            behavior: HitTestBehavior.opaque,
+            onSecondaryTapDown: (details) =>
+                onShowRootMenu(details.globalPosition),
+            onLongPressStart: (details) =>
+                onShowRootMenu(details.globalPosition),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ],
     );
   }
 
@@ -2449,6 +2463,7 @@ class _FolderSidebar extends StatelessWidget {
     required this.selectedSection,
     required this.onSelectFolder,
     required this.onSelectSection,
+    required this.onShowRootMenu,
     required this.onCreateNoteInFolder,
     required this.onDeleteFolder,
     required this.onCreateFolder,
@@ -2461,6 +2476,7 @@ class _FolderSidebar extends StatelessWidget {
   final _WorkspaceSection selectedSection;
   final ValueChanged<String?> onSelectFolder;
   final ValueChanged<_WorkspaceSection> onSelectSection;
+  final Future<void> Function(Offset position) onShowRootMenu;
   final Future<void> Function(String? path) onCreateNoteInFolder;
   final Future<void> Function(Folder folder) onDeleteFolder;
   final Future<void> Function(String? parentPath) onCreateFolder;
@@ -2503,12 +2519,19 @@ class _FolderSidebar extends StatelessWidget {
               builder: (context, snapshot) {
                 final folders = snapshot.data ?? const <Folder>[];
                 if (folders.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(
-                        'No folders yet.',
-                        style: Theme.of(context).textTheme.bodyMedium,
+                  return GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onSecondaryTapDown: (details) =>
+                        onShowRootMenu(details.globalPosition),
+                    onLongPressStart: (details) =>
+                        onShowRootMenu(details.globalPosition),
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          'No folders yet.',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
                       ),
                     ),
                   );

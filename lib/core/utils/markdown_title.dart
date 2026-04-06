@@ -4,13 +4,17 @@ String deriveTitleFromMarkdown(String content) {
 
   for (final rawLine in lines) {
     final line = rawLine.trim();
-    if (_isCodeSnippetOpeningTag(line)) {
-      isInsideCodeSnippet = true;
+    if (_isCodeSnippetClosingTag(line)) {
+      if (isInsideCodeSnippet) {
+        isInsideCodeSnippet = false;
+      } else if (_isCodeSnippetOpeningTag(line)) {
+        isInsideCodeSnippet = true;
+      }
       continue;
     }
 
-    if (_isCodeSnippetClosingTag(line)) {
-      isInsideCodeSnippet = false;
+    if (_isCodeSnippetOpeningTag(line)) {
+      isInsideCodeSnippet = true;
       continue;
     }
 
@@ -32,9 +36,9 @@ String deriveTitleFromMarkdown(String content) {
 }
 
 bool _isCodeSnippetOpeningTag(String line) {
-  return RegExp(r'^\[code(?::[^\]\s]+)?\]$').hasMatch(line);
+  return RegExp(r'^```([^\s`]+)?$').hasMatch(line);
 }
 
 bool _isCodeSnippetClosingTag(String line) {
-  return line == '[/code]';
+  return line == '```';
 }

@@ -77,7 +77,7 @@ Standalone paragraph
     expect(richTextContents(tester), contains('[ ] Next'));
   });
 
-  testWidgets('treats fenced code markers as plain paragraph text',
+  testWidgets('renders fenced code blocks as isolated snippet blocks',
       (tester) async {
     await tester.pumpWidget(
       buildPreview('''
@@ -92,10 +92,8 @@ After *italic*
     );
 
     expect(richTextContents(tester), contains('Before bold'));
-    expect(
-      richTextContents(tester),
-      contains("```dart final value = 'not bold'; ```"),
-    );
+    expect(find.text('DART'), findsOneWidget);
+    expect(find.text("final value = '**not bold**';"), findsOneWidget);
     expect(richTextContents(tester), contains('After italic'));
   });
 
@@ -117,9 +115,9 @@ After *italic*
       buildPreview('''
 Before **bold**
 
-[code:dart]
+```dart
 final value = '**not bold**';
-[/code]
+```
 
 After *italic*
 '''),
@@ -135,14 +133,14 @@ After *italic*
       (tester) async {
     await tester.pumpWidget(
       buildPreview('''
-[code:dart]
+```dart
 final value = '**still markdown**';
 '''),
     );
 
     expect(
       richTextContents(tester),
-      contains("[code:dart] final value = 'still markdown';"),
+      contains("```dart final value = 'still markdown';"),
     );
   });
 

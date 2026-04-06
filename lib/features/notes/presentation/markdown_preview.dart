@@ -529,12 +529,15 @@ bool _startsNewMarkdownBlock(String line) {
 }
 
 bool _isCodeSnippetClosingTag(String line) {
-  return line == '[/code]';
+  return line == '```';
 }
 
 String? _codeSnippetLanguage(String line) {
-  final match = RegExp(r'^\[code(?::([^\]\s]+))?\]$').firstMatch(line);
-  return match?.group(1)?.trim() ?? (match != null ? '' : null);
+  final fencedMatch = RegExp(r'^```([^\s`]+)?$').firstMatch(line);
+  if (fencedMatch != null) {
+    return fencedMatch.group(1)?.trim() ?? '';
+  }
+  return null;
 }
 
 String _stripListMarker(String line) {

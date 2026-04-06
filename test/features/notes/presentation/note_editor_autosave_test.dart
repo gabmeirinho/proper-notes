@@ -71,7 +71,7 @@ void main() {
 
       await tester.enterText(
         find.byType(TextField).at(1),
-        '[code:dart]\nfinal value = 42;\n[/code]',
+        '```dart\nfinal value = 42;\n```',
       );
       await tester.pump(const Duration(milliseconds: 800));
       await tester.pumpAndSettle();
@@ -80,7 +80,7 @@ void main() {
       expect(
         repository.createdNotes.single.documentJson,
         documentJsonFromEditableText(
-          '[code:dart]\nfinal value = 42;\n[/code]',
+          '```dart\nfinal value = 42;\n```',
         ),
       );
     },

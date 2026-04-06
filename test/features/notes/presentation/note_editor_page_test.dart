@@ -45,6 +45,66 @@ void main() {
     expect(content.style?.color, colorScheme.onSurface);
   });
 
+  test('renders inactive bold markdown without visible markers', () {
+    final spans = buildInactiveMarkdownLineSpans(
+      'Before **bold** after',
+      baseStyle: baseStyle,
+      colorScheme: colorScheme,
+    );
+
+    expect(spans.map((span) => (span as TextSpan).text).join(),
+        'Before **bold** after');
+    expect((spans[1] as TextSpan).style?.color, Colors.transparent);
+    expect((spans[2] as TextSpan).text, 'bold');
+    expect((spans[2] as TextSpan).style?.fontWeight, FontWeight.w700);
+    expect((spans[3] as TextSpan).style?.color, Colors.transparent);
+  });
+
+  test('renders inactive italic markdown without visible markers', () {
+    final spans = buildInactiveMarkdownLineSpans(
+      'Before *italic* after',
+      baseStyle: baseStyle,
+      colorScheme: colorScheme,
+    );
+
+    expect(spans.map((span) => (span as TextSpan).text).join(),
+        'Before *italic* after');
+    expect((spans[1] as TextSpan).style?.color, Colors.transparent);
+    expect((spans[2] as TextSpan).text, 'italic');
+    expect((spans[2] as TextSpan).style?.fontStyle, FontStyle.italic);
+    expect((spans[3] as TextSpan).style?.color, Colors.transparent);
+  });
+
+  test('renders inactive inline code markdown without visible markers', () {
+    final spans = buildInactiveMarkdownLineSpans(
+      'Before `code` after',
+      baseStyle: baseStyle,
+      colorScheme: colorScheme,
+    );
+
+    expect(spans.map((span) => (span as TextSpan).text).join(),
+        'Before `code` after');
+    expect((spans[1] as TextSpan).style?.color, Colors.transparent);
+    expect((spans[2] as TextSpan).text, 'code');
+    expect((spans[2] as TextSpan).style?.fontFamily, isNull);
+    expect(
+      (spans[2] as TextSpan).style?.backgroundColor,
+      colorScheme.surfaceContainerHighest,
+    );
+    expect((spans[3] as TextSpan).style?.color, Colors.transparent);
+  });
+
+  test('snippet overlay bottom aligns to the middle of closing fence line', () {
+    final bottom = snippetOverlayBottomForClosingFence(
+      closingFenceBox:
+          const TextBox.fromLTRBD(0, 20, 40, 36, TextDirection.ltr),
+      contentPaddingTop: 18,
+      scrollOffset: 4,
+    );
+
+    expect(bottom, 42);
+  });
+
   test('renders inactive quote markers as quote bars', () {
     final spans = buildInactiveMarkdownLineSpans(
       '> Quoted text',
@@ -63,10 +123,29 @@ void main() {
     expect(content.style?.fontStyle, FontStyle.italic);
   });
 
+  test('renders inactive headings without dropping markdown markers', () {
+    final spans = buildInactiveMarkdownLineSpans(
+      '# Heading',
+      baseStyle: baseStyle,
+      colorScheme: colorScheme,
+    );
+
+    expect(spans.length, 2);
+
+    final marker = spans[0] as TextSpan;
+    final content = spans[1] as TextSpan;
+    expect(marker.text, '# ');
+    expect(marker.style?.color, Colors.transparent);
+    expect(marker.style?.fontSize, 0.1);
+    expect(content.text, 'Heading');
+    expect(content.style?.fontWeight, FontWeight.w800);
+    expect(spans.map((span) => (span as TextSpan).text).join(), '# Heading');
+  });
+
   test('keeps code snippet tags and body as plain inactive text by default',
       () {
     final tagSpans = buildInactiveMarkdownLineSpans(
-      '[code:dart]',
+      '```dart',
       baseStyle: baseStyle,
       colorScheme: colorScheme,
     );
@@ -77,7 +156,7 @@ void main() {
     );
 
     expect(tagSpans.length, 1);
-    expect((tagSpans.single as TextSpan).text, '[code:dart]');
+    expect((tagSpans.single as TextSpan).text, '```dart');
 
     expect(codeLineSpans.length, 1);
     expect((codeLineSpans.single as TextSpan).text, 'print("hi");');
@@ -87,7 +166,7 @@ void main() {
 
   test('renders inactive code snippet regions with code styling', () {
     final openingSpans = buildInactiveMarkdownLineSpans(
-      '[code:dart]',
+      '```dart',
       baseStyle: baseStyle,
       colorScheme: colorScheme,
       isCodeSnippetOpeningTag: true,
@@ -100,19 +179,20 @@ void main() {
       isInsideCodeSnippet: true,
     );
     final closingSpans = buildInactiveMarkdownLineSpans(
-      '[/code]',
+      '```',
       baseStyle: baseStyle,
       colorScheme: colorScheme,
       isCodeSnippetClosingTag: true,
     );
 
-    expect((openingSpans.single as TextSpan).text, '[DART]');
+    expect((openingSpans.single as TextSpan).text, '```dart');
     expect((openingSpans.single as TextSpan).style?.color, colorScheme.primary);
 
     expect((bodySpans.single as TextSpan).text, 'final value = 42;');
-    expect((bodySpans.single as TextSpan).style?.fontFamily, 'monospace');
+    expect(
+        (bodySpans.single as TextSpan).style?.fontFamily, isNot('monospace'));
 
-    expect((closingSpans.single as TextSpan).text, '[/CODE]');
+    expect((closingSpans.single as TextSpan).text, '```');
     expect((closingSpans.single as TextSpan).style?.color, colorScheme.primary);
   });
 
@@ -176,35 +256,343 @@ void main() {
     expect(updated.selection.baseOffset, 0);
   });
 
-  testWidgets('code button inserts snippet delimiters', (tester) async {
+  testWidgets('slash menu converts current line into fenced code tags',
+      (tester) async {
     final repository = _StubNoteRepository();
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: NoteEditorPage(
-            createNote: CreateNote(
-              repository: repository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: repository,
-              deviceId: 'device-1',
-            ),
-          ),
-        ),
-      ),
-    );
+    await tester.pumpWidget(_buildEditor(repository: repository));
 
-    await tester.tap(find.text('Code'));
+    await tester.enterText(_bodyField(), '/');
     await tester.pumpAndSettle();
 
-    final contentField =
-        tester.widgetList<TextField>(find.byType(TextField)).last;
-    expect(contentField.controller?.text, '');
+    expect(find.text('Code block'), findsOneWidget);
+
+    await tester.tap(find.text('Code block'));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.controller?.text, '```\n\n```');
+    expect(bodyField.controller?.selection.baseOffset, 4);
+    expect(bodyField.focusNode?.hasFocus, isTrue);
   });
 
-  testWidgets('embedded editor shows code controls and code block copy button',
+  testWidgets('slash menu supports keyboard enter selection', (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), '/co');
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.controller?.text, '```\n\n```');
+  });
+
+  testWidgets('bold button wraps the current selection in markdown',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), 'hello');
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    bodyField.controller!.selection =
+        const TextSelection(baseOffset: 0, extentOffset: 5);
+    await tester.pump();
+
+    await tester.tap(find.text('Bold'));
+    await tester.pumpAndSettle();
+
+    final updatedBodyField = tester.widget<TextField>(_bodyField());
+    expect(updatedBodyField.controller?.text, '**hello**');
+    expect(updatedBodyField.controller?.selection.baseOffset, 2);
+    expect(updatedBodyField.controller?.selection.extentOffset, 7);
+  });
+
+  testWidgets('italic shortcut inserts markdown placeholder at the caret',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.tap(_bodyField());
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyI);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyI);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.controller?.text, '*italic text*');
+    expect(bodyField.controller?.selection.baseOffset, 1);
+    expect(bodyField.controller?.selection.extentOffset, 12);
+  });
+
+  testWidgets('loads note content into the unified editor', (tester) async {
+    final repository = _StubNoteRepository();
+    final note = Note(
+      id: 'note-1',
+      title: 'Doc note',
+      content: 'First paragraph\n\nSecond paragraph',
+      documentJson: paragraphDocumentFromEditableText(
+        'First paragraph\n\nSecond paragraph',
+      ),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+
+    final textFields =
+        tester.widgetList<TextField>(find.byType(TextField)).toList();
+    expect(textFields, hasLength(2));
+    expect(textFields.last.controller?.text,
+        'First paragraph\n\nSecond paragraph');
+  });
+
+  testWidgets('editing keeps the same body controller', (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    final before = tester.widget<TextField>(_bodyField()).controller;
+    await tester.enterText(_bodyField(), 'Hello world');
+    await tester.pumpAndSettle();
+    final after = tester.widget<TextField>(_bodyField()).controller;
+
+    expect(identical(before, after), isTrue);
+    expect(after?.text, 'Hello world');
+  });
+
+  testWidgets('loads code blocks as editable markdown content', (tester) async {
+    final repository = _StubNoteRepository();
+    final note = Note(
+      id: 'note-2',
+      title: 'Code note',
+      content: 'Intro\n\n```dart\nfinal value = 42;\n```',
+      documentJson: NoteDocument(
+        version: 1,
+        blocks: const <NoteBlock>[
+          ParagraphBlock(id: 'p1', text: 'Intro'),
+          CodeBlock(id: 'c1', language: 'dart', code: 'final value = 42;'),
+        ],
+      ).toJsonString(),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+
+    expect(
+      tester.widget<TextField>(_bodyField()).controller?.text,
+      'Intro\n\n```dart\nfinal value = 42;\n```',
+    );
+  });
+
+  testWidgets('arrow up keeps focus inside the body editor', (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), '\nSecond paragraph');
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    bodyField.controller!.selection = TextSelection.collapsed(
+      offset: bodyField.controller!.text.length,
+    );
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+
+    final updatedBodyField = tester.widget<TextField>(_bodyField());
+    expect(updatedBodyField.focusNode?.hasFocus, isTrue);
+  });
+
+  testWidgets('control arrow treats fenced delimiter as one jump',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), '```\ncode\n```');
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    bodyField.controller!.selection = const TextSelection.collapsed(offset: 1);
+    await tester.pump();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+
+    final updatedBodyField = tester.widget<TextField>(_bodyField());
+    expect(updatedBodyField.controller?.selection.baseOffset, 3);
+  });
+
+  testWidgets('arrow up from a new paragraph below heading reaches prior line',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), '# h1\nadasdads\n');
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.controller?.selection.baseOffset, 14);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+
+    final updatedBodyField = tester.widget<TextField>(_bodyField());
+    expect(updatedBodyField.controller?.selection.baseOffset, lessThan(14));
+  });
+
+  testWidgets(
+      'left arrow from empty line below heading reaches prior line once',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), '# h1\nadasdads\n');
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.controller?.selection.baseOffset, 14);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+
+    final updatedBodyField = tester.widget<TextField>(_bodyField());
+    expect(updatedBodyField.controller?.selection.baseOffset, 13);
+  });
+
+  testWidgets('left arrow moves one character at a time below a heading',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), '# h1\nexample');
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    bodyField.controller!.selection = const TextSelection.collapsed(offset: 12);
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(_bodyField()).controller?.selection.baseOffset,
+      11,
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(_bodyField()).controller?.selection.baseOffset,
+      10,
+    );
+  });
+
+  testWidgets('slash menu inserts code block below existing text',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), 'Intro\n\n/');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Code block'));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<TextField>(_bodyField()).controller?.text,
+      'Intro\n\n```\n\n```',
+    );
+  });
+
+  testWidgets('slash menu inserts a new block at the current slash line',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(
+      _bodyField(),
+      '```\nfirst();\n```\n\n/',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Code block'));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(
+      bodyField.controller?.text,
+      '```\nfirst();\n```\n\n```\n\n```',
+    );
+    expect(bodyField.controller?.selection.baseOffset, 22);
+  });
+
+  testWidgets('control a once then delete clears the whole document',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), 'Intro\n\n```\nprint("hi");\n```');
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.controller?.text, '');
+    expect(bodyField.controller?.selection.baseOffset, 0);
+    expect(bodyField.focusNode?.hasFocus, isTrue);
+  });
+
+  testWidgets('tapping empty editor space restores a caret at the start',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    final editor = find.byKey(const ValueKey('document-block-editor'));
+    await tester.tapAt(tester.getCenter(editor));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.focusNode?.hasFocus, isTrue);
+    expect(bodyField.controller?.selection.baseOffset, 0);
+  });
+
+  testWidgets('shows always-visible copy buttons for each fenced block',
       (tester) async {
     final repository = _StubNoteRepository();
     String? clipboardText;
@@ -223,166 +611,50 @@ void main() {
           .setMockMethodCallHandler(SystemChannels.platform, null);
     });
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: NoteEditorPage(
-            createNote: CreateNote(
-              repository: repository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: repository,
-              deviceId: 'device-1',
-            ),
-            embedded: true,
-            onClose: () {},
-          ),
-        ),
-      ),
-    );
-
-    expect(find.text('Code'), findsOneWidget);
-    expect(find.text('Copy code'), findsOneWidget);
+    await tester
+        .pumpWidget(_buildEditor(repository: repository, embedded: true));
 
     await tester.enterText(
-      find.byType(TextField).last,
-      '[code:dart]\nprint("hi");\n[/code]',
+      _bodyField(),
+      '```dart\nprint("hi");\n```\n\n```\nprint("bye");\n```',
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Copy'));
+    expect(find.byTooltip('Copy code'), findsNWidgets(2));
+
+    await tester.tap(find.byTooltip('Copy code').at(1));
     await tester.pump();
 
-    expect(clipboardText, 'print("hi");');
-    expect(find.text('DART snippet copied'), findsOneWidget);
-  });
-
-  testWidgets('loads paragraph documents as separate editable blocks',
-      (tester) async {
-    final repository = _StubNoteRepository();
-    final note = Note(
-      id: 'note-1',
-      title: 'Doc note',
-      content: 'First paragraph\n\nSecond paragraph',
-      documentJson: paragraphDocumentFromEditableText(
-          'First paragraph\n\nSecond paragraph'),
-      createdAt: DateTime.utc(2026, 1, 1),
-      updatedAt: DateTime.utc(2026, 1, 1),
-      syncStatus: SyncStatus.synced,
-      contentHash: 'hash',
-      deviceId: 'device-1',
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: NoteEditorPage(
-            createNote: CreateNote(
-              repository: repository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: repository,
-              deviceId: 'device-1',
-            ),
-            note: note,
-          ),
-        ),
-      ),
-    );
-
-    expect(find.byKey(const ValueKey('document-block-editor')), findsOneWidget);
-    expect(find.byType(TextField), findsNWidgets(3));
-
-    final textFields =
-        tester.widgetList<TextField>(find.byType(TextField)).toList();
-    expect(textFields[1].controller?.text, 'First paragraph');
-    expect(textFields[2].controller?.text, 'Second paragraph');
-  });
-
-  testWidgets('editing a paragraph keeps the same text field controller',
-      (tester) async {
-    final repository = _StubNoteRepository();
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: NoteEditorPage(
-            createNote: CreateNote(
-              repository: repository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: repository,
-              deviceId: 'device-1',
-            ),
-          ),
-        ),
-      ),
-    );
-
-    final before =
-        tester.widgetList<TextField>(find.byType(TextField)).last.controller;
-
-    await tester.enterText(find.byType(TextField).last, 'Hello world');
-    await tester.pumpAndSettle();
-
-    final after =
-        tester.widgetList<TextField>(find.byType(TextField)).last.controller;
-
-    expect(identical(before, after), isTrue);
-    expect(after?.text, 'Hello world');
-  });
-
-  testWidgets('loads code blocks as dedicated editor cards', (tester) async {
-    final repository = _StubNoteRepository();
-    final note = Note(
-      id: 'note-2',
-      title: 'Code note',
-      content: 'Intro\n\n[code:dart]\nfinal value = 42;\n[/code]',
-      documentJson: NoteDocument(
-        version: 1,
-        blocks: const <NoteBlock>[
-          ParagraphBlock(id: 'p1', text: 'Intro'),
-          CodeBlock(id: 'c1', language: 'dart', code: 'final value = 42;'),
-        ],
-      ).toJsonString(),
-      createdAt: DateTime.utc(2026, 1, 1),
-      updatedAt: DateTime.utc(2026, 1, 1),
-      syncStatus: SyncStatus.synced,
-      contentHash: 'hash',
-      deviceId: 'device-1',
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: NoteEditorPage(
-            createNote: CreateNote(
-              repository: repository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: repository,
-              deviceId: 'device-1',
-            ),
-            note: note,
-          ),
-        ),
-      ),
-    );
-
-    expect(find.byKey(const ValueKey('document-block-editor')), findsOneWidget);
-    expect(find.text('DART'), findsOneWidget);
-    expect(find.text('Copy'), findsOneWidget);
-
-    final textFields =
-        tester.widgetList<TextField>(find.byType(TextField)).toList();
-    expect(textFields[1].controller?.text, 'Intro');
-    expect(textFields[2].controller?.text, 'final value = 42;');
+    expect(clipboardText, 'print("bye");');
+    expect(find.text('Code snippet copied'), findsOneWidget);
   });
 }
+
+Widget _buildEditor({
+  required NoteRepository repository,
+  Note? note,
+  bool embedded = false,
+}) {
+  return MaterialApp(
+    home: Scaffold(
+      body: NoteEditorPage(
+        createNote: CreateNote(
+          repository: repository,
+          deviceId: 'device-1',
+        ),
+        updateNote: UpdateNote(
+          repository: repository,
+          deviceId: 'device-1',
+        ),
+        note: note,
+        embedded: embedded,
+        onClose: embedded ? () {} : null,
+      ),
+    ),
+  );
+}
+
+Finder _bodyField() => find.byType(TextField).last;
 
 class _StubNoteRepository implements NoteRepository {
   @override
@@ -434,4 +706,19 @@ class _StubNoteRepository implements NoteRepository {
   @override
   Stream<List<Note>> watchDeletedNotes({String? folderPath}) =>
       const Stream<List<Note>>.empty();
+}
+
+class _RecordingNoteRepository extends _StubNoteRepository {
+  final List<Note> createdNotes = <Note>[];
+  final List<Note> updatedNotes = <Note>[];
+
+  @override
+  Future<void> create(Note note) async {
+    createdNotes.add(note);
+  }
+
+  @override
+  Future<void> update(Note note) async {
+    updatedNotes.add(note);
+  }
 }

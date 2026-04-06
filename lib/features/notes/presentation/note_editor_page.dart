@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -40,6 +41,8 @@ class _NoteEditorPageState extends State<NoteEditorPage>
     with WidgetsBindingObserver {
   static const Duration _autosaveDelay = Duration(milliseconds: 800);
 
+  final GlobalKey<_DocumentBlocksEditorState> _documentEditorKey =
+      GlobalKey<_DocumentBlocksEditorState>();
   late final TextEditingController _titleController;
   late final _MarkdownEditingController _contentController;
   late final FocusNode _titleFocusNode;
@@ -63,7 +66,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
       text: initialContent,
     );
     _titleFocusNode = FocusNode();
-    _contentFocusNode = FocusNode();
+    _contentFocusNode = FocusNode(skipTraversal: true);
     _persistedNote = widget.note;
     _lastPersistedSnapshot =
         widget.note == null ? null : _snapshotFromNote(widget.note!);
@@ -142,6 +145,14 @@ class _NoteEditorPageState extends State<NoteEditorPage>
         SingleActivator(LogicalKeyboardKey.keyS, control: true):
             _SaveNoteIntent(),
         SingleActivator(LogicalKeyboardKey.keyS, meta: true): _SaveNoteIntent(),
+        SingleActivator(LogicalKeyboardKey.keyB, control: true):
+            _ToggleBoldIntent(),
+        SingleActivator(LogicalKeyboardKey.keyB, meta: true):
+            _ToggleBoldIntent(),
+        SingleActivator(LogicalKeyboardKey.keyI, control: true):
+            _ToggleItalicIntent(),
+        SingleActivator(LogicalKeyboardKey.keyI, meta: true):
+            _ToggleItalicIntent(),
         SingleActivator(LogicalKeyboardKey.digit1, control: true):
             _ApplyHeadingIntent(1),
         SingleActivator(LogicalKeyboardKey.digit1, meta: true):
@@ -172,6 +183,18 @@ class _NoteEditorPageState extends State<NoteEditorPage>
               return null;
             },
           ),
+          _ToggleBoldIntent: CallbackAction<_ToggleBoldIntent>(
+            onInvoke: (_) {
+              _toggleInlineMarkdown('**', placeholder: 'bold text');
+              return null;
+            },
+          ),
+          _ToggleItalicIntent: CallbackAction<_ToggleItalicIntent>(
+            onInvoke: (_) {
+              _toggleInlineMarkdown('*', placeholder: 'italic text');
+              return null;
+            },
+          ),
           _CloseEditorIntent: CallbackAction<_CloseEditorIntent>(
             onInvoke: (_) {
               unawaited(_requestClose());
@@ -180,6 +203,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
           ),
         },
         child: _NoteEditorContent(
+          editorKey: _documentEditorKey,
           title: effectiveTitle.isEmpty ? title : effectiveTitle,
           derivedTitle: derivedTitle,
           manualTitleIsEmpty: manualTitle.isEmpty,
@@ -194,6 +218,10 @@ class _NoteEditorPageState extends State<NoteEditorPage>
           onRetrySave: _flushPendingChanges,
           onClose: widget.embedded ? _requestClose : null,
           applyHeading: _applyHeading,
+          toggleBold: () =>
+              _toggleInlineMarkdown('**', placeholder: 'bold text'),
+          toggleItalic: () =>
+              _toggleInlineMarkdown('*', placeholder: 'italic text'),
           toggleBulletList: _toggleBulletList,
           toggleQuote: _toggleQuote,
           insertCodeSnippet: _insertCodeSnippet,
@@ -517,18 +545,59 @@ class _NoteEditorPageState extends State<NoteEditorPage>
     });
   }
 
+  void _toggleInlineMarkdown(
+    String marker, {
+    required String placeholder,
+  }) {
+    _contentFocusNode.requestFocus();
+    final text = _contentController.text;
+    final selection = _validSelection(text);
+    final start =
+        math.min(selection.start, selection.end).clamp(0, text.length);
+    final end = math.max(selection.start, selection.end).clamp(0, text.length);
+    final selectedText = text.substring(start, end);
+
+    if (selection.isCollapsed) {
+      final replacement = '$marker$placeholder$marker';
+      final updatedText = text.replaceRange(start, end, replacement);
+      final placeholderStart = start + marker.length;
+      _contentController.value = TextEditingValue(
+        text: updatedText,
+        selection: TextSelection(
+          baseOffset: placeholderStart,
+          extentOffset: placeholderStart + placeholder.length,
+        ),
+      );
+      return;
+    }
+
+    final updatedText =
+        text.replaceRange(start, end, '$marker$selectedText$marker');
+    _contentController.value = TextEditingValue(
+      text: updatedText,
+      selection: TextSelection(
+        baseOffset: start + marker.length,
+        extentOffset: start + marker.length + selectedText.length,
+      ),
+    );
+  }
+
   void _insertCodeSnippet() {
+    if (_documentEditorKey.currentState case final editor?) {
+      editor.insertCodeBlock();
+      return;
+    }
+
     _contentFocusNode.requestFocus();
     final text = _contentController.text;
     final selection = _validSelection(text);
     final selectedText = selection.textInside(text);
-    final replacement = selectedText.isEmpty
-        ? '[code]\n\n[/code]'
-        : '[code]\n$selectedText\n[/code]';
+    final replacement =
+        selectedText.isEmpty ? '```\n\n```' : '```\n$selectedText\n```';
     final updatedText =
         selection.textBefore(text) + replacement + selection.textAfter(text);
     final cursorOffset = selectedText.isEmpty
-        ? selection.start + 7
+        ? selection.start + 4
         : selection.start + replacement.length;
 
     _contentController.value = TextEditingValue(
@@ -538,6 +607,13 @@ class _NoteEditorPageState extends State<NoteEditorPage>
   }
 
   Future<void> _copyCurrentCodeSnippet() async {
+    if (_documentEditorKey.currentState case final editor?) {
+      final copied = await editor.copyFocusedCodeBlock(context);
+      if (copied) {
+        return;
+      }
+    }
+
     final snippet = _contentController.currentCodeSnippet;
     if (snippet == null) {
       if (!mounted) {
@@ -649,6 +725,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
 
 class _NoteEditorContent extends StatelessWidget {
   const _NoteEditorContent({
+    required this.editorKey,
     required this.title,
     required this.derivedTitle,
     required this.manualTitleIsEmpty,
@@ -663,6 +740,8 @@ class _NoteEditorContent extends StatelessWidget {
     required this.onRetrySave,
     required this.onClose,
     required this.applyHeading,
+    required this.toggleBold,
+    required this.toggleItalic,
     required this.toggleBulletList,
     required this.toggleQuote,
     required this.insertCodeSnippet,
@@ -670,6 +749,7 @@ class _NoteEditorContent extends StatelessWidget {
     required this.onContentTap,
   });
 
+  final GlobalKey<_DocumentBlocksEditorState> editorKey;
   final String title;
   final String derivedTitle;
   final bool manualTitleIsEmpty;
@@ -684,6 +764,8 @@ class _NoteEditorContent extends StatelessWidget {
   final Future<bool> Function() onRetrySave;
   final Future<void> Function()? onClose;
   final void Function(int level) applyHeading;
+  final VoidCallback toggleBold;
+  final VoidCallback toggleItalic;
   final VoidCallback toggleBulletList;
   final VoidCallback toggleQuote;
   final VoidCallback insertCodeSnippet;
@@ -745,27 +827,6 @@ class _NoteEditorContent extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 16),
-        if (isDesktopEmbedded)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _EditorCommandButton(
-                  label: 'Code',
-                  onPressed: insertCodeSnippet,
-                ),
-                _EditorCommandButton(
-                  label: 'Copy code',
-                  onPressed: () {
-                    unawaited(copyCurrentCodeSnippet());
-                  },
-                ),
-              ],
-            ),
-          ),
-        if (isDesktopEmbedded) const SizedBox(height: 12),
         if (!isDesktopEmbedded)
           Align(
             alignment: Alignment.centerLeft,
@@ -786,16 +847,20 @@ class _NoteEditorContent extends StatelessWidget {
                   onPressed: () => applyHeading(3),
                 ),
                 _EditorCommandButton(
+                  label: 'Bold',
+                  onPressed: toggleBold,
+                ),
+                _EditorCommandButton(
+                  label: 'Italic',
+                  onPressed: toggleItalic,
+                ),
+                _EditorCommandButton(
                   label: 'List',
                   onPressed: toggleBulletList,
                 ),
                 _EditorCommandButton(
                   label: 'Quote',
                   onPressed: toggleQuote,
-                ),
-                _EditorCommandButton(
-                  label: 'Code',
-                  onPressed: insertCodeSnippet,
                 ),
               ],
             ),
@@ -804,6 +869,7 @@ class _NoteEditorContent extends StatelessWidget {
         Expanded(
           child: _MarkdownEditorPane(
             controller: contentController,
+            documentEditorKey: editorKey,
             focusNode: contentFocusNode,
             embedded: embedded,
             onTap: onContentTap,
@@ -905,42 +971,41 @@ class _ApplyHeadingIntent extends Intent {
   final int level;
 }
 
+class _ToggleBoldIntent extends Intent {
+  const _ToggleBoldIntent();
+}
+
+class _ToggleItalicIntent extends Intent {
+  const _ToggleItalicIntent();
+}
+
+class _SelectAllDocumentIntent extends Intent {
+  const _SelectAllDocumentIntent();
+}
+
+class _ClearSelectedDocumentIntent extends Intent {
+  const _ClearSelectedDocumentIntent();
+}
+
 class _MarkdownEditingController extends TextEditingController {
   _MarkdownEditingController({super.text});
 
   _CodeSnippetSelection? get currentCodeSnippet {
-    final lines = text.split('\n');
-    if (lines.isEmpty) {
+    if (text.isEmpty) {
       return null;
     }
 
-    final currentLineIndex = _activeLineIndex.clamp(0, lines.length - 1);
-    var start = -1;
-    for (var index = currentLineIndex; index >= 0; index--) {
-      final trimmed = lines[index].trim();
-      if (_isCodeSnippetClosingTag(trimmed)) {
-        return null;
-      }
-      final language = _codeSnippetLanguage(trimmed);
-      if (language != null) {
-        start = index;
-        break;
-      }
-    }
+    final selection = value.selection;
+    final offset = selection.isValid
+        ? selection.extentOffset.clamp(0, text.length)
+        : text.length;
 
-    if (start == -1) {
-      return null;
-    }
-
-    final language = _codeSnippetLanguage(lines[start].trim()) ?? '';
-    for (var index = start + 1; index < lines.length; index++) {
-      final trimmed = lines[index].trim();
-      if (_codeSnippetLanguage(trimmed) != null) {
-        return null;
-      }
-      if (_isCodeSnippetClosingTag(trimmed)) {
-        final code = lines.sublist(start + 1, index).join('\n');
-        return _CodeSnippetSelection(language: language, code: code);
+    for (final snippet in _parseFencedCodeSnippets(text)) {
+      if (snippet.containsOffset(offset)) {
+        return _CodeSnippetSelection(
+          language: snippet.language,
+          code: snippet.code,
+        );
       }
     }
 
@@ -961,26 +1026,32 @@ class _MarkdownEditingController extends TextEditingController {
 
     for (var index = 0; index < lines.length; index++) {
       final line = lines[index];
-      final trimmed = line.trim();
-      final codeSnippetLanguage = _codeSnippetLanguage(trimmed);
-      final isCodeSnippetOpeningTag = codeSnippetLanguage != null;
-      final isCodeSnippetClosingTag = _isCodeSnippetClosingTag(trimmed);
+      final lineState = _classifyCodeSnippetLine(
+        line.trim(),
+        isInsideCodeSnippet: isInsideCodeSnippet,
+      );
       spans.add(
         _buildLineSpan(
           line,
           baseStyle,
           context,
           isActiveLine: index == activeLineIndex,
-          isInsideCodeSnippet: isInsideCodeSnippet,
-          isCodeSnippetOpeningTag: isCodeSnippetOpeningTag,
-          isCodeSnippetClosingTag: isCodeSnippetClosingTag,
-          codeSnippetLanguage: codeSnippetLanguage ?? '',
+          isInsideCodeSnippet: lineState.kind == _CodeSnippetLineKind.body,
+          isCodeSnippetOpeningTag:
+              lineState.kind == _CodeSnippetLineKind.opening,
+          isCodeSnippetClosingTag:
+              lineState.kind == _CodeSnippetLineKind.closing,
+          codeSnippetLanguage: lineState.language,
         ),
       );
-      if (isCodeSnippetOpeningTag) {
-        isInsideCodeSnippet = true;
-      } else if (isCodeSnippetClosingTag) {
-        isInsideCodeSnippet = false;
+      switch (lineState.kind) {
+        case _CodeSnippetLineKind.opening:
+          isInsideCodeSnippet = true;
+        case _CodeSnippetLineKind.closing:
+          isInsideCodeSnippet = false;
+        case _CodeSnippetLineKind.body:
+        case _CodeSnippetLineKind.none:
+          break;
       }
       if (index < lines.length - 1) {
         spans.add(TextSpan(text: '\n', style: baseStyle));
@@ -1001,6 +1072,14 @@ class _MarkdownEditingController extends TextEditingController {
     required String codeSnippetLanguage,
   }) {
     if (isActiveLine) {
+      final activeHeadingSpan = _buildActiveHeadingLineSpan(
+        line,
+        baseStyle: baseStyle,
+        colorScheme: Theme.of(context).colorScheme,
+      );
+      if (activeHeadingSpan != null) {
+        return activeHeadingSpan;
+      }
       return TextSpan(text: line, style: baseStyle);
     }
 
@@ -1014,6 +1093,26 @@ class _MarkdownEditingController extends TextEditingController {
         isCodeSnippetClosingTag: isCodeSnippetClosingTag,
         codeSnippetLanguage: codeSnippetLanguage,
       ),
+    );
+  }
+
+  InlineSpan? _buildActiveHeadingLineSpan(
+    String line, {
+    required TextStyle baseStyle,
+    required ColorScheme colorScheme,
+  }) {
+    final trimmedLeft = line.trimLeft();
+    final headingMatch = RegExp(r'^(#{1,3})(\s+)(.*)$').firstMatch(trimmedLeft);
+    if (headingMatch == null) {
+      return null;
+    }
+
+    final level = headingMatch.group(1)!.length;
+    final headingStyle = _inactiveHeadingStyle(baseStyle, level);
+
+    return TextSpan(
+      text: line,
+      style: headingStyle.copyWith(color: colorScheme.onSurface),
     );
   }
 
@@ -1060,45 +1159,18 @@ List<InlineSpan> buildInactiveMarkdownLineSpans(
     final spacing = headingMatch.group(2)!;
     final content = headingMatch.group(3)!;
     final level = hashes.length;
-    final headingStyle = switch (level) {
-      1 => baseStyle.copyWith(
-          fontSize: (baseStyle.fontSize ?? 16) * 1.7,
-          fontWeight: FontWeight.w800,
-          height: 1.2,
-        ),
-      2 => baseStyle.copyWith(
-          fontSize: (baseStyle.fontSize ?? 16) * 1.35,
-          fontWeight: FontWeight.w700,
-          height: 1.28,
-        ),
-      _ => baseStyle.copyWith(
-          fontSize: (baseStyle.fontSize ?? 16) * 1.15,
-          fontWeight: FontWeight.w700,
-          height: 1.35,
-        ),
-    };
+    final headingStyle = _inactiveHeadingStyle(baseStyle, level);
 
     return [
       if (indent.isNotEmpty) TextSpan(text: indent, style: baseStyle),
       TextSpan(
-        text: hashes,
-        style: headingStyle.copyWith(
-          color: Colors.transparent,
-          fontSize: 0.1,
-          height: 1,
-        ),
+        text: '$hashes$spacing',
+        style: _hiddenMarkdownMarkerStyle(headingStyle),
       ),
-      TextSpan(
-        text: spacing,
-        style: headingStyle.copyWith(
-          color: Colors.transparent,
-          fontSize: 0.1,
-          height: 1,
-        ),
-      ),
-      TextSpan(
-        text: content,
-        style: headingStyle.copyWith(color: colorScheme.onSurface),
+      ..._buildInactiveInlineMarkdownSpans(
+        content,
+        baseStyle: headingStyle.copyWith(color: colorScheme.onSurface),
+        colorScheme: colorScheme,
       ),
     ];
   }
@@ -1116,9 +1188,10 @@ List<InlineSpan> buildInactiveMarkdownLineSpans(
       if (bulletIndent.isNotEmpty)
         TextSpan(text: bulletIndent, style: baseStyle),
       TextSpan(text: '• ', style: bulletStyle),
-      TextSpan(
-        text: content,
-        style: baseStyle.copyWith(color: colorScheme.onSurface),
+      ..._buildInactiveInlineMarkdownSpans(
+        content,
+        baseStyle: baseStyle.copyWith(color: colorScheme.onSurface),
+        colorScheme: colorScheme,
       ),
     ];
   }
@@ -1135,22 +1208,42 @@ List<InlineSpan> buildInactiveMarkdownLineSpans(
     return [
       if (quoteIndent.isNotEmpty) TextSpan(text: quoteIndent, style: baseStyle),
       TextSpan(text: '│ ', style: quoteMarkerStyle),
-      TextSpan(
-        text: content,
-        style: baseStyle.copyWith(
+      ..._buildInactiveInlineMarkdownSpans(
+        content,
+        baseStyle: baseStyle.copyWith(
           color: colorScheme.onSurface,
           fontStyle: FontStyle.italic,
         ),
+        colorScheme: colorScheme,
       ),
     ];
   }
 
-  return [
-    TextSpan(
-      text: line,
-      style: baseStyle.copyWith(color: colorScheme.onSurface),
-    ),
-  ];
+  return _buildInactiveInlineMarkdownSpans(
+    line,
+    baseStyle: baseStyle.copyWith(color: colorScheme.onSurface),
+    colorScheme: colorScheme,
+  );
+}
+
+TextStyle _inactiveHeadingStyle(TextStyle baseStyle, int level) {
+  return switch (level) {
+    1 => baseStyle.copyWith(
+        fontSize: (baseStyle.fontSize ?? 16) * 1.7,
+        fontWeight: FontWeight.w800,
+        height: 1.2,
+      ),
+    2 => baseStyle.copyWith(
+        fontSize: (baseStyle.fontSize ?? 16) * 1.35,
+        fontWeight: FontWeight.w700,
+        height: 1.28,
+      ),
+    _ => baseStyle.copyWith(
+        fontSize: (baseStyle.fontSize ?? 16) * 1.15,
+        fontWeight: FontWeight.w700,
+        height: 1.35,
+      ),
+  };
 }
 
 List<InlineSpan> _buildInactiveCodeSnippetLineSpans(
@@ -1168,19 +1261,13 @@ List<InlineSpan> _buildInactiveCodeSnippetLineSpans(
     fontWeight: FontWeight.w700,
     letterSpacing: 0.5,
   );
-  final codeStyle = baseStyle.copyWith(
-    color: colorScheme.onSurface,
-    fontFamily: 'monospace',
-    backgroundColor: colorScheme.surfaceContainerHigh,
-  );
+  final codeStyle = baseStyle.copyWith(color: colorScheme.onSurface);
 
   if (isCodeSnippetOpeningTag) {
     return [
       if (indent.isNotEmpty) TextSpan(text: indent, style: baseStyle),
       TextSpan(
-        text: codeSnippetLanguage.isEmpty
-            ? '[CODE]'
-            : '[${codeSnippetLanguage.toUpperCase()}]',
+        text: codeSnippetLanguage.isEmpty ? '```' : '```$codeSnippetLanguage',
         style: chipStyle,
       ),
     ];
@@ -1189,7 +1276,7 @@ List<InlineSpan> _buildInactiveCodeSnippetLineSpans(
   if (isCodeSnippetClosingTag) {
     return [
       if (indent.isNotEmpty) TextSpan(text: indent, style: baseStyle),
-      TextSpan(text: '[/CODE]', style: chipStyle),
+      TextSpan(text: '```', style: chipStyle),
     ];
   }
 
@@ -1197,6 +1284,79 @@ List<InlineSpan> _buildInactiveCodeSnippetLineSpans(
     if (indent.isNotEmpty) TextSpan(text: indent, style: baseStyle),
     TextSpan(text: trimmedLeft, style: codeStyle),
   ];
+}
+
+List<InlineSpan> _buildInactiveInlineMarkdownSpans(
+  String text, {
+  required TextStyle baseStyle,
+  required ColorScheme colorScheme,
+}) {
+  final spans = <InlineSpan>[];
+  final pattern = RegExp(
+    r'((?<!`)`[^`\n]+`(?!`)|\*\*[^*\n]+\*\*|\*[^*\n]+\*)',
+  );
+  var currentIndex = 0;
+
+  for (final match in pattern.allMatches(text)) {
+    if (match.start > currentIndex) {
+      spans.add(
+        TextSpan(
+          text: text.substring(currentIndex, match.start),
+          style: baseStyle,
+        ),
+      );
+    }
+
+    final token = match.group(0)!;
+    final marker = token.startsWith('**')
+        ? '**'
+        : token.startsWith('`')
+            ? '`'
+            : '*';
+    final content =
+        token.substring(marker.length, token.length - marker.length);
+
+    spans.add(
+      TextSpan(
+        text: marker,
+        style: _hiddenMarkdownMarkerStyle(baseStyle),
+      ),
+    );
+    spans.add(
+      TextSpan(
+        text: content,
+        style: token.startsWith('**')
+            ? baseStyle.copyWith(fontWeight: FontWeight.w700)
+            : token.startsWith('`')
+                ? baseStyle.copyWith(
+                    backgroundColor: colorScheme.surfaceContainerHighest,
+                  )
+                : baseStyle.copyWith(fontStyle: FontStyle.italic),
+      ),
+    );
+    spans.add(
+      TextSpan(
+        text: marker,
+        style: _hiddenMarkdownMarkerStyle(baseStyle),
+      ),
+    );
+
+    currentIndex = match.end;
+  }
+
+  if (currentIndex < text.length) {
+    spans.add(TextSpan(text: text.substring(currentIndex), style: baseStyle));
+  }
+
+  return spans;
+}
+
+TextStyle _hiddenMarkdownMarkerStyle(TextStyle baseStyle) {
+  return baseStyle.copyWith(
+    color: Colors.transparent,
+    fontSize: 0.1,
+    height: 1,
+  );
 }
 
 class _CodeSnippetSelection {
@@ -1209,24 +1369,157 @@ class _CodeSnippetSelection {
   final String code;
 }
 
+class _FencedCodeSnippet {
+  const _FencedCodeSnippet({
+    required this.language,
+    required this.code,
+    required this.startOffset,
+    required this.codeStartOffset,
+    required this.closingStartOffset,
+    required this.endOffset,
+  });
+
+  final String language;
+  final String code;
+  final int startOffset;
+  final int codeStartOffset;
+  final int closingStartOffset;
+  final int endOffset;
+
+  bool containsOffset(int offset) {
+    return offset >= startOffset && offset <= endOffset;
+  }
+}
+
+enum _CodeSnippetLineKind {
+  none,
+  opening,
+  body,
+  closing,
+}
+
+class _CodeSnippetLineState {
+  const _CodeSnippetLineState({
+    required this.kind,
+    this.language = '',
+  });
+
+  final _CodeSnippetLineKind kind;
+  final String language;
+}
+
+_CodeSnippetLineState _classifyCodeSnippetLine(
+  String line, {
+  required bool isInsideCodeSnippet,
+}) {
+  if (isInsideCodeSnippet) {
+    if (_isFencedCodeSnippetDelimiter(line)) {
+      return const _CodeSnippetLineState(kind: _CodeSnippetLineKind.closing);
+    }
+    return const _CodeSnippetLineState(kind: _CodeSnippetLineKind.body);
+  }
+
+  final language = _codeSnippetLanguage(line);
+  if (language != null) {
+    return _CodeSnippetLineState(
+      kind: _CodeSnippetLineKind.opening,
+      language: language,
+    );
+  }
+
+  return const _CodeSnippetLineState(kind: _CodeSnippetLineKind.none);
+}
+
 bool _isCodeSnippetClosingTag(String line) {
-  return line == '[/code]';
+  return _isFencedCodeSnippetDelimiter(line);
 }
 
 String? _codeSnippetLanguage(String line) {
-  final match = RegExp(r'^\[code(?::([^\]\s]+))?\]$').firstMatch(line);
-  return match?.group(1)?.trim() ?? (match != null ? '' : null);
+  final fencedMatch = RegExp(r'^```([^\s`]+)?$').firstMatch(line);
+  if (fencedMatch != null) {
+    return fencedMatch.group(1)?.trim() ?? '';
+  }
+  return null;
+}
+
+bool _isFencedCodeSnippetDelimiter(String line) {
+  return RegExp(r'^```([^\s`]+)?$').hasMatch(line);
+}
+
+List<_FencedCodeSnippet> _parseFencedCodeSnippets(String text) {
+  final lines = text.split('\n');
+  if (lines.isEmpty) {
+    return const <_FencedCodeSnippet>[];
+  }
+
+  final lineStartOffsets = <int>[];
+  var offset = 0;
+  for (var index = 0; index < lines.length; index++) {
+    lineStartOffsets.add(offset);
+    offset += lines[index].length;
+    if (index < lines.length - 1) {
+      offset += 1;
+    }
+  }
+
+  final snippets = <_FencedCodeSnippet>[];
+  var index = 0;
+  while (index < lines.length) {
+    final openingLine = lines[index].trim();
+    final language = _codeSnippetLanguage(openingLine);
+    if (language == null) {
+      index++;
+      continue;
+    }
+
+    var closingIndex = -1;
+    for (var scan = index + 1; scan < lines.length; scan++) {
+      if (_isFencedCodeSnippetDelimiter(lines[scan].trim())) {
+        closingIndex = scan;
+        break;
+      }
+    }
+
+    if (closingIndex == -1) {
+      index++;
+      continue;
+    }
+
+    final openingStartOffset = lineStartOffsets[index];
+    final openingEndOffset = openingStartOffset + lines[index].length;
+    final codeStartOffset =
+        closingIndex > index ? openingEndOffset + 1 : openingEndOffset;
+    final closingStartOffset = lineStartOffsets[closingIndex];
+    final closingEndOffset = closingStartOffset + lines[closingIndex].length;
+
+    snippets.add(
+      _FencedCodeSnippet(
+        language: language,
+        code: lines.sublist(index + 1, closingIndex).join('\n'),
+        startOffset: openingStartOffset,
+        codeStartOffset: codeStartOffset,
+        closingStartOffset: closingStartOffset,
+        endOffset: closingEndOffset,
+      ),
+    );
+
+    index = closingIndex + 1;
+  }
+
+  return List<_FencedCodeSnippet>.unmodifiable(snippets);
 }
 
 class _MarkdownEditorPane extends StatelessWidget {
   const _MarkdownEditorPane({
     required this.controller,
+    required this.documentEditorKey,
     required this.focusNode,
     required this.embedded,
     required this.onTap,
   });
 
   final TextEditingController controller;
+  final GlobalKey<_DocumentBlocksEditorState> documentEditorKey;
   final FocusNode focusNode;
   final bool embedded;
   final VoidCallback onTap;
@@ -1242,18 +1535,534 @@ class _MarkdownEditorPane extends StatelessWidget {
         borderRadius: embedded ? BorderRadius.zero : BorderRadius.circular(16),
         border: embedded ? null : Border.all(color: colorScheme.outlineVariant),
       ),
-      child: _DocumentBlocksEditor(
+      child: _UnifiedMarkdownEditor(
+        key: const ValueKey('document-block-editor'),
         controller: controller,
         focusNode: focusNode,
-        embedded: embedded,
         onTap: onTap,
       ),
     );
   }
 }
 
+class _UnifiedMarkdownEditor extends StatefulWidget {
+  const _UnifiedMarkdownEditor({
+    super.key,
+    required this.controller,
+    required this.focusNode,
+    required this.onTap,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final VoidCallback onTap;
+
+  @override
+  State<_UnifiedMarkdownEditor> createState() => _UnifiedMarkdownEditorState();
+}
+
+class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
+  static const EdgeInsets _editorContentPadding = EdgeInsets.all(18);
+  static const double _snippetHorizontalInset = 6;
+  static const double _snippetTopInset = 4;
+  int _selectedSlashCommandIndex = 0;
+  late final ScrollController _editorScrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    _editorScrollController = ScrollController()
+      ..addListener(_handleScrollChanged);
+    _lastRenderedText = widget.controller.text;
+    _lastRenderedSlashQuery = _slashCommandQuery;
+    widget.controller.addListener(_handleControllerChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _UnifiedMarkdownEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_handleControllerChanged);
+      widget.controller.addListener(_handleControllerChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    _editorScrollController
+      ..removeListener(_handleScrollChanged)
+      ..dispose();
+    widget.controller.removeListener(_handleControllerChanged);
+    super.dispose();
+  }
+
+  String _lastRenderedText = '';
+  String? _lastRenderedSlashQuery;
+
+  void _handleScrollChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _handleControllerChanged() {
+    final commands = _matchingSlashCommands;
+    final nextIndex = commands.isEmpty
+        ? 0
+        : _selectedSlashCommandIndex.clamp(0, commands.length - 1);
+    final nextSlashQuery = _slashCommandQuery;
+    final shouldRebuild = widget.controller.text != _lastRenderedText ||
+        nextSlashQuery != _lastRenderedSlashQuery ||
+        nextIndex != _selectedSlashCommandIndex;
+
+    _lastRenderedText = widget.controller.text;
+    _lastRenderedSlashQuery = nextSlashQuery;
+    if (!shouldRebuild) {
+      return;
+    }
+
+    if (nextIndex != _selectedSlashCommandIndex) {
+      setState(() {
+        _selectedSlashCommandIndex = nextIndex;
+      });
+      return;
+    }
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  bool get _isWholeDocumentSelected {
+    final selection = widget.controller.selection;
+    return selection.isValid &&
+        !selection.isCollapsed &&
+        selection.start == 0 &&
+        selection.end == widget.controller.text.length;
+  }
+
+  TextSelection get _selection => widget.controller.selection;
+
+  _LineRange? get _selectedLineRange {
+    final selection = _selection;
+    if (!selection.isValid || !selection.isCollapsed) {
+      return null;
+    }
+
+    final text = widget.controller.text;
+    final offset = selection.extentOffset.clamp(0, text.length);
+    final start = offset == 0
+        ? 0
+        : (() {
+            final lineStart = text.lastIndexOf('\n', offset - 1);
+            return lineStart == -1 ? 0 : lineStart + 1;
+          })();
+    final lineEnd = text.indexOf('\n', offset);
+    final end = lineEnd == -1 ? text.length : lineEnd;
+    return _LineRange(start: start, end: end);
+  }
+
+  String? get _slashCommandQuery {
+    final lineRange = _selectedLineRange;
+    if (lineRange == null) {
+      return null;
+    }
+
+    final lineText =
+        widget.controller.text.substring(lineRange.start, lineRange.end).trim();
+    if (!lineText.startsWith('/')) {
+      return null;
+    }
+    return lineText.substring(1).toLowerCase();
+  }
+
+  List<_SlashCommand> get _matchingSlashCommands {
+    final query = _slashCommandQuery;
+    if (query == null) {
+      return const <_SlashCommand>[];
+    }
+
+    return _slashCommands
+        .where((command) =>
+            query.isEmpty ||
+            command.label.toLowerCase().contains(query) ||
+            command.aliases.any((alias) => alias.contains(query)))
+        .toList(growable: false);
+  }
+
+  void _applySlashCommand(_SlashCommand command) {
+    final lineRange = _selectedLineRange;
+    if (lineRange == null) {
+      return;
+    }
+
+    switch (command.type) {
+      case _SlashCommandType.code:
+        final text = widget.controller.text;
+        const replacement = '```\n\n```';
+        final updatedText =
+            text.replaceRange(lineRange.start, lineRange.end, replacement);
+        final codeStart = lineRange.start + 4;
+        widget.controller.value = TextEditingValue(
+          text: updatedText,
+          selection: TextSelection.collapsed(offset: codeStart),
+        );
+        _selectedSlashCommandIndex = 0;
+        _focusEditorAt(codeStart);
+    }
+  }
+
+  void _focusEditorAt(int offset) {
+    final clampedOffset = offset.clamp(0, widget.controller.text.length);
+    widget.controller.selection =
+        TextSelection.collapsed(offset: clampedOffset);
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      FocusScope.of(context).requestFocus(widget.focusNode);
+      widget.focusNode.requestFocus();
+      widget.controller.selection =
+          TextSelection.collapsed(offset: clampedOffset);
+    });
+  }
+
+  bool _handleCodeFenceWordJump(KeyEvent event) {
+    final selection = widget.controller.selection;
+    if (!selection.isValid || !selection.isCollapsed) {
+      return false;
+    }
+
+    final isWordJump = HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed;
+    if (!isWordJump ||
+        (event.logicalKey != LogicalKeyboardKey.arrowLeft &&
+            event.logicalKey != LogicalKeyboardKey.arrowRight)) {
+      return false;
+    }
+
+    final lineRange = _selectedLineRange;
+    if (lineRange == null) {
+      return false;
+    }
+
+    final lineText =
+        widget.controller.text.substring(lineRange.start, lineRange.end);
+    if (!_isFencedCodeSnippetDelimiter(lineText.trim())) {
+      return false;
+    }
+
+    final offset =
+        selection.extentOffset.clamp(0, widget.controller.text.length);
+    final nextOffset = event.logicalKey == LogicalKeyboardKey.arrowLeft
+        ? lineRange.start
+        : lineRange.end;
+    if (offset == nextOffset) {
+      return false;
+    }
+
+    widget.controller.selection = TextSelection.collapsed(offset: nextOffset);
+    return true;
+  }
+
+  KeyEventResult _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    if (_isWholeDocumentSelected &&
+        (event.logicalKey == LogicalKeyboardKey.backspace ||
+            event.logicalKey == LogicalKeyboardKey.delete)) {
+      widget.controller.value = const TextEditingValue(
+        text: '',
+        selection: TextSelection.collapsed(offset: 0),
+      );
+      _focusEditorAt(0);
+      return KeyEventResult.handled;
+    }
+
+    if (_handleCodeFenceWordJump(event)) {
+      return KeyEventResult.handled;
+    }
+
+    final commands = _matchingSlashCommands;
+    if (commands.isEmpty) {
+      return KeyEventResult.ignored;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      setState(() {
+        _selectedSlashCommandIndex =
+            (_selectedSlashCommandIndex + 1) % commands.length;
+      });
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      setState(() {
+        _selectedSlashCommandIndex =
+            (_selectedSlashCommandIndex - 1 + commands.length) %
+                commands.length;
+      });
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+      _applySlashCommand(commands[_selectedSlashCommandIndex]);
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      widget.controller.selection = widget.controller.selection.copyWith(
+        baseOffset: widget.controller.selection.extentOffset,
+      );
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final commands = _matchingSlashCommands;
+    final style = Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.6);
+    final renderedTextSpan = style == null
+        ? null
+        : widget.controller.buildTextSpan(
+            context: context,
+            style: style,
+            withComposing: false,
+          );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final snippetOverlays = style == null || renderedTextSpan == null
+                  ? const <_SnippetOverlayGeometry>[]
+                  : _buildSnippetOverlayGeometry(
+                      context,
+                      text: widget.controller.text,
+                      textSpan: renderedTextSpan,
+                      maxWidth: constraints.maxWidth,
+                      scrollOffset: _editorScrollController.hasClients
+                          ? _editorScrollController.offset
+                          : 0,
+                    );
+
+              return Stack(
+                children: [
+                  for (final overlay in snippetOverlays)
+                    Positioned(
+                      left: overlay.left,
+                      right: overlay.right,
+                      top: overlay.top,
+                      height: overlay.height,
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHigh,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .outlineVariant
+                                  .withValues(alpha: 0.7),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTapDown: (_) {
+                        if (!widget.focusNode.hasFocus ||
+                            widget.controller.text.isEmpty) {
+                          _focusEditorAt(0);
+                        }
+                      },
+                      child: Focus(
+                        canRequestFocus: false,
+                        skipTraversal: true,
+                        onKeyEvent: (_, event) => _handleKeyEvent(event),
+                        child: TextField(
+                          controller: widget.controller,
+                          focusNode: widget.focusNode,
+                          scrollController: _editorScrollController,
+                          onTap: widget.onTap,
+                          inputFormatters: const [
+                            _MarkdownListEditingFormatter(),
+                          ],
+                          decoration: const InputDecoration(
+                            hintText:
+                                '# Untitled note\n\nStart writing in Markdown...',
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: _editorContentPadding,
+                          ),
+                          style: style,
+                          keyboardType: TextInputType.multiline,
+                          textInputAction: TextInputAction.newline,
+                          textAlignVertical: TextAlignVertical.top,
+                          minLines: null,
+                          maxLines: null,
+                          expands: true,
+                        ),
+                      ),
+                    ),
+                  ),
+                  for (final overlay in snippetOverlays)
+                    Positioned(
+                      top: overlay.top + 6,
+                      right: overlay.right + 6,
+                      child: IconButton(
+                        tooltip: 'Copy code',
+                        onPressed: () async {
+                          await Clipboard.setData(
+                            ClipboardData(text: overlay.snippet.code),
+                          );
+                          if (!context.mounted) {
+                            return;
+                          }
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                overlay.snippet.language.isEmpty
+                                    ? 'Code snippet copied'
+                                    : '${overlay.snippet.language.toUpperCase()} snippet copied',
+                              ),
+                            ),
+                          );
+                        },
+                        icon: const Icon(
+                          Icons.content_copy_outlined,
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+        if (commands.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+            child: _SlashCommandMenu(
+              commands: commands,
+              selectedIndex: _selectedSlashCommandIndex,
+              onSelected: _applySlashCommand,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+List<_SnippetOverlayGeometry> _buildSnippetOverlayGeometry(
+  BuildContext context, {
+  required String text,
+  required InlineSpan textSpan,
+  required double maxWidth,
+  required double scrollOffset,
+}) {
+  if (text.isEmpty || maxWidth <= 0) {
+    return const <_SnippetOverlayGeometry>[];
+  }
+
+  final snippets = _parseFencedCodeSnippets(text);
+  if (snippets.isEmpty) {
+    return const <_SnippetOverlayGeometry>[];
+  }
+
+  final contentWidth = math.max(0.0,
+      maxWidth - _UnifiedMarkdownEditorState._editorContentPadding.horizontal);
+  if (contentWidth == 0) {
+    return const <_SnippetOverlayGeometry>[];
+  }
+
+  final painter = TextPainter(
+    text: textSpan,
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+  )..layout(maxWidth: contentWidth);
+
+  final overlays = <_SnippetOverlayGeometry>[];
+  for (final snippet in snippets) {
+    final boxes = painter.getBoxesForSelection(
+      TextSelection(
+        baseOffset: snippet.startOffset,
+        extentOffset: snippet.endOffset,
+      ),
+    );
+    if (boxes.isEmpty) {
+      continue;
+    }
+
+    final topBox = boxes.first;
+    final bottomBox = boxes.last;
+
+    final top = topBox.top +
+        _UnifiedMarkdownEditorState._editorContentPadding.top -
+        scrollOffset -
+        _UnifiedMarkdownEditorState._snippetTopInset;
+    final bottom = snippetOverlayBottomForClosingFence(
+      closingFenceBox: bottomBox,
+      contentPaddingTop: _UnifiedMarkdownEditorState._editorContentPadding.top,
+      scrollOffset: scrollOffset,
+    );
+
+    overlays.add(
+      _SnippetOverlayGeometry(
+        snippet: snippet,
+        left: _UnifiedMarkdownEditorState._snippetHorizontalInset,
+        right: _UnifiedMarkdownEditorState._snippetHorizontalInset,
+        top: top,
+        height: math.max(0, bottom - top),
+      ),
+    );
+  }
+
+  return List<_SnippetOverlayGeometry>.unmodifiable(overlays);
+}
+
+@visibleForTesting
+double snippetOverlayBottomForClosingFence({
+  required TextBox closingFenceBox,
+  required double contentPaddingTop,
+  required double scrollOffset,
+}) {
+  return ((closingFenceBox.top + closingFenceBox.bottom) / 2) +
+      contentPaddingTop -
+      scrollOffset;
+}
+
+class _SnippetOverlayGeometry {
+  const _SnippetOverlayGeometry({
+    required this.snippet,
+    required this.left,
+    required this.right,
+    required this.top,
+    required this.height,
+  });
+
+  final _FencedCodeSnippet snippet;
+  final double left;
+  final double right;
+  final double top;
+  final double height;
+}
+
 class _DocumentBlocksEditor extends StatefulWidget {
   const _DocumentBlocksEditor({
+    super.key,
     required this.controller,
     required this.focusNode,
     required this.embedded,
@@ -1274,18 +2083,24 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
   bool _syncingFromMaster = false;
   bool _syncingToMaster = false;
   bool _rebuildScheduled = false;
+  int? _slashMenuBlockIndex;
+  int _selectedSlashCommandIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _rebuildBlocksFromMasterText();
+    HardwareKeyboard.instance.addHandler(_handleHardwareKeyEvent);
     widget.controller.addListener(_handleMasterChanged);
+    widget.focusNode.addListener(_handleExternalFocusRequest);
     widget.focusNode.addListener(_syncMasterFromBlocks);
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleHardwareKeyEvent);
     widget.controller.removeListener(_handleMasterChanged);
+    widget.focusNode.removeListener(_handleExternalFocusRequest);
     widget.focusNode.removeListener(_syncMasterFromBlocks);
     for (final block in _blocks) {
       block.dispose();
@@ -1341,8 +2156,7 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
         );
 
       for (final block in _blocks) {
-        block.controller.addListener(_syncMasterFromBlocks);
-        block.focusNode.addListener(_syncMasterFromBlocks);
+        _attachBlockListeners(block);
       }
       _syncSelectionsFromMaster();
     } finally {
@@ -1367,7 +2181,9 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
   void _syncBlockTextsFromMaster(List<NoteBlock> parsedBlocks) {
     _syncingFromMaster = true;
     try {
-      for (var index = 0; index < _blocks.length && index < parsedBlocks.length; index++) {
+      for (var index = 0;
+          index < _blocks.length && index < parsedBlocks.length;
+          index++) {
         _blocks[index].syncFromNoteBlock(parsedBlocks[index]);
       }
     } finally {
@@ -1377,9 +2193,14 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
 
   void _syncSelectionsFromMaster() {
     final selection = widget.controller.selection;
-    final targetOffset = selection.isValid
-        ? selection.extentOffset.clamp(0, widget.controller.text.length)
-        : widget.controller.text.length;
+    final normalizedSelection = selection.isValid
+        ? TextSelection(
+            baseOffset:
+                selection.baseOffset.clamp(0, widget.controller.text.length),
+            extentOffset:
+                selection.extentOffset.clamp(0, widget.controller.text.length),
+          )
+        : TextSelection.collapsed(offset: widget.controller.text.length);
 
     var consumed = 0;
     for (var index = 0; index < _blocks.length; index++) {
@@ -1390,15 +2211,34 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
       final separatorLength = isLast ? 0 : 2;
       final rangeEnd = blockEnd + separatorLength;
 
-      if (targetOffset <= rangeEnd || isLast) {
-        final localOffset =
-            block.localSelectionOffset((targetOffset - consumed).clamp(0, length));
-        if (block.controller.selection.baseOffset != localOffset ||
-            block.controller.selection.extentOffset != localOffset) {
-          block.controller.selection =
-              TextSelection.collapsed(offset: localOffset);
+      if (normalizedSelection.isCollapsed) {
+        final targetOffset = normalizedSelection.extentOffset;
+        if (targetOffset <= rangeEnd || isLast) {
+          final localOffset = block
+              .localSelectionOffset((targetOffset - consumed).clamp(0, length));
+          if (block.controller.selection.baseOffset != localOffset ||
+              block.controller.selection.extentOffset != localOffset) {
+            block.controller.selection =
+                TextSelection.collapsed(offset: localOffset);
+          }
+        } else if (!block.controller.selection.isCollapsed ||
+            block.controller.selection.extentOffset != 0) {
+          block.controller.selection = const TextSelection.collapsed(offset: 0);
         }
-        return;
+      } else {
+        final localBase = block.localSelectionOffset(
+          (normalizedSelection.baseOffset - consumed).clamp(0, length),
+        );
+        final localExtent = block.localSelectionOffset(
+          (normalizedSelection.extentOffset - consumed).clamp(0, length),
+        );
+        final nextSelection = TextSelection(
+          baseOffset: localBase,
+          extentOffset: localExtent,
+        );
+        if (block.controller.selection != nextSelection) {
+          block.controller.selection = nextSelection;
+        }
       }
 
       consumed = rangeEnd;
@@ -1411,10 +2251,16 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
     }
 
     final text = _blocks.map((block) => block.rawText).join('\n\n');
-    final focusedIndex =
+    final effectiveFocusedIndex =
         _blocks.indexWhere((block) => block.focusNode.hasFocus);
-    final effectiveFocusedIndex = widget.focusNode.hasFocus ? 0 : focusedIndex;
-    var selectionOffset = text.length;
+    var nextSelection = widget.controller.selection.isValid
+        ? TextSelection(
+            baseOffset:
+                widget.controller.selection.baseOffset.clamp(0, text.length),
+            extentOffset:
+                widget.controller.selection.extentOffset.clamp(0, text.length),
+          )
+        : TextSelection.collapsed(offset: text.length);
 
     if (effectiveFocusedIndex != -1) {
       var consumed = 0;
@@ -1423,21 +2269,26 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
       }
       final activeSelection =
           _blocks[effectiveFocusedIndex].controller.selection;
-      final localOffset = activeSelection.isValid
-          ? activeSelection.extentOffset.clamp(
-              0,
-              _blocks[effectiveFocusedIndex].controller.text.length,
-            )
-          : _blocks[effectiveFocusedIndex].controller.text.length;
-      selectionOffset =
-          consumed + _blocks[effectiveFocusedIndex].rawSelectionOffset(localOffset);
+      final textLength = _blocks[effectiveFocusedIndex].controller.text.length;
+      final localBase = activeSelection.isValid
+          ? activeSelection.baseOffset.clamp(0, textLength)
+          : textLength;
+      final localExtent = activeSelection.isValid
+          ? activeSelection.extentOffset.clamp(0, textLength)
+          : textLength;
+      nextSelection = TextSelection(
+        baseOffset: consumed +
+            _blocks[effectiveFocusedIndex].rawSelectionOffset(localBase),
+        extentOffset: consumed +
+            _blocks[effectiveFocusedIndex].rawSelectionOffset(localExtent),
+      );
     }
 
     _syncingToMaster = true;
     try {
       widget.controller.value = TextEditingValue(
         text: text,
-        selection: TextSelection.collapsed(offset: selectionOffset),
+        selection: nextSelection,
       );
     } finally {
       _syncingToMaster = false;
@@ -1453,77 +2304,987 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
     }
   }
 
+  int _activeBlockIndex() {
+    for (var index = 0; index < _blocks.length; index++) {
+      if (_blocks[index].focusNode.hasFocus) {
+        return index;
+      }
+    }
+
+    return _blocks.isEmpty ? -1 : _blocks.length - 1;
+  }
+
+  void _handleExternalFocusRequest() {
+    if (!widget.focusNode.hasFocus || _blocks.isEmpty) {
+      return;
+    }
+    if (!_isMasterSelectionCollapsed) {
+      return;
+    }
+    if (_blocks.any((block) => block.focusNode.hasFocus)) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !widget.focusNode.hasFocus) {
+        return;
+      }
+      _focusBlockForMasterSelection();
+    });
+  }
+
+  void _attachBlockListeners(_DocumentEditorBlock block) {
+    block.controller.addListener(_syncMasterFromBlocks);
+    block.languageController.addListener(_syncMasterFromBlocks);
+    block.focusNode.addListener(_syncMasterFromBlocks);
+  }
+
+  bool get _isMasterSelectionCollapsed {
+    final selection = widget.controller.selection;
+    return !selection.isValid || selection.isCollapsed;
+  }
+
+  bool get _isWholeDocumentSelected {
+    final selection = widget.controller.selection;
+    return selection.isValid &&
+        !selection.isCollapsed &&
+        selection.start == 0 &&
+        selection.end == widget.controller.text.length;
+  }
+
+  bool get _hasEditorFocus {
+    return widget.focusNode.hasFocus ||
+        _blocks.any((block) => block.focusNode.hasFocus);
+  }
+
+  bool get _hasDocumentSelection {
+    final selection = widget.controller.selection;
+    return selection.isValid && !selection.isCollapsed;
+  }
+
+  void _selectAllBlocks() {
+    widget.controller.selection = TextSelection(
+        baseOffset: 0, extentOffset: widget.controller.text.length);
+    for (final block in _blocks) {
+      block.controller.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: block.controller.text.length,
+      );
+    }
+    setState(() {});
+    FocusScope.of(context).requestFocus(widget.focusNode);
+  }
+
+  void _clearDocumentSelection() {
+    if (!_hasDocumentSelection) {
+      return;
+    }
+
+    final selection = widget.controller.selection;
+    final start = math.min(selection.start, selection.end);
+    final end = math.max(selection.start, selection.end);
+    final updatedText = widget.controller.text.replaceRange(start, end, '');
+
+    widget.controller.value = TextEditingValue(
+      text: updatedText,
+      selection:
+          TextSelection.collapsed(offset: start.clamp(0, updatedText.length)),
+    );
+    _rebuildBlocksFromMasterText();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _focusBlockForMasterSelection();
+    });
+  }
+
+  void _collapseDocumentSelectionToExtent() {
+    final selection = widget.controller.selection;
+    if (!selection.isValid || selection.isCollapsed) {
+      return;
+    }
+
+    final collapsed = TextSelection.collapsed(
+      offset: selection.extentOffset.clamp(0, widget.controller.text.length),
+    );
+    widget.controller.selection = collapsed;
+    _syncSelectionsFromMaster();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _focusBlockForMasterSelection();
+    });
+  }
+
+  bool _handleHardwareKeyEvent(KeyEvent event) {
+    if (!_hasEditorFocus || event is! KeyDownEvent) {
+      return false;
+    }
+
+    final activeIndex = _activeBlockIndex();
+    if (_isSelectAllShortcut(event)) {
+      _selectAllBlocks();
+      return true;
+    }
+
+    if (_hasDocumentSelection &&
+        !HardwareKeyboard.instance.isShiftPressed &&
+        (event.logicalKey == LogicalKeyboardKey.arrowRight ||
+            event.logicalKey == LogicalKeyboardKey.arrowDown)) {
+      _collapseDocumentSelectionToExtent();
+      return true;
+    }
+
+    if (_hasDocumentSelection &&
+        HardwareKeyboard.instance.isShiftPressed &&
+        (event.logicalKey == LogicalKeyboardKey.arrowUp ||
+            event.logicalKey == LogicalKeyboardKey.arrowDown)) {
+      _extendDocumentSelectionByBlock(
+        upward: event.logicalKey == LogicalKeyboardKey.arrowUp,
+      );
+      return true;
+    }
+
+    if (HardwareKeyboard.instance.isShiftPressed &&
+        activeIndex != -1 &&
+        !_blocks[activeIndex].isCode) {
+      final block = _blocks[activeIndex];
+      final selection = block.controller.selection;
+      final previousIsCode = activeIndex > 0 && _blocks[activeIndex - 1].isCode;
+      final nextIsCode =
+          activeIndex < _blocks.length - 1 && _blocks[activeIndex + 1].isCode;
+
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp &&
+          previousIsCode &&
+          _isCaretOnFirstLine(block)) {
+        _extendSelectionToAdjacentBlock(activeIndex, upward: true);
+        return true;
+      }
+
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown &&
+          nextIsCode &&
+          _isSelectionExtentAtBlockEnd(block)) {
+        _extendSelectionToAdjacentBlock(activeIndex, upward: false);
+        return true;
+      }
+    }
+
+    if (_hasDocumentSelection &&
+        (event.logicalKey == LogicalKeyboardKey.backspace ||
+            event.logicalKey == LogicalKeyboardKey.delete)) {
+      _clearDocumentSelection();
+      return true;
+    }
+
+    return false;
+  }
+
+  void insertCodeBlock() {
+    final activeIndex = _activeBlockIndex();
+    if (activeIndex != -1 &&
+        !_blocks[activeIndex].isCode &&
+        _blocks[activeIndex].controller.text.trim().isEmpty) {
+      convertBlockToCode(activeIndex, clearText: true);
+      return;
+    }
+
+    final insertIndex = activeIndex == -1 ? 0 : activeIndex + 1;
+    final block = _DocumentEditorBlock(
+      controller: TextEditingController(),
+      languageController: TextEditingController(),
+      focusNode: FocusNode(),
+      isCode: true,
+    );
+    _attachBlockListeners(block);
+
+    setState(() {
+      _blocks.insert(insertIndex, block);
+    });
+    _syncMasterFromBlocks();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _focusBlock(insertIndex.clamp(0, _blocks.length - 1), placeAtEnd: false);
+    });
+  }
+
+  void convertBlockToCode(
+    int index, {
+    bool clearText = false,
+    bool ensureTrailingParagraph = false,
+  }) {
+    if (index < 0 || index >= _blocks.length || _blocks[index].isCode) {
+      return;
+    }
+
+    final existing = _blocks[index];
+    final replacement = _DocumentEditorBlock(
+      controller: TextEditingController(
+          text: clearText ? '' : existing.controller.text),
+      languageController: TextEditingController(),
+      focusNode: FocusNode(),
+      isCode: true,
+    );
+    _attachBlockListeners(replacement);
+
+    setState(() {
+      _blocks[index] = replacement;
+      if (ensureTrailingParagraph && index == _blocks.length - 1) {
+        final trailingParagraph = _DocumentEditorBlock(
+          controller: _MarkdownEditingController(text: ''),
+          languageController: TextEditingController(),
+          focusNode: FocusNode(),
+          isCode: false,
+        );
+        _attachBlockListeners(trailingParagraph);
+        _blocks.add(trailingParagraph);
+      }
+      _slashMenuBlockIndex = null;
+      _selectedSlashCommandIndex = 0;
+    });
+    existing.dispose();
+    _syncMasterFromBlocks();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _focusBlock(index.clamp(0, _blocks.length - 1), placeAtEnd: false);
+    });
+  }
+
+  void removeBlock(int index) {
+    if (index < 0 || index >= _blocks.length) {
+      return;
+    }
+
+    final removed = _blocks.removeAt(index);
+    if (_blocks.isEmpty) {
+      final fallback = _DocumentEditorBlock(
+        controller: _MarkdownEditingController(text: ''),
+        languageController: TextEditingController(),
+        focusNode: FocusNode(),
+        isCode: false,
+      );
+      _attachBlockListeners(fallback);
+      _blocks.add(fallback);
+    }
+
+    setState(() {});
+    removed.dispose();
+    _syncMasterFromBlocks();
+  }
+
+  void _removeBlockAndFocus(int index) {
+    if (index < 0 || index >= _blocks.length) {
+      return;
+    }
+
+    final targetIndex = index > 0 ? index - 1 : 0;
+    final placeAtEnd = index > 0;
+    removeBlock(index);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _focusBlock(targetIndex.clamp(0, _blocks.length - 1),
+          placeAtEnd: placeAtEnd);
+    });
+  }
+
+  void _insertParagraphAfter(int index) {
+    final paragraph = _DocumentEditorBlock(
+      controller: _MarkdownEditingController(text: ''),
+      languageController: TextEditingController(),
+      focusNode: FocusNode(),
+      isCode: false,
+    );
+    _attachBlockListeners(paragraph);
+    setState(() {
+      _blocks.insert(index + 1, paragraph);
+    });
+    _syncMasterFromBlocks();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _focusBlock((index + 1).clamp(0, _blocks.length - 1), placeAtEnd: false);
+    });
+  }
+
+  void _focusBlock(int index, {required bool placeAtEnd}) {
+    if (index < 0 || index >= _blocks.length) {
+      return;
+    }
+
+    final block = _blocks[index];
+    block.focusNode.requestFocus();
+    final offset = placeAtEnd ? block.controller.text.length : 0;
+    block.controller.selection = TextSelection.collapsed(offset: offset);
+  }
+
+  void _focusBlockAtFirstLineEnd(int index) {
+    if (index < 0 || index >= _blocks.length) {
+      return;
+    }
+
+    final block = _blocks[index];
+    final lineEnd = block.controller.text.indexOf('\n');
+    final offset = lineEnd == -1 ? block.controller.text.length : lineEnd;
+    block.focusNode.requestFocus();
+    block.controller.selection = TextSelection.collapsed(offset: offset);
+  }
+
+  void _focusBlockForMasterSelection() {
+    final selection = widget.controller.selection;
+    final targetOffset = selection.isValid
+        ? selection.extentOffset.clamp(0, widget.controller.text.length)
+        : widget.controller.text.length;
+
+    var consumed = 0;
+    for (var index = 0; index < _blocks.length; index++) {
+      final block = _blocks[index];
+      final length = block.rawText.length;
+      final isLast = index == _blocks.length - 1;
+      final blockEnd = consumed + length;
+      final separatorLength = isLast ? 0 : 2;
+      final rangeEnd = blockEnd + separatorLength;
+
+      if (targetOffset <= rangeEnd || isLast) {
+        final localOffset = block
+            .localSelectionOffset((targetOffset - consumed).clamp(0, length));
+        block.focusNode.requestFocus();
+        block.controller.selection =
+            TextSelection.collapsed(offset: localOffset);
+        return;
+      }
+
+      consumed = rangeEnd;
+    }
+  }
+
+  void _handleParagraphChanged(int index, _DocumentEditorBlock block) {
+    final commands = _matchingSlashCommands(block);
+    final nextBlockIndex = commands.isEmpty ? null : index;
+    final nextSelectedIndex = commands.isEmpty
+        ? 0
+        : (_slashMenuBlockIndex == index
+            ? _selectedSlashCommandIndex.clamp(0, commands.length - 1)
+            : 0);
+    if (_slashMenuBlockIndex == nextBlockIndex &&
+        _selectedSlashCommandIndex == nextSelectedIndex) {
+      return;
+    }
+    setState(() {
+      _slashMenuBlockIndex = nextBlockIndex;
+      _selectedSlashCommandIndex = nextSelectedIndex;
+    });
+  }
+
+  bool _isCaretOnFirstLine(_DocumentEditorBlock block) {
+    final selection = block.controller.selection;
+    if (!selection.isValid) {
+      return false;
+    }
+
+    final offset =
+        selection.extentOffset.clamp(0, block.controller.text.length);
+    if (offset == 0) {
+      return true;
+    }
+
+    return block.controller.text.lastIndexOf('\n', offset - 1) == -1;
+  }
+
+  bool _isSelectionExtentAtBlockEnd(_DocumentEditorBlock block) {
+    final selection = block.controller.selection;
+    if (!selection.isValid) {
+      return false;
+    }
+    return selection.extentOffset == block.controller.text.length;
+  }
+
+  bool _isSelectAllShortcut(KeyEvent event) {
+    return event.logicalKey == LogicalKeyboardKey.keyA &&
+        (HardwareKeyboard.instance.isControlPressed ||
+            HardwareKeyboard.instance.isMetaPressed);
+  }
+
+  int _blockStartOffset(int index) {
+    var consumed = 0;
+    for (var scan = 0; scan < index; scan++) {
+      consumed += _blocks[scan].rawText.length + 2;
+    }
+    return consumed;
+  }
+
+  int _blockEndOffset(int index) {
+    return _blockStartOffset(index) + _blocks[index].rawText.length;
+  }
+
+  int _blockIndexForDocumentOffset(int offset) {
+    var consumed = 0;
+    for (var index = 0; index < _blocks.length; index++) {
+      final length = _blocks[index].rawText.length;
+      final isLast = index == _blocks.length - 1;
+      final rangeEnd = consumed + length + (isLast ? 0 : 2);
+      if (offset <= rangeEnd || isLast) {
+        return index;
+      }
+      consumed = rangeEnd;
+    }
+    return _blocks.isEmpty ? -1 : _blocks.length - 1;
+  }
+
+  void _extendDocumentSelectionByBlock({required bool upward}) {
+    final selection = widget.controller.selection;
+    if (!selection.isValid || _blocks.isEmpty) {
+      return;
+    }
+
+    final currentExtent =
+        selection.extentOffset.clamp(0, widget.controller.text.length);
+    final currentIndex = _blockIndexForDocumentOffset(currentExtent);
+    if (currentIndex == -1) {
+      return;
+    }
+
+    final currentBlockStart = _blockStartOffset(currentIndex);
+    final currentBlockEnd = _blockEndOffset(currentIndex);
+
+    final nextExtent = switch ((
+      upward,
+      currentExtent <= currentBlockStart,
+      currentExtent >= currentBlockEnd
+    )) {
+      (true, true, _) when currentIndex > 0 =>
+        _blockStartOffset(currentIndex - 1),
+      (true, _, _) => currentBlockStart,
+      (false, _, true) when currentIndex < _blocks.length - 1 =>
+        _blockEndOffset(currentIndex + 1),
+      (false, _, _) => currentBlockEnd,
+    };
+
+    widget.controller.selection = TextSelection(
+      baseOffset: selection.baseOffset.clamp(0, widget.controller.text.length),
+      extentOffset: nextExtent.clamp(0, widget.controller.text.length),
+    );
+    _syncSelectionsFromMaster();
+    setState(() {});
+  }
+
+  void _extendSelectionToAdjacentBlock(int index, {required bool upward}) {
+    final selection = widget.controller.selection;
+    final activeBlock = _blocks[index];
+    final blockStart = _blockStartOffset(index);
+    final localSelection = activeBlock.controller.selection;
+    final currentExtent = blockStart +
+        activeBlock.rawSelectionOffset(
+          localSelection.isValid
+              ? localSelection.extentOffset
+                  .clamp(0, activeBlock.controller.text.length)
+              : activeBlock.controller.text.length,
+        );
+    final nextExtent = upward
+        ? _blockStartOffset(index - 1)
+        : _blockStartOffset(index + 1) + _blocks[index + 1].rawText.length;
+
+    final baseOffset = selection.isValid ? selection.baseOffset : currentExtent;
+    widget.controller.selection = TextSelection(
+      baseOffset: baseOffset.clamp(0, widget.controller.text.length),
+      extentOffset: nextExtent.clamp(0, widget.controller.text.length),
+    );
+    _syncSelectionsFromMaster();
+    setState(() {});
+  }
+
+  KeyEventResult _handleParagraphKeyEvent(
+    int index,
+    _DocumentEditorBlock block,
+    KeyEvent event,
+  ) {
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    if (_isSelectAllShortcut(event)) {
+      _selectAllBlocks();
+      return KeyEventResult.handled;
+    }
+
+    if (_hasDocumentSelection &&
+        (event.logicalKey == LogicalKeyboardKey.backspace ||
+            event.logicalKey == LogicalKeyboardKey.delete)) {
+      _clearDocumentSelection();
+      return KeyEventResult.handled;
+    }
+
+    final commands = _matchingSlashCommands(block);
+    if (commands.isNotEmpty) {
+      if (_slashMenuBlockIndex != index) {
+        _slashMenuBlockIndex = index;
+        _selectedSlashCommandIndex = 0;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        setState(() {
+          _selectedSlashCommandIndex =
+              (_selectedSlashCommandIndex + 1) % commands.length;
+        });
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        setState(() {
+          _selectedSlashCommandIndex =
+              (_selectedSlashCommandIndex - 1 + commands.length) %
+                  commands.length;
+        });
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.enter ||
+          event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+        _applySlashCommand(index, commands[_selectedSlashCommandIndex]);
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        setState(() {
+          _slashMenuBlockIndex = null;
+          _selectedSlashCommandIndex = 0;
+        });
+        return KeyEventResult.handled;
+      }
+    }
+
+    final selection = block.controller.selection;
+    if (!selection.isValid || !selection.isCollapsed) {
+      return KeyEventResult.ignored;
+    }
+
+    final shiftPressed = HardwareKeyboard.instance.isShiftPressed;
+    final previousIsCode = index > 0 && _blocks[index - 1].isCode;
+    if (shiftPressed &&
+        event.logicalKey == LogicalKeyboardKey.arrowUp &&
+        previousIsCode &&
+        _isCaretOnFirstLine(block)) {
+      _extendSelectionToAdjacentBlock(index, upward: true);
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp &&
+        index > 0 &&
+        ((previousIsCode && _isCaretOnFirstLine(block)) ||
+            selection.extentOffset == 0)) {
+      _focusBlock(index - 1, placeAtEnd: true);
+      return KeyEventResult.handled;
+    }
+
+    final nextIsCode = index < _blocks.length - 1 && _blocks[index + 1].isCode;
+    if (shiftPressed &&
+        event.logicalKey == LogicalKeyboardKey.arrowDown &&
+        nextIsCode &&
+        _isSelectionExtentAtBlockEnd(block)) {
+      _extendSelectionToAdjacentBlock(index, upward: false);
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown &&
+        selection.extentOffset == block.controller.text.length &&
+        index < _blocks.length - 1) {
+      _focusBlock(index + 1, placeAtEnd: false);
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleCodeKeyEvent(
+    int index,
+    _DocumentEditorBlock block,
+    KeyEvent event,
+  ) {
+    if (event is! KeyDownEvent || !block.isCode) {
+      return KeyEventResult.ignored;
+    }
+
+    if (_isSelectAllShortcut(event)) {
+      _selectAllBlocks();
+      return KeyEventResult.handled;
+    }
+
+    if (_hasDocumentSelection &&
+        (event.logicalKey == LogicalKeyboardKey.backspace ||
+            event.logicalKey == LogicalKeyboardKey.delete)) {
+      _clearDocumentSelection();
+      return KeyEventResult.handled;
+    }
+
+    final selection = block.controller.selection;
+    if (!selection.isValid || !selection.isCollapsed) {
+      return KeyEventResult.ignored;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown &&
+        selection.extentOffset == block.controller.text.length) {
+      if (index == _blocks.length - 1) {
+        _insertParagraphAfter(index);
+      } else {
+        final nextBlock = _blocks[index + 1];
+        if (!nextBlock.isCode && nextBlock.controller.text.isNotEmpty) {
+          _focusBlockAtFirstLineEnd(index + 1);
+        } else {
+          _focusBlock(index + 1, placeAtEnd: false);
+        }
+      }
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp &&
+        selection.extentOffset == 0 &&
+        index > 0) {
+      _focusBlock(index - 1, placeAtEnd: true);
+      return KeyEventResult.handled;
+    }
+
+    if ((event.logicalKey == LogicalKeyboardKey.backspace ||
+            event.logicalKey == LogicalKeyboardKey.delete) &&
+        block.controller.text.isEmpty) {
+      _removeBlockAndFocus(index);
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  void _applySlashCommand(int index, _SlashCommand command) {
+    switch (command.type) {
+      case _SlashCommandType.code:
+        _convertSelectionLineToCode(index, ensureTrailingParagraph: true);
+    }
+  }
+
+  void _convertSelectionLineToCode(
+    int index, {
+    required bool ensureTrailingParagraph,
+  }) {
+    if (index < 0 || index >= _blocks.length) {
+      return;
+    }
+
+    final existing = _blocks[index];
+    if (existing.isCode) {
+      return;
+    }
+
+    final lineRange = _selectedLineRange(existing);
+    if (lineRange == null) {
+      convertBlockToCode(
+        index,
+        clearText: true,
+        ensureTrailingParagraph: ensureTrailingParagraph,
+      );
+      return;
+    }
+
+    final fullText = existing.controller.text;
+    final beforeText = fullText
+        .substring(0, lineRange.start)
+        .replaceFirst(RegExp(r'\n+$'), '');
+    final afterText =
+        fullText.substring(lineRange.end).replaceFirst(RegExp(r'^\n+'), '');
+
+    final replacementBlocks = <_DocumentEditorBlock>[
+      if (beforeText.isNotEmpty)
+        _DocumentEditorBlock(
+          controller: _MarkdownEditingController(text: beforeText),
+          languageController: TextEditingController(),
+          focusNode: FocusNode(),
+          isCode: false,
+        ),
+      _DocumentEditorBlock(
+        controller: TextEditingController(),
+        languageController: TextEditingController(),
+        focusNode: FocusNode(),
+        isCode: true,
+      ),
+      if (afterText.isNotEmpty)
+        _DocumentEditorBlock(
+          controller: _MarkdownEditingController(text: afterText),
+          languageController: TextEditingController(),
+          focusNode: FocusNode(),
+          isCode: false,
+        )
+      else if (ensureTrailingParagraph && index == _blocks.length - 1)
+        _DocumentEditorBlock(
+          controller: _MarkdownEditingController(text: ''),
+          languageController: TextEditingController(),
+          focusNode: FocusNode(),
+          isCode: false,
+        ),
+    ];
+
+    for (final block in replacementBlocks) {
+      _attachBlockListeners(block);
+    }
+
+    final codeBlockIndex = index + (beforeText.isNotEmpty ? 1 : 0);
+
+    setState(() {
+      _blocks
+        ..removeAt(index)
+        ..insertAll(index, replacementBlocks);
+      _slashMenuBlockIndex = null;
+      _selectedSlashCommandIndex = 0;
+    });
+    existing.dispose();
+    _syncMasterFromBlocks();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _focusBlock(codeBlockIndex.clamp(0, _blocks.length - 1),
+          placeAtEnd: false);
+    });
+  }
+
+  Future<bool> copyFocusedCodeBlock(BuildContext context) async {
+    final activeIndex = _activeBlockIndex();
+    if (activeIndex == -1 || !_blocks[activeIndex].isCode) {
+      return false;
+    }
+
+    final block = _blocks[activeIndex];
+    await Clipboard.setData(ClipboardData(text: block.controller.text));
+    if (!context.mounted) {
+      return true;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          block.languageController.text.trim().isEmpty
+              ? 'Code snippet copied'
+              : '${block.languageController.text.trim().toUpperCase()} snippet copied',
+        ),
+      ),
+    );
+    return true;
+  }
+
   bool _matchesMasterStructure(String text) {
     final parsedSignatures = blocksFromEditableText(text)
         .map(_DocumentEditorBlock.structureSignatureForNoteBlock)
         .toList(growable: false);
-    final currentSignatures =
-        _blocks.map((block) => block.structureSignature).toList(growable: false);
+    final currentSignatures = _blocks
+        .map((block) => block.structureSignature)
+        .toList(growable: false);
     return listEquals(currentSignatures, parsedSignatures);
   }
 
   @override
   Widget build(BuildContext context) {
     final style = Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.6);
+    final colorScheme = Theme.of(context).colorScheme;
     final padding = widget.embedded
         ? const EdgeInsets.only(top: 8, right: 4, bottom: 8)
         : const EdgeInsets.all(18);
+    final highlightAll = _isWholeDocumentSelected;
 
-    return ListView.separated(
-      key: const ValueKey('document-block-editor'),
-      padding: padding,
-      itemCount: _blocks.length,
-      separatorBuilder: (context, _) => const SizedBox(height: 18),
-      itemBuilder: (context, index) {
-        final block = _blocks[index];
-        final focusNode = index == 0 ? widget.focusNode : block.focusNode;
-        if (block.isCode) {
-          return _CodeEditorBlockCard(
-            block: block,
-            focusNode: focusNode,
-            onTap: widget.onTap,
-          );
-        }
-
-        return TextField(
-          controller: block.controller,
-          focusNode: focusNode,
-          onTap: widget.onTap,
-          inputFormatters: const [
-            _MarkdownListEditingFormatter(),
-          ],
-          decoration: InputDecoration(
-            hintText: index == 0
-                ? '# Untitled note\n\nStart writing in Markdown...'
-                : null,
-            border: InputBorder.none,
-            isDense: true,
-            contentPadding: EdgeInsets.zero,
-          ),
-          style: style,
-          keyboardType: TextInputType.multiline,
-          textInputAction: TextInputAction.newline,
-          textAlignVertical: TextAlignVertical.top,
-          minLines: 1,
-          maxLines: null,
-        );
+    return Actions(
+      actions: <Type, Action<Intent>>{
+        SelectAllTextIntent: CallbackAction<SelectAllTextIntent>(
+          onInvoke: (_) {
+            _selectAllBlocks();
+            return null;
+          },
+        ),
       },
+      child: Focus(
+        key: const ValueKey('document-editor-focus'),
+        focusNode: widget.focusNode,
+        child: ListView.separated(
+          key: const ValueKey('document-block-editor'),
+          padding: padding,
+          itemCount: _blocks.length,
+          separatorBuilder: (context, _) => const SizedBox(height: 18),
+          itemBuilder: (context, index) {
+            final block = _blocks[index];
+            final focusNode = block.focusNode;
+            if (block.isCode) {
+              return _CodeEditorBlockCard(
+                block: block,
+                focusNode: focusNode,
+                onTap: widget.onTap,
+                onKeyEvent: (event) => _handleCodeKeyEvent(index, block, event),
+                highlightSelection: highlightAll,
+              );
+            }
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  decoration: BoxDecoration(
+                    color: highlightAll
+                        ? colorScheme.primary.withValues(alpha: 0.08)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Focus(
+                    onKeyEvent: (_, event) =>
+                        _handleParagraphKeyEvent(index, block, event),
+                    child: TextField(
+                      controller: block.controller,
+                      focusNode: focusNode,
+                      onTap: widget.onTap,
+                      onChanged: (_) => _handleParagraphChanged(index, block),
+                      inputFormatters: const [
+                        _MarkdownListEditingFormatter(),
+                      ],
+                      decoration: InputDecoration(
+                        hintText: index == 0
+                            ? '# Untitled note\n\nStart writing in Markdown...'
+                            : null,
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      style: style,
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      textAlignVertical: TextAlignVertical.top,
+                      minLines: 1,
+                      maxLines: null,
+                    ),
+                  ),
+                ),
+                if (_matchingSlashCommands(block).isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: _SlashCommandMenu(
+                      commands: _matchingSlashCommands(block),
+                      selectedIndex: _slashMenuBlockIndex == index
+                          ? _selectedSlashCommandIndex
+                          : 0,
+                      onSelected: (command) {
+                        _applySlashCommand(index, command);
+                      },
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
     );
+  }
+
+  List<_SlashCommand> _matchingSlashCommands(_DocumentEditorBlock block) {
+    if (block.isCode) {
+      return const <_SlashCommand>[];
+    }
+
+    final query = _slashCommandQuery(block);
+    if (query == null) {
+      return const <_SlashCommand>[];
+    }
+    return _slashCommands
+        .where((command) =>
+            query.isEmpty ||
+            command.label.toLowerCase().contains(query) ||
+            command.aliases.any((alias) => alias.contains(query)))
+        .toList(growable: false);
+  }
+
+  String? _slashCommandQuery(_DocumentEditorBlock block) {
+    final lineRange = _selectedLineRange(block);
+    if (lineRange == null) {
+      return null;
+    }
+
+    final lineText =
+        block.controller.text.substring(lineRange.start, lineRange.end);
+    final trimmed = lineText.trim();
+    if (!trimmed.startsWith('/')) {
+      return null;
+    }
+
+    return trimmed.substring(1).toLowerCase();
+  }
+
+  _LineRange? _selectedLineRange(_DocumentEditorBlock block) {
+    final selection = block.controller.selection;
+    if (!selection.isValid || !selection.isCollapsed) {
+      return null;
+    }
+
+    final text = block.controller.text;
+    final offset = selection.extentOffset.clamp(0, text.length);
+    final lineStart = text.lastIndexOf('\n', offset == 0 ? 0 : offset - 1);
+    final start = lineStart == -1 ? 0 : lineStart + 1;
+    final lineEnd = text.indexOf('\n', offset);
+    final end = lineEnd == -1 ? text.length : lineEnd;
+    return _LineRange(start: start, end: end);
   }
 }
 
+const List<_SlashCommand> _slashCommands = <_SlashCommand>[
+  _SlashCommand(
+    type: _SlashCommandType.code,
+    label: 'Code block',
+    description: 'Insert a code block',
+    aliases: <String>['code', 'snippet', 'block'],
+  ),
+];
+
+enum _SlashCommandType {
+  code,
+}
+
+class _SlashCommand {
+  const _SlashCommand({
+    required this.type,
+    required this.label,
+    required this.description,
+    required this.aliases,
+  });
+
+  final _SlashCommandType type;
+  final String label;
+  final String description;
+  final List<String> aliases;
+}
+
+class _LineRange {
+  const _LineRange({
+    required this.start,
+    required this.end,
+  });
+
+  final int start;
+  final int end;
+}
+
 class _DocumentEditorBlock {
-  const _DocumentEditorBlock({
+  _DocumentEditorBlock({
     required this.controller,
+    required this.languageController,
     required this.focusNode,
     required this.isCode,
-    required this.language,
   });
 
   final TextEditingController controller;
+  final TextEditingController languageController;
   final FocusNode focusNode;
   final bool isCode;
-  final String language;
 
   factory _DocumentEditorBlock.fromNoteBlock(
     NoteBlock block, {
@@ -1532,21 +3293,21 @@ class _DocumentEditorBlock {
     return switch (block) {
       ParagraphBlock(:final text) => _DocumentEditorBlock(
           controller: _MarkdownEditingController(text: text),
+          languageController: TextEditingController(),
           focusNode: focusNode,
           isCode: false,
-          language: '',
         ),
       CodeBlock(:final language, :final code) => _DocumentEditorBlock(
           controller: TextEditingController(text: code),
+          languageController: TextEditingController(text: language),
           focusNode: focusNode,
           isCode: true,
-          language: language,
         ),
       _ => _DocumentEditorBlock(
           controller: _MarkdownEditingController(text: ''),
+          languageController: TextEditingController(),
           focusNode: focusNode,
           isCode: false,
-          language: '',
         ),
     };
   }
@@ -1568,17 +3329,18 @@ class _DocumentEditorBlock {
   }
 
   String get signature => isCode
-      ? 'code|$language|${controller.text}'
+      ? 'code|${languageController.text.trim()}|${controller.text}'
       : 'paragraph|${controller.text}';
 
-  String get structureSignature => isCode ? 'code|$language' : 'paragraph';
+  String get structureSignature =>
+      isCode ? 'code|${languageController.text.trim()}' : 'paragraph';
 
-  String get openingTag =>
-      language.isEmpty ? '[code]' : '[code:$language]';
+  String get openingTag => languageController.text.trim().isEmpty
+      ? '```'
+      : '```${languageController.text.trim()}';
 
-  String get rawText => isCode
-      ? '$openingTag\n${controller.text}\n[/code]'
-      : controller.text;
+  String get rawText =>
+      isCode ? '$openingTag\n${controller.text}\n```' : controller.text;
 
   int localSelectionOffset(int rawOffsetWithinBlock) {
     if (!isCode) {
@@ -1600,24 +3362,40 @@ class _DocumentEditorBlock {
   void syncFromNoteBlock(NoteBlock block) {
     final nextText = switch (block) {
       ParagraphBlock(:final text) when !isCode => text,
-      CodeBlock(:final code, :final language) when isCode && language == this.language => code,
+      CodeBlock(:final code) when isCode => code,
       _ => controller.text,
+    };
+    final nextLanguage = switch (block) {
+      CodeBlock(:final language) when isCode => language,
+      _ => languageController.text,
     };
 
     if (controller.text == nextText) {
-      return;
+      if (languageController.text == nextLanguage) {
+        return;
+      }
+    }
+
+    if (languageController.text != nextLanguage) {
+      languageController.value = TextEditingValue(
+        text: nextLanguage,
+        selection: TextSelection.collapsed(offset: nextLanguage.length),
+      );
     }
 
     final safeOffset =
         controller.selection.extentOffset.clamp(0, nextText.length);
-    controller.value = TextEditingValue(
-      text: nextText,
-      selection: TextSelection.collapsed(offset: safeOffset),
-    );
+    if (controller.text != nextText) {
+      controller.value = TextEditingValue(
+        text: nextText,
+        selection: TextSelection.collapsed(offset: safeOffset),
+      );
+    }
   }
 
   void dispose() {
     controller.dispose();
+    languageController.dispose();
     focusNode.dispose();
   }
 }
@@ -1627,11 +3405,15 @@ class _CodeEditorBlockCard extends StatelessWidget {
     required this.block,
     required this.focusNode,
     required this.onTap,
+    required this.onKeyEvent,
+    required this.highlightSelection,
   });
 
   final _DocumentEditorBlock block;
   final FocusNode focusNode;
   final VoidCallback onTap;
+  final KeyEventResult Function(KeyEvent event) onKeyEvent;
+  final bool highlightSelection;
 
   @override
   Widget build(BuildContext context) {
@@ -1639,11 +3421,16 @@ class _CodeEditorBlockCard extends StatelessWidget {
     final colorScheme = theme.colorScheme;
 
     return Container(
-      key: ValueKey('code-block-editor-${block.language}-${block.controller.text.length}'),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHigh,
+        color: highlightSelection
+            ? colorScheme.primary.withValues(alpha: 0.14)
+            : colorScheme.onSurface.withValues(alpha: 0.96),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(
+          color: highlightSelection
+              ? colorScheme.primary.withValues(alpha: 0.42)
+              : colorScheme.onSurface.withValues(alpha: 0.12),
+        ),
       ),
       padding: const EdgeInsets.all(14),
       child: Column(
@@ -1651,16 +3438,18 @@ class _CodeEditorBlockCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(
-                block.language.isEmpty ? 'CODE' : block.language.toUpperCase(),
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: colorScheme.primary,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
+              if (block.languageController.text.trim().isNotEmpty)
+                Text(
+                  block.languageController.text.trim().toUpperCase(),
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                  ),
                 ),
-              ),
               const Spacer(),
-              TextButton.icon(
+              IconButton(
+                tooltip: 'Copy code',
                 onPressed: () async {
                   await Clipboard.setData(
                     ClipboardData(text: block.controller.text),
@@ -1671,38 +3460,150 @@ class _CodeEditorBlockCard extends StatelessWidget {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        block.language.isEmpty
+                        block.languageController.text.trim().isEmpty
                             ? 'Code snippet copied'
-                            : '${block.language.toUpperCase()} snippet copied',
+                            : '${block.languageController.text.trim().toUpperCase()} snippet copied',
                       ),
                     ),
                   );
                 },
-                icon: const Icon(Icons.content_copy_outlined, size: 16),
-                label: const Text('Copy'),
+                icon: Icon(
+                  Icons.content_copy_outlined,
+                  size: 18,
+                  color: colorScheme.onInverseSurface,
+                ),
               ),
             ],
           ),
-          TextField(
-            controller: block.controller,
-            focusNode: focusNode,
-            onTap: onTap,
-            decoration: const InputDecoration(
-              border: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.zero,
+          const SizedBox(height: 8),
+          Focus(
+            onKeyEvent: (_, event) => onKeyEvent(event),
+            child: TextField(
+              controller: block.controller,
+              focusNode: focusNode,
+              onTap: onTap,
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontFamily: 'monospace',
+                color: colorScheme.onInverseSurface,
+                height: 1.5,
+              ),
+              keyboardType: TextInputType.multiline,
+              textInputAction: TextInputAction.newline,
+              textAlignVertical: TextAlignVertical.top,
+              minLines: 1,
+              maxLines: null,
             ),
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontFamily: 'monospace',
-              color: colorScheme.onSurface,
-              height: 1.5,
-            ),
-            keyboardType: TextInputType.multiline,
-            textInputAction: TextInputAction.newline,
-            textAlignVertical: TextAlignVertical.top,
-            minLines: 1,
-            maxLines: null,
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SlashCommandMenu extends StatelessWidget {
+  const _SlashCommandMenu({
+    required this.commands,
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  final List<_SlashCommand> commands;
+  final int selectedIndex;
+  final ValueChanged<_SlashCommand> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      width: 280,
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colorScheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.shadow.withValues(alpha: 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var index = 0; index < commands.length; index++)
+            InkWell(
+              onTap: () => onSelected(commands[index]),
+              canRequestFocus: false,
+              borderRadius: BorderRadius.circular(14),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: index == selectedIndex
+                        ? colorScheme.surfaceContainerHigh
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 6,
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: colorScheme.surfaceContainerHigh,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.code,
+                            size: 16,
+                            color: colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                commands[index].label,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: colorScheme.onSurface,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                commands[index].description,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
