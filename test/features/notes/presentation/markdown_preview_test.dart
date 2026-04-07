@@ -1,9 +1,28 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:proper_notes/core/utils/attachments.dart';
 import 'package:proper_notes/core/utils/note_document.dart';
+import 'package:proper_notes/features/notes/presentation/attachment_image_preview.dart';
 import 'package:proper_notes/features/notes/presentation/markdown_preview.dart';
 
 void main() {
+  late Directory tempDirectory;
+
+  setUp(() async {
+    tempDirectory =
+        await Directory.systemTemp.createTemp('markdown_preview_test_');
+    debugAttachmentDirectoryOverride = tempDirectory;
+  });
+
+  tearDown(() async {
+    debugAttachmentDirectoryOverride = null;
+    if (await tempDirectory.exists()) {
+      await tempDirectory.delete(recursive: true);
+    }
+  });
+
   Widget buildPreview(String content) {
     return MaterialApp(
       home: Scaffold(
@@ -75,6 +94,17 @@ Standalone paragraph
     expect(find.text('•'), findsNWidgets(2));
     expect(richTextContents(tester), contains('[x] Done'));
     expect(richTextContents(tester), contains('[ ] Next'));
+  });
+
+  testWidgets('renders attachment markdown as an image preview',
+      (tester) async {
+    await tester.pumpWidget(
+      buildPreview('![Architecture](attachment://preview.png)'),
+    );
+    await tester.pump();
+
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
+    expect(find.text('Architecture'), findsOneWidget);
   });
 
   testWidgets('renders fenced code blocks as isolated snippet blocks',

@@ -86,6 +86,13 @@ void main() {
         find.text('Keep writing without leaving the workspace.'),
         findsOneWidget,
       );
+      expect(find.byTooltip('More app actions'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('More app actions'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Import Obsidian notes'), findsOneWidget);
+      expect(find.text('Show attachments folder'), findsOneWidget);
     },
   );
 
@@ -161,6 +168,13 @@ void main() {
       expect(find.textContaining('Shortcuts:'), findsNothing);
       expect(find.text('Sync ready'), findsNothing);
       expect(find.text('Folder: Projects'), findsNothing);
+      expect(find.byTooltip('More app actions'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('More app actions'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Import Obsidian notes'), findsOneWidget);
+      expect(find.text('Show attachments folder'), findsOneWidget);
     },
   );
 

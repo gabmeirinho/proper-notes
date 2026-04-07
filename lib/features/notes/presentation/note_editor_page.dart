@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/services/clipboard_image_service.dart';
+import '../../../core/utils/attachments.dart';
 import '../../../core/utils/markdown_title.dart';
 import '../../../core/utils/note_document.dart';
+import 'attachment_image_preview.dart';
 import '../application/create_note.dart';
 import '../application/update_note.dart';
 import '../domain/note.dart';
@@ -222,6 +224,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
               _toggleInlineMarkdown('**', placeholder: 'bold text'),
           toggleItalic: () =>
               _toggleInlineMarkdown('*', placeholder: 'italic text'),
+          toggleChecklist: _toggleChecklist,
           toggleBulletList: _toggleBulletList,
           toggleQuote: _toggleQuote,
           insertCodeSnippet: _insertCodeSnippet,
@@ -523,6 +526,33 @@ class _NoteEditorPageState extends State<NoteEditorPage>
     });
   }
 
+  void _toggleChecklist() {
+    _applySelectedLinesTransform((lines) {
+      final nonEmptyLines =
+          lines.where((line) => line.trim().isNotEmpty).toList(growable: false);
+      final allChecklistItems = nonEmptyLines.isNotEmpty &&
+          nonEmptyLines.every((line) => _parseTaskListLine(line) != null);
+
+      return lines.map((line) {
+        if (line.trim().isEmpty) {
+          return line;
+        }
+
+        final indent = _leadingWhitespace(line);
+        final trimmed = line.trimLeft();
+        final taskMatch = _parseTaskListLine(line);
+
+        if (allChecklistItems && taskMatch != null) {
+          return '$indent${taskMatch.content}'.trimRight();
+        }
+
+        final bulletMatch = RegExp(r'^-\s+(.*)$').firstMatch(trimmed);
+        final content = taskMatch?.content ?? bulletMatch?.group(1) ?? trimmed;
+        return '$indent- [ ] $content'.trimRight();
+      }).toList(growable: false);
+    });
+  }
+
   void _toggleQuote() {
     _applySelectedLinesTransform((lines) {
       final nonEmptyLines =
@@ -742,6 +772,7 @@ class _NoteEditorContent extends StatelessWidget {
     required this.applyHeading,
     required this.toggleBold,
     required this.toggleItalic,
+    required this.toggleChecklist,
     required this.toggleBulletList,
     required this.toggleQuote,
     required this.insertCodeSnippet,
@@ -755,7 +786,7 @@ class _NoteEditorContent extends StatelessWidget {
   final bool manualTitleIsEmpty;
   final TextEditingController titleController;
   final FocusNode titleFocusNode;
-  final TextEditingController contentController;
+  final _MarkdownEditingController contentController;
   final FocusNode contentFocusNode;
   final bool isSaving;
   final _EditorSaveStatus status;
@@ -766,6 +797,7 @@ class _NoteEditorContent extends StatelessWidget {
   final void Function(int level) applyHeading;
   final VoidCallback toggleBold;
   final VoidCallback toggleItalic;
+  final VoidCallback toggleChecklist;
   final VoidCallback toggleBulletList;
   final VoidCallback toggleQuote;
   final VoidCallback insertCodeSnippet;
@@ -779,7 +811,7 @@ class _NoteEditorContent extends StatelessWidget {
 
     return Column(
       children: [
-        if (onClose != null) ...[
+        if (isDesktopEmbedded && onClose != null) ...[
           Align(
             alignment: Alignment.centerRight,
             child: IconButton(
@@ -853,6 +885,10 @@ class _NoteEditorContent extends StatelessWidget {
                 _EditorCommandButton(
                   label: 'Italic',
                   onPressed: toggleItalic,
+                ),
+                _EditorCommandButton(
+                  label: 'Checklist',
+                  onPressed: toggleChecklist,
                 ),
                 _EditorCommandButton(
                   label: 'List',
@@ -988,7 +1024,17 @@ class _ClearSelectedDocumentIntent extends Intent {
 }
 
 class _MarkdownEditingController extends TextEditingController {
-  _MarkdownEditingController({super.text});
+  _MarkdownEditingController({
+    super.text,
+    this.onToggleTaskCheckbox,
+  });
+
+  ValueChanged<int>? onToggleTaskCheckbox;
+  Map<String, Size> attachmentImageSizes = const <String, Size>{};
+  double attachmentImageMaxWidth = 320;
+  double attachmentImageMaxHeight = 240;
+  bool showActiveMarkdownLine = true;
+  int? selectedAttachmentLineIndex;
 
   _CodeSnippetSelection? get currentCodeSnippet {
     if (text.isEmpty) {
@@ -1021,8 +1067,12 @@ class _MarkdownEditingController extends TextEditingController {
     final baseStyle = style ?? DefaultTextStyle.of(context).style;
     final spans = <InlineSpan>[];
     final lines = text.split('\n');
-    final activeLineIndex = _activeLineIndex;
+    var activeLineIndex = showActiveMarkdownLine ? _activeLineIndex : -1;
+    if (activeLineIndex == selectedAttachmentLineIndex) {
+      activeLineIndex = -1;
+    }
     var isInsideCodeSnippet = false;
+    var lineStartOffset = 0;
 
     for (var index = 0; index < lines.length; index++) {
       final line = lines[index];
@@ -1042,6 +1092,8 @@ class _MarkdownEditingController extends TextEditingController {
           isCodeSnippetClosingTag:
               lineState.kind == _CodeSnippetLineKind.closing,
           codeSnippetLanguage: lineState.language,
+          lineIndex: index,
+          lineStartOffset: lineStartOffset,
         ),
       );
       switch (lineState.kind) {
@@ -1055,6 +1107,65 @@ class _MarkdownEditingController extends TextEditingController {
       }
       if (index < lines.length - 1) {
         spans.add(TextSpan(text: '\n', style: baseStyle));
+        lineStartOffset += line.length + 1;
+      } else {
+        lineStartOffset += line.length;
+      }
+    }
+
+    return TextSpan(style: baseStyle, children: spans);
+  }
+
+  TextSpan buildLayoutTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+  }) {
+    final baseStyle = style ?? DefaultTextStyle.of(context).style;
+    final spans = <InlineSpan>[];
+    final lines = text.split('\n');
+    var activeLineIndex = showActiveMarkdownLine ? _activeLineIndex : -1;
+    if (activeLineIndex == selectedAttachmentLineIndex) {
+      activeLineIndex = -1;
+    }
+    var isInsideCodeSnippet = false;
+    var lineStartOffset = 0;
+
+    for (var index = 0; index < lines.length; index++) {
+      final line = lines[index];
+      final lineState = _classifyCodeSnippetLine(
+        line.trim(),
+        isInsideCodeSnippet: isInsideCodeSnippet,
+      );
+      spans.add(
+        _buildLayoutLineSpan(
+          line,
+          baseStyle,
+          context,
+          isActiveLine: index == activeLineIndex,
+          isInsideCodeSnippet: lineState.kind == _CodeSnippetLineKind.body,
+          isCodeSnippetOpeningTag:
+              lineState.kind == _CodeSnippetLineKind.opening,
+          isCodeSnippetClosingTag:
+              lineState.kind == _CodeSnippetLineKind.closing,
+          codeSnippetLanguage: lineState.language,
+          lineIndex: index,
+          lineStartOffset: lineStartOffset,
+        ),
+      );
+      switch (lineState.kind) {
+        case _CodeSnippetLineKind.opening:
+          isInsideCodeSnippet = true;
+        case _CodeSnippetLineKind.closing:
+          isInsideCodeSnippet = false;
+        case _CodeSnippetLineKind.body:
+        case _CodeSnippetLineKind.none:
+          break;
+      }
+      if (index < lines.length - 1) {
+        spans.add(TextSpan(text: '\n', style: baseStyle));
+        lineStartOffset += line.length + 1;
+      } else {
+        lineStartOffset += line.length;
       }
     }
 
@@ -1070,6 +1181,8 @@ class _MarkdownEditingController extends TextEditingController {
     required bool isCodeSnippetOpeningTag,
     required bool isCodeSnippetClosingTag,
     required String codeSnippetLanguage,
+    required int lineIndex,
+    required int lineStartOffset,
   }) {
     if (isActiveLine) {
       final activeHeadingSpan = _buildActiveHeadingLineSpan(
@@ -1092,7 +1205,118 @@ class _MarkdownEditingController extends TextEditingController {
         isCodeSnippetOpeningTag: isCodeSnippetOpeningTag,
         isCodeSnippetClosingTag: isCodeSnippetClosingTag,
         codeSnippetLanguage: codeSnippetLanguage,
+        taskCheckboxBuilder: onToggleTaskCheckbox == null
+            ? null
+            : (taskMatch) => _buildTaskCheckboxSpan(
+                  taskMatch: taskMatch,
+                  baseStyle: baseStyle,
+                  lineIndex: lineIndex,
+                  checkedCharacterOffset:
+                      lineStartOffset + taskMatch.checkedCharacterIndex,
+                ),
+        attachmentImageBuilder: (image) => _buildAttachmentPlaceholderSpan(
+          image,
+          baseStyle: baseStyle,
+        ),
       ),
+    );
+  }
+
+  InlineSpan _buildLayoutLineSpan(
+    String line,
+    TextStyle baseStyle,
+    BuildContext context, {
+    required bool isActiveLine,
+    required bool isInsideCodeSnippet,
+    required bool isCodeSnippetOpeningTag,
+    required bool isCodeSnippetClosingTag,
+    required String codeSnippetLanguage,
+    required int lineIndex,
+    required int lineStartOffset,
+  }) {
+    if (isActiveLine) {
+      final activeHeadingSpan = _buildActiveHeadingLineSpan(
+        line,
+        baseStyle: baseStyle,
+        colorScheme: Theme.of(context).colorScheme,
+      );
+      if (activeHeadingSpan != null) {
+        return activeHeadingSpan;
+      }
+      return TextSpan(text: line, style: baseStyle);
+    }
+
+    return TextSpan(
+      children: buildInactiveMarkdownLineSpans(
+        line,
+        baseStyle: baseStyle,
+        colorScheme: Theme.of(context).colorScheme,
+        isInsideCodeSnippet: isInsideCodeSnippet,
+        isCodeSnippetOpeningTag: isCodeSnippetOpeningTag,
+        isCodeSnippetClosingTag: isCodeSnippetClosingTag,
+        codeSnippetLanguage: codeSnippetLanguage,
+        taskCheckboxBuilder: (taskMatch) => TextSpan(
+          text: taskMatch.markerText,
+          style: _hiddenMarkdownMarkerWidthPreservingStyle(baseStyle),
+        ),
+        attachmentImageBuilder: (image) => _buildAttachmentPlaceholderSpan(
+          image,
+          baseStyle: baseStyle,
+        ),
+      ),
+    );
+  }
+
+  InlineSpan _buildTaskCheckboxSpan({
+    required _TaskListLineMatch taskMatch,
+    required TextStyle baseStyle,
+    required int lineIndex,
+    required int checkedCharacterOffset,
+  }) {
+    final checkboxSize =
+        (((baseStyle.fontSize ?? 16) * 0.95).clamp(16.0, 18.0)) as double;
+    final markerPrefix = taskMatch.markerText.substring(0, 3);
+    final markerSuffix = taskMatch.markerText.substring(4);
+
+    return TextSpan(
+      children: [
+        TextSpan(
+          text: markerPrefix,
+          style: _hiddenMarkdownMarkerStyle(baseStyle),
+        ),
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: _TaskCheckboxInline(
+            key: ValueKey('task-checkbox-overlay-$lineIndex'),
+            checked: taskMatch.checked,
+            size: checkboxSize,
+            onTap: () => onToggleTaskCheckbox?.call(checkedCharacterOffset),
+          ),
+        ),
+        TextSpan(
+          text: markerSuffix,
+          style: _hiddenMarkdownMarkerStyle(baseStyle),
+        ),
+      ],
+    );
+  }
+
+  InlineSpan _buildAttachmentPlaceholderSpan(
+    AttachmentImageMarkdown image, {
+    required TextStyle baseStyle,
+  }) {
+    return TextSpan(
+      text: _attachmentPlaceholderText(
+        rawLength: math.max(1, image.rawText.length),
+        lineHeight: (baseStyle.fontSize ?? 16) * (baseStyle.height ?? 1.2),
+        previewBlockHeight: _attachmentPreviewBlockHeight(
+          image.attachmentUri,
+          attachmentImageSizes: attachmentImageSizes,
+          attachmentImageMaxWidth: attachmentImageMaxWidth,
+          attachmentImageMaxHeight: attachmentImageMaxHeight,
+        ),
+      ),
+      style: _hiddenMarkdownMarkerWidthPreservingStyle(baseStyle),
     );
   }
 
@@ -1127,6 +1351,65 @@ class _MarkdownEditingController extends TextEditingController {
   }
 }
 
+double _attachmentPreviewBlockHeight(
+  String attachmentUri, {
+  required Map<String, Size> attachmentImageSizes,
+  required double attachmentImageMaxWidth,
+  required double attachmentImageMaxHeight,
+}) {
+  return _attachmentDisplaySize(
+        attachmentUri,
+        attachmentImageSizes: attachmentImageSizes,
+        maxWidth: attachmentImageMaxWidth,
+        maxHeight: attachmentImageMaxHeight,
+      ).height +
+      _UnifiedMarkdownEditorState._imagePreviewVerticalInset;
+}
+
+String _attachmentPlaceholderText({
+  required int rawLength,
+  required double lineHeight,
+  required double previewBlockHeight,
+}) {
+  if (rawLength <= 1) {
+    return ' ';
+  }
+
+  final targetLineCount = math.max(1, (previewBlockHeight / lineHeight).ceil());
+  final maxLineBreaks = math.max(0, rawLength - 2);
+  final lineBreakCount = math.min(targetLineCount - 1, maxLineBreaks);
+  final fillerCount = rawLength - lineBreakCount - 2;
+
+  return ' ' +
+      ('\n' * lineBreakCount) +
+      ' ' +
+      ('\u200B' * math.max(0, fillerCount));
+}
+
+Size _attachmentDisplaySize(
+  String attachmentUri, {
+  required Map<String, Size> attachmentImageSizes,
+  required double maxWidth,
+  required double maxHeight,
+}) {
+  final intrinsic = attachmentImageSizes[attachmentUri];
+  final safeMaxWidth = math.max(1.0, maxWidth);
+  final safeMaxHeight = math.max(1.0, maxHeight);
+  final fallback = const Size(
+    _UnifiedMarkdownEditorState._imagePreviewFallbackWidth,
+    _UnifiedMarkdownEditorState._imagePreviewFallbackHeight,
+  );
+  final source =
+      intrinsic == null || intrinsic.width <= 0 || intrinsic.height <= 0
+          ? fallback
+          : intrinsic;
+
+  final widthScale = safeMaxWidth / source.width;
+  final heightScale = safeMaxHeight / source.height;
+  final scale = math.min(1.0, math.min(widthScale, heightScale));
+  return Size(source.width * scale, source.height * scale);
+}
+
 @visibleForTesting
 List<InlineSpan> buildInactiveMarkdownLineSpans(
   String line, {
@@ -1136,6 +1419,8 @@ List<InlineSpan> buildInactiveMarkdownLineSpans(
   bool isCodeSnippetOpeningTag = false,
   bool isCodeSnippetClosingTag = false,
   String codeSnippetLanguage = '',
+  InlineSpan Function(_TaskListLineMatch taskMatch)? taskCheckboxBuilder,
+  InlineSpan Function(AttachmentImageMarkdown image)? attachmentImageBuilder,
 }) {
   if (isCodeSnippetOpeningTag ||
       isCodeSnippetClosingTag ||
@@ -1152,6 +1437,36 @@ List<InlineSpan> buildInactiveMarkdownLineSpans(
 
   final trimmedLeft = line.trimLeft();
   final indent = line.substring(0, line.length - trimmedLeft.length);
+
+  final imageMatch = parseAttachmentImageMarkdownLine(line);
+  if (imageMatch != null) {
+    return [
+      attachmentImageBuilder?.call(imageMatch) ??
+          TextSpan(
+            text: imageMatch.rawText,
+            style: _hiddenMarkdownMarkerWidthPreservingStyle(baseStyle),
+          ),
+    ];
+  }
+
+  final taskMatch = _parseTaskListLine(line);
+  if (taskMatch != null) {
+    return [
+      if (taskMatch.indent.isNotEmpty)
+        TextSpan(text: taskMatch.indent, style: baseStyle),
+      taskCheckboxBuilder?.call(taskMatch) ??
+          TextSpan(
+            text: taskMatch.markerText,
+            style: _hiddenMarkdownMarkerWidthPreservingStyle(baseStyle),
+          ),
+      if (taskMatch.content.isNotEmpty)
+        ..._buildInactiveInlineMarkdownSpans(
+          taskMatch.content,
+          baseStyle: baseStyle.copyWith(color: colorScheme.onSurface),
+          colorScheme: colorScheme,
+        ),
+    ];
+  }
 
   final headingMatch = RegExp(r'^(#{1,3})(\s+)(.*)$').firstMatch(trimmedLeft);
   if (headingMatch != null) {
@@ -1359,6 +1674,44 @@ TextStyle _hiddenMarkdownMarkerStyle(TextStyle baseStyle) {
   );
 }
 
+TextStyle _hiddenMarkdownMarkerWidthPreservingStyle(TextStyle baseStyle) {
+  return baseStyle.copyWith(color: Colors.transparent);
+}
+
+class _TaskListLineMatch {
+  const _TaskListLineMatch({
+    required this.indent,
+    required this.checked,
+    required this.markerText,
+    required this.content,
+    required this.checkboxTokenStartIndex,
+    required this.checkedCharacterIndex,
+  });
+
+  final String indent;
+  final bool checked;
+  final String markerText;
+  final String content;
+  final int checkboxTokenStartIndex;
+  final int checkedCharacterIndex;
+}
+
+_TaskListLineMatch? _parseTaskListLine(String line) {
+  final match = RegExp(r'^(\s*)- \[( |x|X)\](?:\s|$)').firstMatch(line);
+  if (match == null) {
+    return null;
+  }
+
+  return _TaskListLineMatch(
+    indent: match.group(1)!,
+    checked: (match.group(2) ?? '').toLowerCase() == 'x',
+    markerText: line.substring(match.group(1)!.length, match.end),
+    content: line.substring(match.end),
+    checkboxTokenStartIndex: match.group(1)!.length + 2,
+    checkedCharacterIndex: match.group(1)!.length + 3,
+  );
+}
+
 class _CodeSnippetSelection {
   const _CodeSnippetSelection({
     required this.language,
@@ -1518,7 +1871,7 @@ class _MarkdownEditorPane extends StatelessWidget {
     required this.onTap,
   });
 
-  final TextEditingController controller;
+  final _MarkdownEditingController controller;
   final GlobalKey<_DocumentBlocksEditorState> documentEditorKey;
   final FocusNode focusNode;
   final bool embedded;
@@ -1553,7 +1906,7 @@ class _UnifiedMarkdownEditor extends StatefulWidget {
     required this.onTap,
   });
 
-  final TextEditingController controller;
+  final _MarkdownEditingController controller;
   final FocusNode focusNode;
   final VoidCallback onTap;
 
@@ -1565,17 +1918,26 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   static const EdgeInsets _editorContentPadding = EdgeInsets.all(18);
   static const double _snippetHorizontalInset = 6;
   static const double _snippetTopInset = 4;
+  static const double _imagePreviewFallbackWidth = 320;
+  static const double _imagePreviewFallbackHeight = 180;
+  static const double _imagePreviewVerticalInset = 8;
   int _selectedSlashCommandIndex = 0;
   late final ScrollController _editorScrollController;
+  final Map<String, Size> _attachmentImageSizes = <String, Size>{};
+  final Set<String> _loadingAttachmentImageSizes = <String>{};
+  _SelectedAttachmentImage? _selectedAttachmentImage;
 
   @override
   void initState() {
     super.initState();
+    widget.controller.onToggleTaskCheckbox = _toggleTaskCheckboxAt;
     _editorScrollController = ScrollController()
       ..addListener(_handleScrollChanged);
     _lastRenderedText = widget.controller.text;
     _lastRenderedSlashQuery = _slashCommandQuery;
     widget.controller.addListener(_handleControllerChanged);
+    widget.focusNode.addListener(_handleFocusChanged);
+    _ensureAttachmentImageSizes();
   }
 
   @override
@@ -1583,7 +1945,13 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_handleControllerChanged);
+      oldWidget.controller.onToggleTaskCheckbox = null;
       widget.controller.addListener(_handleControllerChanged);
+      widget.controller.onToggleTaskCheckbox = _toggleTaskCheckboxAt;
+    }
+    if (oldWidget.focusNode != widget.focusNode) {
+      oldWidget.focusNode.removeListener(_handleFocusChanged);
+      widget.focusNode.addListener(_handleFocusChanged);
     }
   }
 
@@ -1592,7 +1960,9 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     _editorScrollController
       ..removeListener(_handleScrollChanged)
       ..dispose();
+    widget.controller.onToggleTaskCheckbox = null;
     widget.controller.removeListener(_handleControllerChanged);
+    widget.focusNode.removeListener(_handleFocusChanged);
     super.dispose();
   }
 
@@ -1605,7 +1975,15 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     }
   }
 
+  void _handleFocusChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   void _handleControllerChanged() {
+    _ensureAttachmentImageSizes();
+    _syncSelectedAttachmentImageWithText();
     final commands = _matchingSlashCommands;
     final nextIndex = commands.isEmpty
         ? 0
@@ -1708,7 +2086,99 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
         );
         _selectedSlashCommandIndex = 0;
         _focusEditorAt(codeStart);
+      case _SlashCommandType.checklist:
+        final text = widget.controller.text;
+        const replacement = '- [ ] ';
+        final updatedText =
+            text.replaceRange(lineRange.start, lineRange.end, replacement);
+        final checklistOffset = lineRange.start + replacement.length;
+        widget.controller.value = TextEditingValue(
+          text: updatedText,
+          selection: TextSelection.collapsed(offset: checklistOffset),
+        );
+        _selectedSlashCommandIndex = 0;
+        _focusEditorAt(checklistOffset);
     }
+  }
+
+  void _toggleTaskCheckboxAt(int checkedCharacterOffset) {
+    final text = widget.controller.text;
+    if (checkedCharacterOffset < 0 || checkedCharacterOffset >= text.length) {
+      return;
+    }
+
+    final currentMarker = text[checkedCharacterOffset];
+    if (currentMarker != ' ' && currentMarker.toLowerCase() != 'x') {
+      return;
+    }
+
+    final replacement = currentMarker == ' ' ? 'x' : ' ';
+    final updatedText = text.replaceRange(
+      checkedCharacterOffset,
+      checkedCharacterOffset + 1,
+      replacement,
+    );
+    widget.controller.value = widget.controller.value.copyWith(
+      text: updatedText,
+      selection: widget.controller.selection,
+      composing: TextRange.empty,
+    );
+  }
+
+  Future<void> _handlePasteFromClipboard() async {
+    final image = await ClipboardImageService.readImage();
+    if (image != null) {
+      final savedImage = await saveAttachmentImageBytes(
+        image.bytes,
+        extension: image.extension,
+      );
+      final decodedSize = await decodeImageSize(image.bytes);
+      if (decodedSize != null && mounted) {
+        setState(() {
+          _attachmentImageSizes[savedImage.attachmentUri] = decodedSize;
+        });
+      }
+      final markdown = buildAttachmentImageMarkdown(savedImage.attachmentUri);
+      final replacement = _normalizeImageInsertion(markdown);
+      _replaceSelectionWithText(replacement);
+      return;
+    }
+
+    final textData = await Clipboard.getData(Clipboard.kTextPlain);
+    final pastedText = textData?.text;
+    if (pastedText == null || pastedText.isEmpty) {
+      return;
+    }
+
+    _replaceSelectionWithText(pastedText);
+  }
+
+  String _normalizeImageInsertion(String markdown) {
+    final text = widget.controller.text;
+    final selection = widget.controller.selection;
+    final start = selection.start.clamp(0, text.length);
+    final end = selection.end.clamp(0, text.length);
+    final needsLeadingBreak = start > 0 && text[start - 1] != '\n';
+    final trailingBreak = end < text.length && text[end] == '\n' ? '' : '\n';
+
+    return '${needsLeadingBreak ? '\n' : ''}$markdown$trailingBreak';
+  }
+
+  void _replaceSelectionWithText(String replacement) {
+    _clearSelectedAttachmentImage();
+    final text = widget.controller.text;
+    final selection = widget.controller.selection;
+    final start =
+        math.min(selection.start, selection.end).clamp(0, text.length);
+    final end = math.max(selection.start, selection.end).clamp(0, text.length);
+    final updatedText = text.replaceRange(start, end, replacement);
+    final nextOffset = start + replacement.length;
+
+    widget.controller.value = TextEditingValue(
+      text: updatedText,
+      selection: TextSelection.collapsed(offset: nextOffset),
+    );
+    _focusEditorAt(nextOffset);
   }
 
   void _focusEditorAt(int offset) {
@@ -1726,6 +2196,75 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
       widget.controller.selection =
           TextSelection.collapsed(offset: clampedOffset);
     });
+  }
+
+  void _focusAfterAttachmentImage(_AttachmentImageOverlayGeometry overlay) {
+    _clearSelectedAttachmentImage();
+    _focusEditorAt(overlay.focusOffset);
+  }
+
+  void _clearSelectedAttachmentImage() {
+    if (_selectedAttachmentImage == null) {
+      return;
+    }
+    setState(() {
+      _selectedAttachmentImage = null;
+    });
+  }
+
+  void _syncSelectedAttachmentImageWithText() {
+    final selectedImage = _selectedAttachmentImage;
+    if (selectedImage == null) {
+      return;
+    }
+
+    final text = widget.controller.text;
+    if (selectedImage.deleteStart < 0 ||
+        selectedImage.deleteStart >= text.length ||
+        selectedImage.deleteEnd > text.length ||
+        selectedImage.deleteStart >= selectedImage.deleteEnd) {
+      _selectedAttachmentImage = null;
+      return;
+    }
+
+    final selectedText =
+        text.substring(selectedImage.deleteStart, selectedImage.deleteEnd);
+    final lineText = selectedText.replaceFirst(RegExp(r'^\n'), '').replaceFirst(
+          RegExp(r'\n$'),
+          '',
+        );
+    final imageMatch = parseAttachmentImageMarkdownLine(lineText);
+    if (imageMatch == null ||
+        imageMatch.attachmentUri != selectedImage.attachmentUri) {
+      _selectedAttachmentImage = null;
+    }
+  }
+
+  bool _deleteSelectedAttachmentImage() {
+    final selectedImage = _selectedAttachmentImage;
+    if (selectedImage == null) {
+      return false;
+    }
+
+    final text = widget.controller.text;
+    final deleteStart = selectedImage.deleteStart.clamp(0, text.length);
+    final deleteEnd = selectedImage.deleteEnd.clamp(0, text.length);
+    if (deleteStart >= deleteEnd) {
+      _clearSelectedAttachmentImage();
+      return false;
+    }
+
+    final updatedText = text.replaceRange(deleteStart, deleteEnd, '');
+    final nextOffset = deleteStart.clamp(0, updatedText.length);
+    widget.controller.value = TextEditingValue(
+      text: updatedText,
+      selection: TextSelection.collapsed(offset: nextOffset),
+    );
+    setState(() {
+      _selectedAttachmentImage = null;
+    });
+    _focusEditorAt(nextOffset);
+    return true;
   }
 
   bool _handleCodeFenceWordJump(KeyEvent event) {
@@ -1769,6 +2308,20 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   KeyEventResult _handleKeyEvent(KeyEvent event) {
     if (event is! KeyDownEvent) {
       return KeyEventResult.ignored;
+    }
+
+    final isPasteShortcut = (HardwareKeyboard.instance.isControlPressed ||
+            HardwareKeyboard.instance.isMetaPressed) &&
+        event.logicalKey == LogicalKeyboardKey.keyV;
+    if (isPasteShortcut) {
+      unawaited(_handlePasteFromClipboard());
+      return KeyEventResult.handled;
+    }
+
+    if ((event.logicalKey == LogicalKeyboardKey.backspace ||
+            event.logicalKey == LogicalKeyboardKey.delete) &&
+        _deleteSelectedAttachmentImage()) {
+      return KeyEventResult.handled;
     }
 
     if (_isWholeDocumentSelected &&
@@ -1815,6 +2368,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     }
 
     if (event.logicalKey == LogicalKeyboardKey.escape) {
+      _clearSelectedAttachmentImage();
       widget.controller.selection = widget.controller.selection.copyWith(
         baseOffset: widget.controller.selection.extentOffset,
       );
@@ -1828,13 +2382,6 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   Widget build(BuildContext context) {
     final commands = _matchingSlashCommands;
     final style = Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.6);
-    final renderedTextSpan = style == null
-        ? null
-        : widget.controller.buildTextSpan(
-            context: context,
-            style: style,
-            withComposing: false,
-          );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1842,18 +2389,54 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final snippetOverlays = style == null || renderedTextSpan == null
+              final contentWidth = math.max(
+                0.0,
+                constraints.maxWidth - _editorContentPadding.horizontal,
+              );
+              final contentHeight = math.max(
+                0.0,
+                constraints.maxHeight - _editorContentPadding.vertical,
+              );
+              widget.controller.attachmentImageSizes = _attachmentImageSizes;
+              widget.controller.attachmentImageMaxWidth = contentWidth;
+              widget.controller.attachmentImageMaxHeight = contentHeight;
+              widget.controller.showActiveMarkdownLine =
+                  widget.focusNode.hasFocus;
+              widget.controller.selectedAttachmentLineIndex =
+                  _selectedAttachmentImage?.lineIndex;
+              final overlayTextSpan = style == null
+                  ? null
+                  : widget.controller.buildLayoutTextSpan(
+                      context: context,
+                      style: style,
+                    );
+              final snippetOverlays = style == null || overlayTextSpan == null
                   ? const <_SnippetOverlayGeometry>[]
                   : _buildSnippetOverlayGeometry(
                       context,
                       text: widget.controller.text,
-                      textSpan: renderedTextSpan,
+                      textSpan: overlayTextSpan,
                       maxWidth: constraints.maxWidth,
                       scrollOffset: _editorScrollController.hasClients
                           ? _editorScrollController.offset
                           : 0,
                     );
-
+              final imageOverlays = style == null || overlayTextSpan == null
+                  ? const <_AttachmentImageOverlayGeometry>[]
+                  : _buildAttachmentImageOverlayGeometry(
+                      context,
+                      text: widget.controller.text,
+                      textSpan: overlayTextSpan,
+                      maxWidth: constraints.maxWidth,
+                      maxHeight: constraints.maxHeight,
+                      activeLineIndex: widget.focusNode.hasFocus
+                          ? widget.controller._activeLineIndex
+                          : -1,
+                      attachmentImageSizes: _attachmentImageSizes,
+                      scrollOffset: _editorScrollController.hasClients
+                          ? _editorScrollController.offset
+                          : 0,
+                    );
               return Stack(
                 children: [
                   for (final overlay in snippetOverlays)
@@ -1882,7 +2465,19 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                   Positioned.fill(
                     child: GestureDetector(
                       behavior: HitTestBehavior.translucent,
-                      onTapDown: (_) {
+                      onTapDown: (details) {
+                        final tappedAttachmentPreview = imageOverlays.any(
+                          (overlay) => Rect.fromLTWH(
+                            overlay.left,
+                            overlay.top,
+                            overlay.width,
+                            overlay.height,
+                          ).contains(details.localPosition),
+                        );
+                        if (tappedAttachmentPreview) {
+                          return;
+                        }
+                        _clearSelectedAttachmentImage();
                         if (!widget.focusNode.hasFocus ||
                             widget.controller.text.isEmpty) {
                           _focusEditorAt(0);
@@ -1918,6 +2513,47 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                       ),
                     ),
                   ),
+                  for (final overlay in imageOverlays)
+                    Positioned(
+                      left: overlay.left,
+                      top: overlay.top,
+                      width: overlay.width,
+                      height: overlay.height,
+                      child: MouseRegion(
+                        key: ValueKey(
+                          'attachment-image-hitbox-${overlay.lineIndex}',
+                        ),
+                        cursor: SystemMouseCursors.basic,
+                        opaque: false,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => _focusAfterAttachmentImage(overlay),
+                          onSecondaryTap: _clearSelectedAttachmentImage,
+                          child: Align(
+                            alignment: Alignment.topLeft,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: _UnifiedMarkdownEditorState
+                                        ._imagePreviewVerticalInset /
+                                    2,
+                              ),
+                              child: AttachmentImagePreview(
+                                key: ValueKey(
+                                  'attachment-image-overlay-${overlay.lineIndex}',
+                                ),
+                                attachmentUri: overlay.attachmentUri,
+                                altText: overlay.altText,
+                                maxWidth: overlay.width,
+                                maxHeight: overlay.previewHeight,
+                                ignorePointer: true,
+                                selected: _selectedAttachmentImage?.lineIndex ==
+                                    overlay.lineIndex,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   for (final overlay in snippetOverlays)
                     Positioned(
                       top: overlay.top + 6,
@@ -1964,6 +2600,135 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
       ],
     );
   }
+
+  void _ensureAttachmentImageSizes() {
+    final attachmentUris = widget.controller.text
+        .split('\n')
+        .map(parseAttachmentImageMarkdownLine)
+        .whereType<AttachmentImageMarkdown>()
+        .map((image) => image.attachmentUri)
+        .toSet();
+
+    for (final attachmentUri in attachmentUris) {
+      if (_attachmentImageSizes.containsKey(attachmentUri) ||
+          _loadingAttachmentImageSizes.contains(attachmentUri)) {
+        continue;
+      }
+      _loadingAttachmentImageSizes.add(attachmentUri);
+      unawaited(_loadAttachmentImageSize(attachmentUri));
+    }
+  }
+
+  Future<void> _loadAttachmentImageSize(String attachmentUri) async {
+    final size = await readAttachmentImageSize(attachmentUri);
+    _loadingAttachmentImageSizes.remove(attachmentUri);
+    if (!mounted || size == null) {
+      return;
+    }
+
+    setState(() {
+      _attachmentImageSizes[attachmentUri] = size;
+    });
+  }
+}
+
+List<_AttachmentImageOverlayGeometry> _buildAttachmentImageOverlayGeometry(
+  BuildContext context, {
+  required String text,
+  required InlineSpan textSpan,
+  required double maxWidth,
+  required double maxHeight,
+  required int activeLineIndex,
+  required Map<String, Size> attachmentImageSizes,
+  required double scrollOffset,
+}) {
+  if (text.isEmpty || maxWidth <= 0) {
+    return const <_AttachmentImageOverlayGeometry>[];
+  }
+
+  final contentWidth = math.max(
+    0.0,
+    maxWidth - _UnifiedMarkdownEditorState._editorContentPadding.horizontal,
+  );
+  final contentHeight = math.max(
+    0.0,
+    maxHeight - _UnifiedMarkdownEditorState._editorContentPadding.vertical,
+  );
+  if (contentWidth == 0 || contentHeight == 0) {
+    return const <_AttachmentImageOverlayGeometry>[];
+  }
+
+  final painter = TextPainter(
+    text: textSpan,
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+  )..layout(maxWidth: contentWidth);
+
+  final overlays = <_AttachmentImageOverlayGeometry>[];
+  final lines = text.split('\n');
+  var lineStartOffset = 0;
+  for (var index = 0; index < lines.length; index++) {
+    final line = lines[index];
+    final imageMatch = parseAttachmentImageMarkdownLine(line);
+    if (imageMatch != null && index != activeLineIndex) {
+      if (line.isNotEmpty) {
+        final boxes = painter.getBoxesForSelection(
+          TextSelection(
+            baseOffset: lineStartOffset,
+            extentOffset: lineStartOffset + line.length,
+          ),
+        );
+        if (boxes.isNotEmpty) {
+          final firstBox = boxes.first;
+          final lastBox = boxes.last;
+          final displaySize = _attachmentDisplaySize(
+            imageMatch.attachmentUri,
+            attachmentImageSizes: attachmentImageSizes,
+            maxWidth: contentWidth - firstBox.left,
+            maxHeight: contentHeight,
+          );
+          if (displaySize.width > 0) {
+            final deleteStart = lineStartOffset;
+            final deleteEnd = index < lines.length - 1
+                ? lineStartOffset + line.length + 1
+                : (lineStartOffset > 0
+                    ? lineStartOffset + line.length
+                    : line.length);
+            final focusOffset = index < lines.length - 1
+                ? lineStartOffset + line.length + 1
+                : (lineStartOffset > 0 ? lineStartOffset - 1 : 0);
+            overlays.add(
+              _AttachmentImageOverlayGeometry(
+                lineIndex: index,
+                attachmentUri: imageMatch.attachmentUri,
+                altText: imageMatch.altText,
+                focusOffset: focusOffset,
+                deleteStart: index < lines.length - 1
+                    ? deleteStart
+                    : (lineStartOffset > 0 ? lineStartOffset - 1 : deleteStart),
+                deleteEnd: deleteEnd,
+                left: firstBox.left +
+                    _UnifiedMarkdownEditorState._editorContentPadding.left,
+                top: firstBox.top +
+                    _UnifiedMarkdownEditorState._editorContentPadding.top -
+                    scrollOffset,
+                width: displaySize.width,
+                height: math.max(0, lastBox.bottom - firstBox.top),
+                previewHeight: displaySize.height,
+              ),
+            );
+          }
+        }
+      }
+    }
+
+    lineStartOffset += line.length;
+    if (index < lines.length - 1) {
+      lineStartOffset += 1;
+    }
+  }
+
+  return List<_AttachmentImageOverlayGeometry>.unmodifiable(overlays);
 }
 
 List<_SnippetOverlayGeometry> _buildSnippetOverlayGeometry(
@@ -2058,6 +2823,111 @@ class _SnippetOverlayGeometry {
   final double right;
   final double top;
   final double height;
+}
+
+class _AttachmentImageOverlayGeometry {
+  const _AttachmentImageOverlayGeometry({
+    required this.lineIndex,
+    required this.attachmentUri,
+    required this.altText,
+    required this.focusOffset,
+    required this.deleteStart,
+    required this.deleteEnd,
+    required this.left,
+    required this.top,
+    required this.width,
+    required this.height,
+    required this.previewHeight,
+  });
+
+  final int lineIndex;
+  final String attachmentUri;
+  final String altText;
+  final int focusOffset;
+  final int deleteStart;
+  final int deleteEnd;
+  final double left;
+  final double top;
+  final double width;
+  final double height;
+  final double previewHeight;
+}
+
+class _SelectedAttachmentImage {
+  const _SelectedAttachmentImage({
+    required this.lineIndex,
+    required this.attachmentUri,
+    required this.deleteStart,
+    required this.deleteEnd,
+    required this.focusOffset,
+  });
+
+  final int lineIndex;
+  final String attachmentUri;
+  final int deleteStart;
+  final int deleteEnd;
+  final int focusOffset;
+}
+
+class _TaskCheckboxInline extends StatelessWidget {
+  const _TaskCheckboxInline({
+    required this.onTap,
+    required this.checked,
+    required this.size,
+    super.key,
+  });
+
+  final VoidCallback onTap;
+  final bool checked;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final borderColor = colorScheme.onSurface.withValues(alpha: 0.8);
+    final fillColor = colorScheme.onSurface.withValues(alpha: 0.82);
+    final checkColor = colorScheme.surface;
+
+    return Tooltip(
+      message: checked
+          ? 'Mark checklist item incomplete'
+          : 'Mark checklist item complete',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: SizedBox(
+            width: size + 8,
+            height: size,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: SizedBox.square(
+                dimension: size,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: checked ? fillColor : Colors.transparent,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: checked ? fillColor : borderColor,
+                      width: 1.8,
+                    ),
+                  ),
+                  child: checked
+                      ? Icon(
+                          Icons.check,
+                          size: size * 0.72,
+                          color: checkColor,
+                        )
+                      : null,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _DocumentBlocksEditor extends StatefulWidget {
@@ -2175,7 +3045,7 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
     final nextStructure = parsedBlocks
         .map(_DocumentEditorBlock.structureSignatureForNoteBlock)
         .toList(growable: false);
-    return !listEquals(currentStructure, nextStructure);
+    return !_listEquals(currentStructure, nextStructure);
   }
 
   void _syncBlockTextsFromMaster(List<NoteBlock> parsedBlocks) {
@@ -2966,7 +3836,39 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
     switch (command.type) {
       case _SlashCommandType.code:
         _convertSelectionLineToCode(index, ensureTrailingParagraph: true);
+      case _SlashCommandType.checklist:
+        _replaceSelectionLineWithChecklist(index);
     }
+  }
+
+  void _replaceSelectionLineWithChecklist(int index) {
+    if (index < 0 || index >= _blocks.length) {
+      return;
+    }
+
+    final block = _blocks[index];
+    if (block.isCode) {
+      return;
+    }
+
+    final lineRange = _selectedLineRange(block);
+    if (lineRange == null) {
+      return;
+    }
+
+    const replacement = '- [ ] ';
+    final updatedText = block.controller.text.replaceRange(
+      lineRange.start,
+      lineRange.end,
+      replacement,
+    );
+    block.controller.value = TextEditingValue(
+      text: updatedText,
+      selection: TextSelection.collapsed(
+        offset: lineRange.start + replacement.length,
+      ),
+    );
+    _focusBlock(index, placeAtEnd: false);
   }
 
   void _convertSelectionLineToCode(
@@ -3084,7 +3986,7 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
     final currentSignatures = _blocks
         .map((block) => block.structureSignature)
         .toList(growable: false);
-    return listEquals(currentSignatures, parsedSignatures);
+    return _listEquals(currentSignatures, parsedSignatures);
   }
 
   @override
@@ -3243,10 +4145,17 @@ const List<_SlashCommand> _slashCommands = <_SlashCommand>[
     description: 'Insert a code block',
     aliases: <String>['code', 'snippet', 'block'],
   ),
+  _SlashCommand(
+    type: _SlashCommandType.checklist,
+    label: 'Checklist',
+    description: 'Insert a checklist item',
+    aliases: <String>['checklist', 'task', 'todo'],
+  ),
 ];
 
 enum _SlashCommandType {
   code,
+  checklist,
 }
 
 class _SlashCommand {
@@ -3657,6 +4566,22 @@ TextEditingValue _continueMarkdownList(
   final lineStart = oldValue.text.lastIndexOf('\n', insertionOffset - 1) + 1;
   final line = oldValue.text.substring(lineStart, insertionOffset);
 
+  final taskMatch = _parseTaskListLine(line);
+  if (taskMatch != null) {
+    final prefix = '${taskMatch.indent}- [ ] ';
+    return newValue.copyWith(
+      text: newValue.text.replaceRange(
+        newValue.selection.extentOffset,
+        newValue.selection.extentOffset,
+        prefix,
+      ),
+      selection: TextSelection.collapsed(
+        offset: newValue.selection.extentOffset + prefix.length,
+      ),
+      composing: TextRange.empty,
+    );
+  }
+
   final bulletMatch = RegExp(r'^(\s*)([-*+])\s+(.*)$').firstMatch(line);
   if (bulletMatch != null) {
     final indent = bulletMatch.group(1)!;
@@ -3688,6 +4613,15 @@ TextEditingValue _removeEmptyMarkdownListMarker(
   final safeLineEnd = lineEnd == -1 ? oldValue.text.length : lineEnd;
   final oldLine = oldValue.text.substring(lineStart, safeLineEnd);
 
+  if (RegExp(r'^\s*-\s+\[(?: |x|X)\]\s$').hasMatch(oldLine)) {
+    final indent = RegExp(r'^\s*').firstMatch(oldLine)?.group(0) ?? '';
+    return newValue.copyWith(
+      text: newValue.text.replaceRange(lineStart, safeLineEnd - 1, indent),
+      selection: TextSelection.collapsed(offset: lineStart + indent.length),
+      composing: TextRange.empty,
+    );
+  }
+
   if (RegExp(r'^\s*[-*+] $').hasMatch(oldLine)) {
     final indent = RegExp(r'^\s*').firstMatch(oldLine)?.group(0) ?? '';
     return newValue.copyWith(
@@ -3698,6 +4632,22 @@ TextEditingValue _removeEmptyMarkdownListMarker(
   }
 
   return newValue;
+}
+
+bool _listEquals<T>(List<T> left, List<T> right) {
+  if (identical(left, right)) {
+    return true;
+  }
+  if (left.length != right.length) {
+    return false;
+  }
+
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 class _EditorCommandButton extends StatelessWidget {

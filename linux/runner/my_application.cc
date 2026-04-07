@@ -10,9 +10,75 @@
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  FlView* view;
+  FlMethodChannel* clipboard_image_channel;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+static FlMethodResponse* get_clipboard_image_response() {
+  GdkDisplay* display = gdk_display_get_default();
+  if (display == nullptr) {
+    return FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  }
+
+  GtkClipboard* clipboard = gtk_clipboard_get_default(display);
+  if (clipboard == nullptr) {
+    return FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  }
+
+  g_autoptr(GdkPixbuf) pixbuf = gtk_clipboard_wait_for_image(clipboard);
+  if (pixbuf == nullptr) {
+    return FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  }
+
+  gchar* buffer = nullptr;
+  gsize buffer_size = 0;
+  g_autoptr(GError) error = nullptr;
+  if (!gdk_pixbuf_save_to_buffer(pixbuf, &buffer, &buffer_size, "png", &error,
+                                 nullptr)) {
+    return FL_METHOD_RESPONSE(fl_method_error_response_new(
+        "CLIPBOARD_IMAGE_ERROR", error->message, nullptr));
+  }
+
+  g_autoptr(FlValue) result = fl_value_new_map();
+  fl_value_set_string_take(
+      result, "bytes",
+      fl_value_new_uint8_list(reinterpret_cast<const uint8_t*>(buffer),
+                              buffer_size));
+  fl_value_set_string_take(result, "extension", fl_value_new_string("png"));
+  g_free(buffer);
+
+  return FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+}
+
+static void clipboard_image_method_call_cb(FlMethodChannel* channel,
+                                           FlMethodCall* method_call,
+                                           gpointer user_data) {
+  g_autoptr(FlMethodResponse) response = nullptr;
+  if (strcmp(fl_method_call_get_name(method_call), "getImage") == 0) {
+    response = get_clipboard_image_response();
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  }
+
+  g_autoptr(GError) error = nullptr;
+  if (!fl_method_call_respond(method_call, response, &error)) {
+    g_warning("Failed to send clipboard image response: %s", error->message);
+  }
+}
+
+static void create_channels(MyApplication* self) {
+  FlEngine* engine = fl_view_get_engine(self->view);
+  FlBinaryMessenger* messenger = fl_engine_get_binary_messenger(engine);
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+
+  self->clipboard_image_channel = fl_method_channel_new(
+      messenger, "proper_notes/clipboard_image", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(self->clipboard_image_channel,
+                                            clipboard_image_method_call_cb,
+                                            self, nullptr);
+}
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
@@ -59,6 +125,7 @@ static void my_application_activate(GApplication* application) {
       project, self->dart_entrypoint_arguments);
 
   FlView* view = fl_view_new(project);
+  self->view = view;
   GdkRGBA background_color;
   // Background defaults to black, override it here if necessary, e.g. #00000000
   // for transparent.
@@ -74,6 +141,7 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+  create_channels(self);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
@@ -121,6 +189,7 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  g_clear_object(&self->clipboard_image_channel);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 

@@ -1,18 +1,36 @@
+import 'dart:io';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:proper_notes/core/utils/attachments.dart';
 import 'package:proper_notes/core/utils/note_document.dart';
 import 'package:proper_notes/features/notes/application/create_note.dart';
 import 'package:proper_notes/features/notes/application/update_note.dart';
 import 'package:proper_notes/features/notes/domain/note.dart';
 import 'package:proper_notes/features/notes/domain/note_repository.dart';
 import 'package:proper_notes/features/notes/domain/sync_status.dart';
+import 'package:proper_notes/features/notes/presentation/attachment_image_preview.dart';
 import 'package:proper_notes/features/notes/presentation/note_editor_page.dart';
 import 'package:proper_notes/features/sync/domain/remote_note.dart';
 
 void main() {
   const colorScheme = ColorScheme.light();
   const baseStyle = TextStyle(fontSize: 16, height: 1.6);
+  late Directory tempDirectory;
+
+  setUp(() async {
+    tempDirectory =
+        await Directory.systemTemp.createTemp('note_editor_page_test_');
+    debugAttachmentDirectoryOverride = tempDirectory;
+  });
+
+  tearDown(() async {
+    debugAttachmentDirectoryOverride = null;
+    if (await tempDirectory.exists()) {
+      await tempDirectory.delete(recursive: true);
+    }
+  });
 
   test('renders inactive bullet markers as bullets', () {
     final spans = buildInactiveMarkdownLineSpans(
@@ -196,7 +214,7 @@ void main() {
     expect((closingSpans.single as TextSpan).style?.color, colorScheme.primary);
   });
 
-  test('renders task-like markdown as plain bullet text', () {
+  test('renders inactive checklist markdown without visible markers', () {
     final spans = buildInactiveMarkdownLineSpans(
       '- [x] Done task',
       baseStyle: baseStyle,
@@ -204,8 +222,382 @@ void main() {
     );
 
     expect(spans.length, 2);
-    expect((spans[0] as TextSpan).text, '• ');
-    expect((spans[1] as TextSpan).text, '[x] Done task');
+    expect((spans[0] as TextSpan).text, '- [x] ');
+    expect((spans[0] as TextSpan).style?.color, Colors.transparent);
+    expect((spans[1] as TextSpan).text, 'Done task');
+  });
+
+  testWidgets('inline checklist span preserves raw markdown length',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    final note = Note(
+      id: 'note-checklist-length',
+      title: 'Checklist note',
+      content: '- [ ] Done task\nNext line',
+      documentJson: paragraphDocumentFromEditableText(
+        '- [ ] Done task\nNext line',
+      ),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    bodyField.controller!.selection = TextSelection.collapsed(
+      offset: bodyField.controller!.text.length,
+    );
+    await tester.pumpAndSettle();
+
+    final builtSpan = bodyField.controller!.buildTextSpan(
+      context: tester.element(_bodyField()),
+      style: baseStyle,
+      withComposing: false,
+    );
+
+    expect(
+      builtSpan.toPlainText(includePlaceholders: true).length,
+      bodyField.controller!.text.length,
+    );
+  });
+
+  testWidgets('inactive attachment image span preserves raw markdown length',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    final note = Note(
+      id: 'note-attachment-length',
+      title: 'Attachment note',
+      content: '![Diagram](attachment://preview.png)\nNext line',
+      documentJson: paragraphDocumentFromEditableText(
+        '![Diagram](attachment://preview.png)\nNext line',
+      ),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pump();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    final nextLineOffset = bodyField.controller!.text.indexOf('Next line');
+    bodyField.controller!.selection = TextSelection.collapsed(
+      offset: nextLineOffset,
+    );
+    await tester.pump();
+
+    final builtSpan = bodyField.controller!.buildTextSpan(
+      context: tester.element(_bodyField()),
+      style: baseStyle,
+      withComposing: false,
+    );
+
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
+    expect(
+      builtSpan.toPlainText(includePlaceholders: true).length,
+      bodyField.controller!.text.length,
+    );
+  });
+
+  testWidgets(
+      'opening a note shows attachment previews before the editor is focused',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    final note = Note(
+      id: 'note-attachment-open-preview',
+      title: 'Attachment note',
+      content: '![Diagram](attachment://preview.png)\nNext line',
+      documentJson: paragraphDocumentFromEditableText(
+        '![Diagram](attachment://preview.png)\nNext line',
+      ),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pump();
+
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
+  });
+
+  testWidgets(
+      'active attachment image line shows raw markdown instead of preview',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    final note = Note(
+      id: 'note-attachment-active',
+      title: 'Attachment note',
+      content: '![Diagram](attachment://preview.png)\nNext line',
+      documentJson: paragraphDocumentFromEditableText(
+        '![Diagram](attachment://preview.png)\nNext line',
+      ),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pump();
+
+    await tester.tap(_bodyField());
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    bodyField.controller!.selection = const TextSelection.collapsed(offset: 0);
+    await tester.pump();
+
+    expect(find.byType(AttachmentImagePreview), findsNothing);
+  });
+
+  testWidgets('clicking attachment preview focuses after the image line',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-tap',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pump();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    bodyField.controller!.selection = TextSelection.collapsed(
+      offset: bodyField.controller!.text.length,
+    );
+    await tester.pump();
+
+    await tester.tapAt(
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+    );
+    await tester.pumpAndSettle();
+
+    final updatedBodyField = tester.widget<TextField>(_bodyField());
+    expect(updatedBodyField.focusNode!.hasFocus, isTrue);
+    expect(updatedBodyField.controller!.selection.baseOffset,
+        imageLine.length + 1);
+    expect(
+      updatedBodyField.controller!.selection.extentOffset,
+      imageLine.length + 1,
+    );
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
+    expect(find.byTooltip('Close image preview'), findsNothing);
+    expect(find.byType(Dialog), findsNothing);
+  });
+
+  testWidgets(
+      'clicking attachment preview while unfocused focuses editor after image',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-unfocused-tap',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.focusNode!.hasFocus, isFalse);
+
+    await tester.tapAt(
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<TextField>(_bodyField()).focusNode!.hasFocus, isTrue);
+    expect(
+      tester.widget<TextField>(_bodyField()).controller!.selection.baseOffset,
+      imageLine.length + 1,
+    );
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
+    expect(find.byType(Dialog), findsNothing);
+  });
+
+  testWidgets(
+      'clicking near the bottom of attachment hitbox does not collapse it',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-bottom-tap',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pump();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    bodyField.controller!.selection = TextSelection.collapsed(
+      offset: bodyField.controller!.text.length,
+    );
+    await tester.pump();
+
+    final hitbox = find.byKey(const ValueKey('attachment-image-hitbox-0'));
+    final hitboxRect = tester.getRect(hitbox);
+    await tester.tapAt(
+      Offset(hitboxRect.center.dx, hitboxRect.bottom - 2),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
+    expect(find.byType(Dialog), findsNothing);
+  });
+
+  testWidgets('right clicking attachment preview does not open a dialog',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-right-click',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pump();
+
+    final gesture = await tester.startGesture(
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+      buttons: kSecondaryButton,
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
+    expect(find.byType(Dialog), findsNothing);
+    expect(find.byTooltip('Close image preview'), findsNothing);
+  });
+
+  testWidgets('scroll wheel over attachment preview still scrolls the editor',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    final trailingLines = List<String>.generate(80, (index) => 'Line $index');
+    final content = [
+      '![Diagram](attachment://preview.png)',
+      '',
+      ...trailingLines,
+    ].join('\n');
+    final note = Note(
+      id: 'note-attachment-scroll',
+      title: 'Attachment scroll note',
+      content: content,
+      documentJson: paragraphDocumentFromEditableText(content),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final editableText = tester.widget<EditableText>(
+      find.byType(EditableText).last,
+    );
+    final scrollController = editableText.scrollController!;
+    final initialOffset = scrollController.offset;
+
+    tester.binding.handlePointerEvent(
+      PointerScrollEvent(
+        position: tester.getCenter(
+          find.byKey(const ValueKey('attachment-image-overlay-0')),
+        ),
+        scrollDelta: const Offset(0, 180),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(scrollController.offset, greaterThan(initialOffset));
+  });
+
+  testWidgets('attachment preview reserves layout space before the next line',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-layout',
+      title: 'Attachment note',
+      content: '$imageLine\nNext line',
+      documentJson: paragraphDocumentFromEditableText('$imageLine\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    final nextLineOffset = imageLine.length + 1;
+    bodyField.controller!.selection = TextSelection.collapsed(
+      offset: nextLineOffset,
+    );
+    await tester.pumpAndSettle();
+
+    final imageBottom = tester
+        .getBottomLeft(find.byKey(const ValueKey('attachment-image-hitbox-0')))
+        .dy;
+    final editableState =
+        tester.state<EditableTextState>(find.byType(EditableText).last);
+    final nextLineCaretRect = editableState.renderEditable.getLocalRectForCaret(
+      TextPosition(offset: nextLineOffset),
+    );
+    final nextLineCaretTop = editableState.renderEditable
+        .localToGlobal(nextLineCaretRect.topLeft)
+        .dy;
+
+    expect(nextLineCaretTop, greaterThanOrEqualTo(imageBottom - 1));
   });
 
   test('continues bullet lists on newline', () {
@@ -224,7 +616,7 @@ void main() {
     expect(updated.selection.baseOffset, 15);
   });
 
-  test('continues task-like markdown as a normal bullet list', () {
+  test('continues checklist markdown as another checklist item', () {
     final updated = applyMarkdownListEditBehavior(
       const TextEditingValue(
         text: '- [x] Done',
@@ -236,8 +628,24 @@ void main() {
       ),
     );
 
-    expect(updated.text, '- [x] Done\n- ');
-    expect(updated.selection.baseOffset, 13);
+    expect(updated.text, '- [x] Done\n- [ ] ');
+    expect(updated.selection.baseOffset, 17);
+  });
+
+  test('backspace on an empty checklist marker returns to normal text', () {
+    final updated = applyMarkdownListEditBehavior(
+      const TextEditingValue(
+        text: '- [ ] ',
+        selection: TextSelection.collapsed(offset: 6),
+      ),
+      const TextEditingValue(
+        text: '- [ ]',
+        selection: TextSelection.collapsed(offset: 5),
+      ),
+    );
+
+    expect(updated.text, '');
+    expect(updated.selection.baseOffset, 0);
   });
 
   test('backspace on an empty bullet marker returns to normal text', () {
@@ -314,6 +722,22 @@ void main() {
     expect(updatedBodyField.controller?.text, '**hello**');
     expect(updatedBodyField.controller?.selection.baseOffset, 2);
     expect(updatedBodyField.controller?.selection.extentOffset, 7);
+  });
+
+  testWidgets('checklist button prefixes the current line with task markdown',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), 'Task item');
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Checklist'));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.controller?.text, '- [ ] Task item');
   });
 
   testWidgets('italic shortcut inserts markdown placeholder at the caret',
@@ -590,6 +1014,41 @@ void main() {
     final bodyField = tester.widget<TextField>(_bodyField());
     expect(bodyField.focusNode?.hasFocus, isTrue);
     expect(bodyField.controller?.selection.baseOffset, 0);
+  });
+
+  testWidgets('inactive checklist checkbox toggles markdown state',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    final note = Note(
+      id: 'note-3',
+      title: 'Checklist note',
+      content: '- [ ] Done task\nNext line',
+      documentJson: paragraphDocumentFromEditableText(
+        '- [ ] Done task\nNext line',
+      ),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    bodyField.controller!.selection = TextSelection.collapsed(
+      offset: bodyField.controller!.text.length,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('task-checkbox-overlay-0')));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<TextField>(_bodyField()).controller?.text,
+      '- [x] Done task\nNext line',
+    );
   });
 
   testWidgets('shows always-visible copy buttons for each fenced block',

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/attachments.dart';
 import '../../../core/utils/note_document.dart';
+import 'attachment_image_preview.dart';
 
 class MarkdownPreview extends StatelessWidget {
   const MarkdownPreview({
@@ -99,6 +101,16 @@ class _CodeSnippetBlock extends _MarkdownBlock {
 
   final String language;
   final String code;
+}
+
+class _ImageBlock extends _MarkdownBlock {
+  const _ImageBlock({
+    required this.altText,
+    required this.attachmentUri,
+  });
+
+  final String altText;
+  final String attachmentUri;
 }
 
 class _DividerBlock extends _MarkdownBlock {
@@ -272,6 +284,14 @@ class _MarkdownBlockView extends StatelessWidget {
             ],
           ),
         ),
+      _ImageBlock(:final altText, :final attachmentUri) =>
+        AttachmentImagePreview(
+          attachmentUri: attachmentUri,
+          altText: altText,
+          compact: compact,
+          maxWidth: compact ? 220 : 420,
+          maxHeight: compact ? 160 : 260,
+        ),
       _DividerBlock() => Divider(
           height: compact ? 8 : 16,
           color: colorScheme.outlineVariant,
@@ -348,6 +368,18 @@ List<_MarkdownBlock> _parseMarkdownBlocks(String content) {
     final trimmed = line.trim();
 
     if (trimmed.isEmpty) {
+      index++;
+      continue;
+    }
+
+    final imageMatch = parseAttachmentImageMarkdownLine(trimmed);
+    if (imageMatch != null) {
+      blocks.add(
+        _ImageBlock(
+          altText: imageMatch.altText,
+          attachmentUri: imageMatch.attachmentUri,
+        ),
+      );
       index++;
       continue;
     }

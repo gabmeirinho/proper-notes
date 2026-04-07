@@ -1,8 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/utils/attachments.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/presentation/account_sheet.dart';
 import '../../sync/application/sync_controller.dart';
@@ -10,6 +15,7 @@ import '../application/create_folder.dart';
 import '../application/create_note.dart';
 import '../application/delete_folder.dart';
 import '../application/delete_note.dart';
+import '../application/import_obsidian_vault.dart';
 import '../application/move_note.dart';
 import '../application/rename_folder.dart';
 import '../application/restore_note.dart';
@@ -76,10 +82,25 @@ class _NotesHomePageState extends State<NotesHomePage> {
   String? _dismissedSyncNotice;
   String? _lastSeenSyncNotice;
   final Set<String> _expandedFolderPaths = <String>{};
+  late final ImportObsidianVault _importObsidianVault;
 
   @override
   void initState() {
     super.initState();
+    _importObsidianVault = ImportObsidianVault(
+      ensureFolderExists: widget.folderRepository.ensureFolderExists,
+      createNote: ({
+        required String title,
+        required String content,
+        String? folderPath,
+      }) async {
+        await widget.createNote(
+          title: title,
+          content: content,
+          folderPath: folderPath,
+        );
+      },
+    );
     widget.syncController.addListener(_handleSyncControllerChanged);
   }
 
@@ -352,13 +373,14 @@ class _NotesHomePageState extends State<NotesHomePage> {
         icon: const Icon(Icons.folder_open_outlined),
       ),
       actions: [
-        _buildAccountButton(),
-        _buildSyncButton(),
         IconButton(
           onPressed: _showSearch,
           tooltip: 'Search',
           icon: const Icon(Icons.search),
         ),
+        _buildSyncButton(),
+        _buildAccountButton(),
+        _buildTopBarActionsMenu(),
       ],
     );
   }
@@ -409,6 +431,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
           ),
           _buildSyncButton(iconSize: 18),
           _buildAccountButton(iconSize: 18),
+          _buildTopBarActionsMenu(iconSize: 18),
         ],
       ),
     );
@@ -470,6 +493,31 @@ class _NotesHomePageState extends State<NotesHomePage> {
               : Icon(Icons.sync, size: iconSize),
         );
       },
+    );
+  }
+
+  Widget _buildTopBarActionsMenu({double iconSize = 24}) {
+    return PopupMenuButton<_TopBarMenuAction>(
+      tooltip: 'More app actions',
+      icon: Icon(Icons.more_vert, size: iconSize),
+      onSelected: (action) async {
+        switch (action) {
+          case _TopBarMenuAction.importObsidianNotes:
+            await _importObsidianNotes();
+          case _TopBarMenuAction.showAttachmentsFolder:
+            await _showAttachmentsFolder();
+        }
+      },
+      itemBuilder: (context) => const [
+        PopupMenuItem(
+          value: _TopBarMenuAction.importObsidianNotes,
+          child: Text('Import Obsidian notes'),
+        ),
+        PopupMenuItem(
+          value: _TopBarMenuAction.showAttachmentsFolder,
+          child: Text('Show attachments folder'),
+        ),
+      ],
     );
   }
 
@@ -595,6 +643,78 @@ class _NotesHomePageState extends State<NotesHomePage> {
           note: note,
         ),
       ),
+    );
+  }
+
+  Future<void> _importObsidianNotes() async {
+    String? selectedDirectoryPath;
+    try {
+      selectedDirectoryPath = await getDirectoryPath(
+        confirmButtonText: 'Import',
+      );
+    } catch (_) {
+      if (mounted) {
+        _showTimedSnackBar('Could not open the folder picker.');
+      }
+      return;
+    }
+
+    if (selectedDirectoryPath == null) {
+      return;
+    }
+
+    ObsidianImportResult result;
+    try {
+      result = await _importObsidianVault(vaultPath: selectedDirectoryPath);
+    } catch (_) {
+      if (mounted) {
+        _showTimedSnackBar('Could not import the selected Obsidian folder.');
+      }
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+
+    if (result.importedNoteCount == 0) {
+      _showTimedSnackBar('No Obsidian markdown notes were found to import.');
+      return;
+    }
+
+    final summary = result.hasFailures
+        ? 'Imported ${result.importedNoteCount} Obsidian notes. Skipped ${result.failedFileCount} files.'
+        : 'Imported ${result.importedNoteCount} Obsidian notes.';
+    _showTimedSnackBar(summary);
+  }
+
+  Future<void> _showAttachmentsFolder() async {
+    final directory = await getAttachmentsDirectory();
+    var opened = false;
+
+    try {
+      opened = await launchUrl(
+        Uri.directory(directory.path),
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (_) {
+      opened = false;
+    }
+
+    if (!opened && !kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
+      try {
+        final result = await Process.run('xdg-open', <String>[directory.path]);
+        opened = result.exitCode == 0;
+      } catch (_) {
+        opened = false;
+      }
+    }
+
+    if (!mounted || opened) {
+      return;
+    }
+
+    _showTimedSnackBar(
+      'Could not open attachments folder: ${directory.path}',
     );
   }
 
@@ -2327,6 +2447,11 @@ class _SidebarNoteSyncIndicator extends StatelessWidget {
       ),
     );
   }
+}
+
+enum _TopBarMenuAction {
+  importObsidianNotes,
+  showAttachmentsFolder,
 }
 
 class _NotesList extends StatelessWidget {
