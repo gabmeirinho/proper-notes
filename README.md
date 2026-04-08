@@ -18,6 +18,7 @@ Current user-facing capabilities:
 - nested folders with rename, move, drag-and-drop, and subtree-aware delete flows
 - desktop workspace with a collapsible sidebar, trash in the workspace, and an embedded editor
 - lighter mobile layout with folder context moved into the app bar
+- pasted and linked attachment images rendered inline inside the editor
 - per-note sync-state indicators and dismissible sync notices
 - cross-device create, edit, delete, restore, and conflict-copy preservation
 - Linux launcher install flow and Android release APK workflow
@@ -30,6 +31,8 @@ Current editor behavior:
 - one text editor remains the canonical editing surface
 - inactive lines render headings, bullets, and quotes in a friendlier way
 - the editor still has fence-based code insertion and inactive-line fenced-code styling
+- attachment image markdown renders as inline previews outside the active editing line
+- attachment preview selection keeps image markdown hidden during normal pointer use and routes typing to a safe insertion point instead of directly into adjacent attachment links
 
 Current preview behavior:
 - note list previews render headings, paragraphs, lists, quotes, dividers, bold, italic, and inline code
@@ -250,8 +253,6 @@ Current verification state:
 - the full automated Flutter test suite is green in this workspace
 - the last tagged release candidate is `v0.1.0-rc1`
 - the current worktree has moved beyond that tag
-
-For manual release validation and cross-device checks, use `QA_CHECKLIST.md`.
 
 ## Current Caveats
 
