@@ -990,6 +990,46 @@ void main() {
     expect(find.text(secondImageLine), findsNothing);
   });
 
+  testWidgets(
+      'clicking an image above another attachment inserts a safe blank line for typing',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const firstImageLine = '![One](attachment://first.png)';
+    const secondImageLine = '![Two](attachment://second.png)';
+    final content = '$firstImageLine\n$secondImageLine';
+    final note = Note(
+      id: 'note-attachment-adjacent-images-safe-caret',
+      title: 'Attachment note',
+      content: content,
+      documentJson: paragraphDocumentFromEditableText(content),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(
+      tester.getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+    );
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.controller!.text, '$firstImageLine\n\n$secondImageLine');
+    expect(find.text(secondImageLine), findsNothing);
+    expect(
+      tester
+          .widget<AttachmentImagePreview>(
+            find.byKey(const ValueKey('attachment-image-overlay-0')),
+          )
+          .selected,
+      isTrue,
+    );
+  });
+
   testWidgets('clicking an already selected attachment does not scroll',
       (tester) async {
     final repository = _StubNoteRepository();

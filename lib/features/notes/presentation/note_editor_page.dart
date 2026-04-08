@@ -2413,9 +2413,20 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   _PreparedAttachmentImageSelection _prepareAttachmentImageSelection(
     _AttachmentImageOverlayGeometry overlay,
   ) {
+    var deleteStart = overlay.deleteStart;
     var deleteEnd = overlay.deleteEnd;
     var focusOffset = overlay.focusOffset;
-    final text = widget.controller.text;
+    var text = widget.controller.text;
+
+    final lines = text.split('\n');
+    final hasAdjacentAttachmentBelow = overlay.lineIndex < lines.length - 1 &&
+        parseAttachmentImageMarkdownLine(lines[overlay.lineIndex + 1]) != null;
+    if (hasAdjacentAttachmentBelow) {
+      final updatedText = text.replaceRange(focusOffset, focusOffset, '\n');
+      widget.controller.text = updatedText;
+      text = updatedText;
+      focusOffset = overlay.focusOffset;
+    }
 
     final isTrailingAttachmentLine = deleteEnd == text.length;
     if (isTrailingAttachmentLine && !text.endsWith('\n')) {
@@ -2423,10 +2434,11 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
       widget.controller.text = updatedText;
       deleteEnd = updatedText.length;
       focusOffset = updatedText.length;
+      text = updatedText;
     }
 
     return _PreparedAttachmentImageSelection(
-      deleteStart: overlay.deleteStart,
+      deleteStart: deleteStart,
       deleteEnd: deleteEnd,
       focusOffset: focusOffset,
     );
