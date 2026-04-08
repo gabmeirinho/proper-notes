@@ -5,6 +5,7 @@ abstract interface class NoteRepository {
   Stream<List<Note>> watchActiveNotes({String? folderPath});
   Stream<List<Note>> watchDeletedNotes({String? folderPath});
   Future<List<Note>> searchNotes(String query, {String? folderPath});
+  Future<int> countAttachmentReferences(String attachmentUri);
   Future<List<Note>> getActiveNotesForSync();
   Future<List<Note>> getDeletedNotesForSync();
   Future<Note?> getById(String id);

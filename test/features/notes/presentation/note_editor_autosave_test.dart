@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:proper_notes/core/utils/attachments.dart';
 import 'package:proper_notes/core/utils/note_document.dart';
 import 'package:proper_notes/features/notes/application/create_note.dart';
 import 'package:proper_notes/features/notes/application/update_note.dart';
@@ -184,6 +185,7 @@ Widget _buildEditor({
           repository: repository,
           deviceId: 'device-1',
         ),
+        noteRepository: repository,
         embedded: embedded,
         onClose: onClose,
       ),
@@ -207,6 +209,15 @@ class _RecordingNoteRepository implements NoteRepository {
 
   @override
   Future<void> applyRemoteDeletion(RemoteNote remoteNote) async {}
+
+  @override
+  Future<int> countAttachmentReferences(String attachmentUri) async {
+    return _activeNotes.fold<int>(
+      0,
+      (total, note) =>
+          total + countAttachmentReferencesInText(note.content, attachmentUri),
+    );
+  }
 
   @override
   Future<void> create(Note note) async {

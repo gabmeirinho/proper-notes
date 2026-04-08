@@ -559,6 +559,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
         builder: (context) => NoteEditorPage(
           createNote: widget.createNote,
           updateNote: widget.updateNote,
+          noteRepository: widget.noteRepository,
           initialFolderPath: _selectedFolderPath,
         ),
       ),
@@ -640,6 +641,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
         builder: (context) => NoteEditorPage(
           createNote: widget.createNote,
           updateNote: widget.updateNote,
+          noteRepository: widget.noteRepository,
           note: note,
         ),
       ),
@@ -1506,6 +1508,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
         key: ValueKey('desktop-editor-${session.sessionId}'),
         createNote: widget.createNote,
         updateNote: widget.updateNote,
+        noteRepository: widget.noteRepository,
         note: session.note,
         initialFolderPath: session.initialFolderPath,
         embedded: true,
@@ -1841,7 +1844,7 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
       children.add(
         _SidebarNoteTile(
           note: note,
-          depth: 1,
+          depth: 0,
           selected: note.id == selectedNoteId,
           onOpen: onOpenNote,
           onShowContextMenu: onShowNoteMenu,
@@ -1933,6 +1936,16 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
       return branch;
     }
 
+    for (final childFolder in childFolders) {
+      branch.addAll(
+        _buildFolderBranch(
+          folder: childFolder,
+          foldersByParent: foldersByParent,
+          notesByFolder: notesByFolder,
+        ),
+      );
+    }
+
     for (final note in childNotes) {
       branch.add(
         _SidebarNoteTile(
@@ -1942,16 +1955,6 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
           onOpen: onOpenNote,
           onShowContextMenu: onShowNoteMenu,
           dragData: _DesktopSidebarDragDataNote(note),
-        ),
-      );
-    }
-
-    for (final childFolder in childFolders) {
-      branch.addAll(
-        _buildFolderBranch(
-          folder: childFolder,
-          foldersByParent: foldersByParent,
-          notesByFolder: notesByFolder,
         ),
       );
     }
@@ -2148,91 +2151,96 @@ class _SidebarFolderTile extends StatelessWidget {
     }
 
     Widget buildTile(bool isDropTargetActive) {
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onSecondaryTapDown: (details) =>
-            _showFolderMenu(context, details.globalPosition),
-        onLongPressStart: (details) =>
-            _showFolderMenu(context, details.globalPosition),
-        child: Material(
-          color: isDropTargetActive
-              ? colorScheme.secondaryContainer
-              : Colors.transparent,
-          child: InkWell(
-            key: ValueKey('sidebar-folder-tile-${folder.path}'),
-            onTap: onTap,
-            hoverColor: colorScheme.primary.withValues(alpha: 0.18),
-            child: Padding(
-              padding: EdgeInsets.only(
-                left: 8 + (folder.depth * 14),
-                right: 4,
-                top: 2,
-                bottom: 2,
-              ),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 28,
-                    child: hasChildren
-                        ? IconButton(
-                            key: ValueKey(
-                                'sidebar-folder-toggle-${folder.path}'),
-                            onPressed: onToggleExpanded,
-                            tooltip:
-                                expanded ? 'Collapse folder' : 'Expand folder',
-                            iconSize: 18,
-                            splashRadius: 16,
-                            icon: Icon(
-                              expanded
-                                  ? Icons.keyboard_arrow_down
-                                  : Icons.keyboard_arrow_right,
-                            ),
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                  const Icon(Icons.folder_outlined, size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      folder.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+      return _SidebarTreeGuide(
+        depth: folder.depth,
+        guideKey: ValueKey('sidebar-tree-guide-folder-${folder.path}'),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onSecondaryTapDown: (details) =>
+              _showFolderMenu(context, details.globalPosition),
+          onLongPressStart: (details) =>
+              _showFolderMenu(context, details.globalPosition),
+          child: Material(
+            color: isDropTargetActive
+                ? colorScheme.secondaryContainer
+                : Colors.transparent,
+            child: InkWell(
+              key: ValueKey('sidebar-folder-tile-${folder.path}'),
+              onTap: onTap,
+              hoverColor: colorScheme.primary.withValues(alpha: 0.18),
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 8 + (folder.depth * 14),
+                  right: 4,
+                  top: 2,
+                  bottom: 2,
+                ),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 28,
+                      child: hasChildren
+                          ? IconButton(
+                              key: ValueKey(
+                                  'sidebar-folder-toggle-${folder.path}'),
+                              onPressed: onToggleExpanded,
+                              tooltip: expanded
+                                  ? 'Collapse folder'
+                                  : 'Expand folder',
+                              iconSize: 18,
+                              splashRadius: 16,
+                              icon: Icon(
+                                expanded
+                                    ? Icons.keyboard_arrow_down
+                                    : Icons.keyboard_arrow_right,
+                              ),
+                            )
+                          : const SizedBox.shrink(),
                     ),
-                  ),
-                  Tooltip(
-                    message: 'Drag folder',
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: buildDragHandle(),
+                    const Icon(Icons.folder_outlined, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        folder.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
-                  PopupMenuButton<_FolderMenuAction>(
-                    tooltip: 'Folder actions',
-                    onSelected: (action) => _handleFolderAction(action),
-                    itemBuilder: (context) => const [
-                      PopupMenuItem(
-                        value: _FolderMenuAction.createNote,
-                        child: Text('New note'),
+                    Tooltip(
+                      message: 'Drag folder',
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: buildDragHandle(),
                       ),
-                      PopupMenuItem(
-                        value: _FolderMenuAction.createFolder,
-                        child: Text('New folder'),
-                      ),
-                      PopupMenuItem(
-                        value: _FolderMenuAction.move,
-                        child: Text('Move'),
-                      ),
-                      PopupMenuItem(
-                        value: _FolderMenuAction.rename,
-                        child: Text('Rename'),
-                      ),
-                      PopupMenuItem(
-                        value: _FolderMenuAction.delete,
-                        child: Text('Delete'),
-                      ),
-                    ],
-                  ),
-                ],
+                    ),
+                    PopupMenuButton<_FolderMenuAction>(
+                      tooltip: 'Folder actions',
+                      onSelected: (action) => _handleFolderAction(action),
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(
+                          value: _FolderMenuAction.createNote,
+                          child: Text('New note'),
+                        ),
+                        PopupMenuItem(
+                          value: _FolderMenuAction.createFolder,
+                          child: Text('New folder'),
+                        ),
+                        PopupMenuItem(
+                          value: _FolderMenuAction.move,
+                          child: Text('Move'),
+                        ),
+                        PopupMenuItem(
+                          value: _FolderMenuAction.rename,
+                          child: Text('Rename'),
+                        ),
+                        PopupMenuItem(
+                          value: _FolderMenuAction.delete,
+                          child: Text('Delete'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -2334,38 +2342,43 @@ class _SidebarNoteTile extends StatelessWidget {
         );
 
     Widget buildTile() {
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onSecondaryTapDown: (details) =>
-            onShowContextMenu(note, details.globalPosition),
-        onLongPressStart: (details) =>
-            onShowContextMenu(note, details.globalPosition),
-        child: Material(
-          color: selected ? colorScheme.secondaryContainer : Colors.transparent,
-          child: InkWell(
-            key: ValueKey('sidebar-note-${note.id}'),
-            onTap: () => onOpen(note),
-            hoverColor: colorScheme.primary.withValues(alpha: 0.18),
-            child: Padding(
-              padding: EdgeInsets.only(
-                left: 48 + (depth * 14),
-                right: 12,
-                top: 8,
-                bottom: 8,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: titleStyle,
+      return _SidebarTreeGuide(
+        depth: depth,
+        guideKey: ValueKey('sidebar-tree-guide-note-${note.id}'),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onSecondaryTapDown: (details) =>
+              onShowContextMenu(note, details.globalPosition),
+          onLongPressStart: (details) =>
+              onShowContextMenu(note, details.globalPosition),
+          child: Material(
+            color:
+                selected ? colorScheme.secondaryContainer : Colors.transparent,
+            child: InkWell(
+              key: ValueKey('sidebar-note-${note.id}'),
+              onTap: () => onOpen(note),
+              hoverColor: colorScheme.primary.withValues(alpha: 0.18),
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 48 + (depth * 14),
+                  right: 12,
+                  top: 8,
+                  bottom: 8,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: titleStyle,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  _SidebarNoteSyncIndicator(status: note.syncStatus),
-                ],
+                    const SizedBox(width: 8),
+                    _SidebarNoteSyncIndicator(status: note.syncStatus),
+                  ],
+                ),
               ),
             ),
           ),
@@ -2401,6 +2414,46 @@ class _SidebarNoteTile extends StatelessWidget {
         child: buildTile(),
       ),
       child: buildTile(),
+    );
+  }
+}
+
+class _SidebarTreeGuide extends StatelessWidget {
+  const _SidebarTreeGuide({
+    required this.depth,
+    required this.child,
+    required this.guideKey,
+  });
+
+  final int depth;
+  final Widget child;
+  final Key guideKey;
+
+  @override
+  Widget build(BuildContext context) {
+    if (depth <= 0) {
+      return child;
+    }
+
+    final guideColor = Theme.of(context).colorScheme.outlineVariant;
+    final leftOffset = 18.0 + ((depth - 1) * 14.0);
+
+    return Stack(
+      children: [
+        Positioned(
+          left: leftOffset,
+          top: 2,
+          bottom: 2,
+          child: IgnorePointer(
+            child: Container(
+              key: guideKey,
+              width: 1,
+              color: guideColor.withValues(alpha: 0.8),
+            ),
+          ),
+        ),
+        child,
+      ],
     );
   }
 }

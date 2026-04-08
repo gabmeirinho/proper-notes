@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../../core/utils/attachments.dart';
 import '../../core/utils/note_document.dart';
 import '../../features/notes/domain/note.dart';
 import '../../features/notes/domain/note_repository.dart';
@@ -11,6 +12,16 @@ class DriftNoteRepository implements NoteRepository {
   DriftNoteRepository(this._database);
 
   final AppDatabase _database;
+
+  @override
+  Future<int> countAttachmentReferences(String attachmentUri) async {
+    final rows = await _database.select(_database.notesTable).get();
+    return rows.fold<int>(
+      0,
+      (total, row) =>
+          total + countAttachmentReferencesInText(row.content, attachmentUri),
+    );
+  }
 
   @override
   Future<void> create(Note note) async {

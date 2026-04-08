@@ -45,6 +45,39 @@ void main() {
     expect(await resolved!.exists(), isTrue);
     expect(resolved.path, saved.file.path);
   });
+
+  test('counts exact attachment URI references in text', () {
+    expect(
+      countAttachmentReferencesInText(
+        '![one](attachment://figure.png)\n![two](attachment://figure.png)',
+        'attachment://figure.png',
+      ),
+      2,
+    );
+    expect(
+      countAttachmentReferencesInText(
+        '![other](attachment://other.png)',
+        'attachment://figure.png',
+      ),
+      0,
+    );
+  });
+
+  test('deletes attachment files directly when trash is disabled', () async {
+    final saved = await saveAttachmentImageBytes(
+      Uint8List.fromList(_transparentPixelPngBytes),
+      extension: 'png',
+    );
+
+    final result = await deleteAttachmentFile(
+      saved.attachmentUri,
+      preferSystemTrash: false,
+    );
+
+    expect(result.existed, isTrue);
+    expect(result.movedToTrash, isFalse);
+    expect(await saved.file.exists(), isFalse);
+  });
 }
 
 const List<int> _transparentPixelPngBytes = <int>[

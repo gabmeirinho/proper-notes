@@ -37,6 +37,18 @@ class SavedAttachmentImage {
   final File file;
 }
 
+class DeleteAttachmentFileResult {
+  const DeleteAttachmentFileResult({
+    required this.fileName,
+    required this.existed,
+    required this.movedToTrash,
+  });
+
+  final String fileName;
+  final bool existed;
+  final bool movedToTrash;
+}
+
 AttachmentImageMarkdown? parseAttachmentImageMarkdownLine(String line) {
   final match =
       RegExp(r'^\s*!\[(.*?)\]\((attachment://[^)\s]+)\)\s*$').firstMatch(line);
@@ -131,6 +143,54 @@ String buildAttachmentImageMarkdown(
   String altText = '',
 }) {
   return '![$altText]($attachmentUri)';
+}
+
+int countAttachmentReferencesInText(String text, String attachmentUri) {
+  if (text.isEmpty || attachmentUri.isEmpty) {
+    return 0;
+  }
+
+  return RegExp(RegExp.escape(attachmentUri)).allMatches(text).length;
+}
+
+Future<DeleteAttachmentFileResult> deleteAttachmentFile(
+  String attachmentUri, {
+  bool preferSystemTrash = true,
+}) async {
+  final fileName = attachmentFileNameFromUri(attachmentUri) ?? attachmentUri;
+  final file = await resolveAttachmentFile(attachmentUri);
+  if (file == null || !await file.exists()) {
+    return DeleteAttachmentFileResult(
+      fileName: fileName,
+      existed: false,
+      movedToTrash: false,
+    );
+  }
+
+  if (preferSystemTrash &&
+      debugAttachmentDirectoryOverride == null &&
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.linux) {
+    try {
+      final result = await Process.run('gio', <String>['trash', file.path]);
+      if (result.exitCode == 0) {
+        return DeleteAttachmentFileResult(
+          fileName: fileName,
+          existed: true,
+          movedToTrash: true,
+        );
+      }
+    } catch (_) {
+      // Fall back to direct deletion when the desktop trash command is missing.
+    }
+  }
+
+  await file.delete();
+  return DeleteAttachmentFileResult(
+    fileName: fileName,
+    existed: true,
+    movedToTrash: false,
+  );
 }
 
 Future<SavedAttachmentImage> saveAttachmentImageBytes(

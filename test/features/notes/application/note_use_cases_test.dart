@@ -45,7 +45,8 @@ void main() {
   });
 
   group('UpdateNote', () {
-    test('updates title, markdown content, sync status and device id', () async {
+    test('updates title, markdown content, sync status and device id',
+        () async {
       final repository = _FakeNoteRepository();
       final useCase = UpdateNote(
         repository: repository,
@@ -164,6 +165,9 @@ class _FakeNoteRepository implements NoteRepository {
   final List<DateTime> softDeleteTimestamps = [];
   final List<String> searchQueries = [];
   final List<Note> _searchResults;
+
+  @override
+  Future<int> countAttachmentReferences(String attachmentUri) async => 0;
 
   @override
   Future<void> create(Note note) async {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:proper_notes/core/utils/attachments.dart';
 import 'package:proper_notes/features/auth/application/auth_controller.dart';
 import 'package:proper_notes/features/auth/domain/auth_service.dart';
 import 'package:proper_notes/features/auth/domain/auth_session.dart';
@@ -422,6 +423,283 @@ void main() {
       );
 
       expect(folderTop.dy, lessThan(noteTop.dy));
+    },
+  );
+
+  testWidgets(
+    'desktop sidebar shows child folders before notes inside an expanded folder',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final folderRepository = _FakeFolderRepository(
+        initialFolders: [
+          Folder(
+            path: 'Projects',
+            parentPath: null,
+            createdAt: DateTime(2026, 1, 1),
+          ),
+          Folder(
+            path: 'Projects/Archive',
+            parentPath: 'Projects',
+            createdAt: DateTime(2026, 1, 2),
+          ),
+        ],
+      );
+      final noteRepository = _FakeNoteRepository(
+        initialActiveNotes: [
+          Note(
+            id: 'note-projects',
+            title: 'Roadmap',
+            content: 'Plan the next release',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 2),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'hash-1',
+            deviceId: 'device-1',
+            folderPath: 'Projects',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NotesHomePage(
+            createNote: CreateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            createFolder: CreateFolder(repository: folderRepository),
+            deleteFolder: DeleteFolder(repository: folderRepository),
+            renameFolder: RenameFolder(repository: folderRepository),
+            moveNote: MoveNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            updateNote: UpdateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            deleteNote: DeleteNote(repository: noteRepository),
+            restoreNote: RestoreNote(repository: noteRepository),
+            searchNotes: SearchNotes(repository: noteRepository),
+            folderRepository: folderRepository,
+            noteRepository: noteRepository,
+            authController: AuthController(authService: _FakeAuthService()),
+            syncController: SyncController(
+              runManualSync: RunManualSync(
+                noteRepository: noteRepository,
+                syncGateway: _FakeSyncGateway(),
+                syncStateRepository: _FakeSyncStateRepository(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(
+        find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+      );
+      await tester.pump();
+
+      final childFolderTop = tester.getTopLeft(
+        find.byKey(const ValueKey('sidebar-folder-tile-Projects/Archive')),
+      );
+      final childNoteTop = tester.getTopLeft(
+        find.byKey(const ValueKey('sidebar-note-note-projects')),
+      );
+
+      expect(childFolderTop.dy, lessThan(childNoteTop.dy));
+    },
+  );
+
+  testWidgets(
+    'desktop root notes are less indented than notes inside a root folder',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final folderRepository = _FakeFolderRepository(
+        initialFolders: [
+          Folder(
+            path: 'Job',
+            parentPath: null,
+            createdAt: DateTime(2026, 1, 1),
+          ),
+        ],
+      );
+      final noteRepository = _FakeNoteRepository(
+        initialActiveNotes: [
+          Note(
+            id: 'note-job',
+            title: 'Roadmap',
+            content: 'Plan the next release',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 2),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'hash-job',
+            deviceId: 'device-1',
+            folderPath: 'Job',
+          ),
+          Note(
+            id: 'note-root',
+            title: 'Android',
+            content: 'Root note',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 2),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'hash-root',
+            deviceId: 'device-1',
+            folderPath: null,
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NotesHomePage(
+            createNote: CreateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            createFolder: CreateFolder(repository: folderRepository),
+            deleteFolder: DeleteFolder(repository: folderRepository),
+            renameFolder: RenameFolder(repository: folderRepository),
+            moveNote: MoveNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            updateNote: UpdateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            deleteNote: DeleteNote(repository: noteRepository),
+            restoreNote: RestoreNote(repository: noteRepository),
+            searchNotes: SearchNotes(repository: noteRepository),
+            folderRepository: folderRepository,
+            noteRepository: noteRepository,
+            authController: AuthController(authService: _FakeAuthService()),
+            syncController: SyncController(
+              runManualSync: RunManualSync(
+                noteRepository: noteRepository,
+                syncGateway: _FakeSyncGateway(),
+                syncStateRepository: _FakeSyncStateRepository(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(find.byKey(const ValueKey('sidebar-folder-tile-Job')));
+      await tester.pump();
+
+      final nestedNoteLeft = tester.getTopLeft(find.text('Roadmap'));
+      final rootNoteLeft = tester.getTopLeft(find.text('Android'));
+
+      expect(rootNoteLeft.dx, lessThan(nestedNoteLeft.dx));
+    },
+  );
+
+  testWidgets(
+    'desktop sidebar shows branch guides for nested items only',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final folderRepository = _FakeFolderRepository(
+        initialFolders: [
+          Folder(
+            path: 'Job',
+            parentPath: null,
+            createdAt: DateTime(2026, 1, 1),
+          ),
+        ],
+      );
+      final noteRepository = _FakeNoteRepository(
+        initialActiveNotes: [
+          Note(
+            id: 'note-job',
+            title: 'Roadmap',
+            content: 'Nested note',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 2),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'hash-job',
+            deviceId: 'device-1',
+            folderPath: 'Job',
+          ),
+          Note(
+            id: 'note-root',
+            title: 'Android',
+            content: 'Root note',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 2),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'hash-root',
+            deviceId: 'device-1',
+            folderPath: null,
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NotesHomePage(
+            createNote: CreateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            createFolder: CreateFolder(repository: folderRepository),
+            deleteFolder: DeleteFolder(repository: folderRepository),
+            renameFolder: RenameFolder(repository: folderRepository),
+            moveNote: MoveNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            updateNote: UpdateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            deleteNote: DeleteNote(repository: noteRepository),
+            restoreNote: RestoreNote(repository: noteRepository),
+            searchNotes: SearchNotes(repository: noteRepository),
+            folderRepository: folderRepository,
+            noteRepository: noteRepository,
+            authController: AuthController(authService: _FakeAuthService()),
+            syncController: SyncController(
+              runManualSync: RunManualSync(
+                noteRepository: noteRepository,
+                syncGateway: _FakeSyncGateway(),
+                syncStateRepository: _FakeSyncStateRepository(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(find.byKey(const ValueKey('sidebar-folder-tile-Job')));
+      await tester.pump();
+
+      expect(
+        find.byKey(const ValueKey('sidebar-tree-guide-note-note-job')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('sidebar-tree-guide-note-note-root')),
+        findsNothing,
+      );
     },
   );
 
@@ -1725,6 +2003,15 @@ class _FakeNoteRepository implements NoteRepository {
       StreamController<List<Note>>.broadcast();
   final StreamController<List<Note>> _deletedController =
       StreamController<List<Note>>.broadcast();
+
+  @override
+  Future<int> countAttachmentReferences(String attachmentUri) async {
+    return [..._activeNotes, ..._deletedNotes].fold<int>(
+      0,
+      (total, note) =>
+          total + countAttachmentReferencesInText(note.content, attachmentUri),
+    );
+  }
 
   @override
   Future<void> applyRemoteDeletion(RemoteNote remoteNote) async {}

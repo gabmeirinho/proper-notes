@@ -214,6 +214,36 @@ void main() {
 
     expect(stored?.folderPath, 'Projects/Proper Notes');
   });
+
+  test(
+      'countAttachmentReferences counts matches across active and deleted notes',
+      () async {
+    final active = _buildNote(
+      id: 'note-attachment-active',
+      title: 'Active',
+      content:
+          '![one](attachment://figure.png)\n![two](attachment://figure.png)',
+      updatedAt: DateTime.utc(2026, 3, 24, 10),
+    );
+    final deleted = _buildNote(
+      id: 'note-attachment-deleted',
+      title: 'Deleted',
+      content: '![three](attachment://figure.png)',
+      updatedAt: DateTime.utc(2026, 3, 24, 11),
+    );
+
+    await repository.create(active);
+    await repository.create(deleted);
+    await repository.softDelete(
+      deleted.id,
+      DateTime.utc(2026, 3, 24, 12),
+    );
+
+    final count =
+        await repository.countAttachmentReferences('attachment://figure.png');
+
+    expect(count, 3);
+  });
 }
 
 Note _buildNote({

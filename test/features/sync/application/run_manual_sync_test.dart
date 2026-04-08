@@ -454,6 +454,9 @@ class _FakeNoteRepository implements NoteRepository {
   final List<Note> createdConflictCopies = [];
 
   @override
+  Future<int> countAttachmentReferences(String attachmentUri) async => 0;
+
+  @override
   Future<void> create(Note note) async {
     createdConflictCopies.add(note);
   }

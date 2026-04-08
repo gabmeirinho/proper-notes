@@ -396,11 +396,13 @@ void main() {
       find.byType(AttachmentImagePreview),
     );
     expect(updatedBodyField.focusNode!.hasFocus, isTrue);
-    expect(updatedBodyField.controller!.selection.baseOffset,
-        imageLine.length + 1);
+    expect(
+      updatedBodyField.controller!.selection.baseOffset,
+      bodyField.controller!.text.length,
+    );
     expect(
       updatedBodyField.controller!.selection.extentOffset,
-      imageLine.length + 1,
+      bodyField.controller!.text.length,
     );
     expect(find.byType(AttachmentImagePreview), findsOneWidget);
     expect(preview.selected, isTrue);
@@ -430,6 +432,7 @@ void main() {
 
     final bodyField = tester.widget<TextField>(_bodyField());
     expect(bodyField.focusNode!.hasFocus, isFalse);
+    final initialSelectionOffset = bodyField.controller!.selection.baseOffset;
 
     await tester.tapAt(
       tester
@@ -446,10 +449,161 @@ void main() {
     );
     expect(
       tester.widget<TextField>(_bodyField()).controller!.selection.baseOffset,
-      imageLine.length + 1,
+      initialSelectionOffset >= 0 ? initialSelectionOffset : 37,
     );
     expect(find.byType(AttachmentImagePreview), findsOneWidget);
     expect(find.byType(Dialog), findsNothing);
+  });
+
+  testWidgets(
+      'clicking attachment preview preserves the prior selection even if the gesture moves it',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-selection-restore',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    final originalSelection = TextSelection.collapsed(
+      offset: bodyField.controller!.text.length,
+    );
+    bodyField.controller!.selection = originalSelection;
+    await tester.pump();
+
+    final imageCenter = tester.getCenter(
+      find.byKey(const ValueKey('attachment-image-overlay-0')),
+    );
+    final gesture = await tester.startGesture(imageCenter);
+    await tester.pump();
+
+    tester.widget<TextField>(_bodyField()).controller!.selection =
+        const TextSelection.collapsed(offset: 0);
+    await tester.pump();
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    final updatedBodyField = tester.widget<TextField>(_bodyField());
+    expect(
+      updatedBodyField.controller!.selection.baseOffset,
+      originalSelection.baseOffset,
+    );
+    expect(
+      tester
+          .widget<AttachmentImagePreview>(find.byType(AttachmentImagePreview))
+          .selected,
+      isTrue,
+    );
+  });
+
+  testWidgets(
+      'typing can continue from the existing caret after selecting an attachment preview',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-typing-after-tap',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    const insertionOffset = 0;
+    bodyField.controller!.selection = const TextSelection.collapsed(
+      offset: insertionOffset,
+    );
+    await tester.pump();
+
+    await tester.tapAt(
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+    );
+    await tester.pumpAndSettle();
+
+    final updatedBodyField = tester.widget<TextField>(_bodyField());
+    updatedBodyField.controller!.value =
+        updatedBodyField.controller!.value.copyWith(
+      text: 'X${updatedBodyField.controller!.text}',
+      selection: const TextSelection.collapsed(offset: insertionOffset + 1),
+    );
+    await tester.pump();
+
+    expect(
+      tester.widget<TextField>(_bodyField()).controller!.text,
+      'X$imageLine\n\nNext line',
+    );
+    expect(tester.widget<TextField>(_bodyField()).focusNode!.hasFocus, isTrue);
+    expect(find.byType(AttachmentImagePreview), findsNothing);
+  });
+
+  testWidgets(
+      'touch tapping attachment preview keeps the preview instead of activating raw markdown',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-touch-tap',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    final originalSelection = TextSelection.collapsed(
+      offset: bodyField.controller!.text.length,
+    );
+    bodyField.controller!.selection = originalSelection;
+    await tester.pump();
+
+    final imageCenter = tester.getCenter(
+      find.byKey(const ValueKey('attachment-image-overlay-0')),
+    );
+    final gesture = await tester.startGesture(
+      imageCenter,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
+    expect(find.text(imageLine), findsNothing);
+    expect(
+      tester.widget<TextField>(_bodyField()).controller!.selection.baseOffset,
+      originalSelection.baseOffset,
+    );
   });
 
   testWidgets('repeated clicks keep the attachment preview selected',
@@ -647,6 +801,37 @@ void main() {
     );
   });
 
+  testWidgets('selected attachment shows an actions menu button',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-actions',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Attachment actions'), findsNothing);
+
+    await tester.tapAt(
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Attachment actions'), findsOneWidget);
+  });
+
   testWidgets(
       'clicking near the bottom of attachment hitbox does not collapse it',
       (tester) async {
@@ -683,6 +868,92 @@ void main() {
 
     expect(find.byType(AttachmentImagePreview), findsOneWidget);
     expect(find.byType(Dialog), findsNothing);
+  });
+
+  testWidgets(
+      'clicking near the bottom of the visible attachment preview keeps it selected',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-visible-bottom-tap',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final previewRect = tester.getRect(
+      find.byKey(const ValueKey('attachment-image-overlay-0')),
+    );
+    await tester.tapAt(
+      Offset(previewRect.center.dx, previewRect.bottom - 2),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
+    expect(
+      tester
+          .widget<AttachmentImagePreview>(find.byType(AttachmentImagePreview))
+          .selected,
+      isTrue,
+    );
+    expect(find.text(imageLine), findsNothing);
+  });
+
+  testWidgets('clicking an already selected attachment does not scroll',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    final trailingLines = List<String>.generate(80, (index) => 'Line $index');
+    final content = [
+      '![Diagram](attachment://preview.png)',
+      '',
+      ...trailingLines,
+    ].join('\n');
+    final note = Note(
+      id: 'note-attachment-repeat-selected-no-scroll',
+      title: 'Attachment note',
+      content: content,
+      documentJson: paragraphDocumentFromEditableText(content),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final editableText = tester.widget<EditableText>(
+      find.byType(EditableText).last,
+    );
+    final scrollController = editableText.scrollController!;
+    final imageFinder =
+        find.byKey(const ValueKey('attachment-image-overlay-0'));
+
+    await tester.tapAt(tester.getCenter(imageFinder));
+    await tester.pumpAndSettle();
+    final offsetAfterFirstTap = scrollController.offset;
+
+    await tester.tapAt(tester.getCenter(imageFinder));
+    await tester.pumpAndSettle();
+
+    expect(scrollController.offset, offsetAfterFirstTap);
+    expect(
+      tester
+          .widget<AttachmentImagePreview>(find.byType(AttachmentImagePreview))
+          .selected,
+      isTrue,
+    );
   });
 
   testWidgets('right clicking attachment preview does not open a dialog',
@@ -1308,6 +1579,7 @@ Widget _buildEditor({
           repository: repository,
           deviceId: 'device-1',
         ),
+        noteRepository: repository,
         note: note,
         embedded: embedded,
         onClose: embedded ? () {} : null,
@@ -1319,8 +1591,14 @@ Widget _buildEditor({
 Finder _bodyField() => find.byType(TextField).last;
 
 class _StubNoteRepository implements NoteRepository {
+  final Map<String, int> attachmentReferenceCounts = <String, int>{};
+
   @override
   Future<void> applyRemoteDeletion(RemoteNote remoteNote) async {}
+
+  @override
+  Future<int> countAttachmentReferences(String attachmentUri) async =>
+      attachmentReferenceCounts[attachmentUri] ?? 0;
 
   @override
   Future<void> create(Note note) async {}

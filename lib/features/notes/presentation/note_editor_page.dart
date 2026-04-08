@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -12,11 +13,13 @@ import 'attachment_image_preview.dart';
 import '../application/create_note.dart';
 import '../application/update_note.dart';
 import '../domain/note.dart';
+import '../domain/note_repository.dart';
 
 class NoteEditorPage extends StatefulWidget {
   const NoteEditorPage({
     required this.createNote,
     required this.updateNote,
+    required this.noteRepository,
     this.note,
     this.initialFolderPath,
     this.embedded = false,
@@ -27,6 +30,7 @@ class NoteEditorPage extends StatefulWidget {
 
   final CreateNote createNote;
   final UpdateNote updateNote;
+  final NoteRepository noteRepository;
   final Note? note;
   final String? initialFolderPath;
   final bool embedded;
@@ -229,6 +233,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
           toggleQuote: _toggleQuote,
           insertCodeSnippet: _insertCodeSnippet,
           copyCurrentCodeSnippet: _copyCurrentCodeSnippet,
+          deleteAttachmentFile: _deleteAttachmentFileWithConfirmation,
           onContentTap: _handleContentTap,
         ),
       ),
@@ -444,6 +449,97 @@ class _NoteEditorPageState extends State<NoteEditorPage>
     }
 
     return true;
+  }
+
+  Future<int> _countAttachmentReferences(String attachmentUri) async {
+    final persistedCount = countAttachmentReferencesInText(
+      _persistedNote?.content ?? '',
+      attachmentUri,
+    );
+    final currentCount = countAttachmentReferencesInText(
+      _contentController.text,
+      attachmentUri,
+    );
+    final repositoryCount =
+        await widget.noteRepository.countAttachmentReferences(
+      attachmentUri,
+    );
+
+    return math.max(0, repositoryCount - persistedCount + currentCount);
+  }
+
+  Future<bool> _deleteAttachmentFileWithConfirmation(
+      String attachmentUri) async {
+    final fileName = attachmentFileNameFromUri(attachmentUri) ?? attachmentUri;
+    final referenceCount = await _countAttachmentReferences(attachmentUri);
+    if (!mounted) {
+      return false;
+    }
+
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) {
+            final willUseTrash =
+                !kIsWeb && defaultTargetPlatform == TargetPlatform.linux;
+            final referenceLabel = referenceCount == 1
+                ? 'There is currently 1 link pointing to this file.'
+                : 'There are currently $referenceCount links pointing to this file.';
+
+            return AlertDialog(
+              title: const Text('Delete file'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Are you sure you want to delete "$fileName"?'),
+                  const SizedBox(height: 12),
+                  Text(
+                    willUseTrash
+                        ? 'It will be moved to your system trash when possible.'
+                        : 'It will be deleted from local app storage.',
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    referenceLabel,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Delete'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+    if (!confirmed) {
+      return false;
+    }
+
+    final result = await deleteAttachmentFile(attachmentUri);
+    if (!mounted) {
+      return result.existed;
+    }
+
+    setState(() {});
+    final messenger = ScaffoldMessenger.of(context);
+    final message = !result.existed
+        ? '$fileName was already missing.'
+        : result.movedToTrash
+            ? '$fileName moved to trash.'
+            : '$fileName deleted from local storage.';
+    messenger.showSnackBar(SnackBar(content: Text(message)));
+    return result.existed;
   }
 
   Future<void> _requestClose() async {
@@ -777,6 +873,7 @@ class _NoteEditorContent extends StatelessWidget {
     required this.toggleQuote,
     required this.insertCodeSnippet,
     required this.copyCurrentCodeSnippet,
+    required this.deleteAttachmentFile,
     required this.onContentTap,
   });
 
@@ -802,6 +899,7 @@ class _NoteEditorContent extends StatelessWidget {
   final VoidCallback toggleQuote;
   final VoidCallback insertCodeSnippet;
   final Future<void> Function() copyCurrentCodeSnippet;
+  final Future<bool> Function(String attachmentUri) deleteAttachmentFile;
   final VoidCallback onContentTap;
 
   @override
@@ -908,6 +1006,7 @@ class _NoteEditorContent extends StatelessWidget {
             documentEditorKey: editorKey,
             focusNode: contentFocusNode,
             embedded: embedded,
+            deleteAttachmentFile: deleteAttachmentFile,
             onTap: onContentTap,
           ),
         ),
@@ -1868,6 +1967,7 @@ class _MarkdownEditorPane extends StatelessWidget {
     required this.documentEditorKey,
     required this.focusNode,
     required this.embedded,
+    required this.deleteAttachmentFile,
     required this.onTap,
   });
 
@@ -1875,6 +1975,7 @@ class _MarkdownEditorPane extends StatelessWidget {
   final GlobalKey<_DocumentBlocksEditorState> documentEditorKey;
   final FocusNode focusNode;
   final bool embedded;
+  final Future<bool> Function(String attachmentUri) deleteAttachmentFile;
   final VoidCallback onTap;
 
   @override
@@ -1892,6 +1993,7 @@ class _MarkdownEditorPane extends StatelessWidget {
         key: const ValueKey('document-block-editor'),
         controller: controller,
         focusNode: focusNode,
+        deleteAttachmentFile: deleteAttachmentFile,
         onTap: onTap,
       ),
     );
@@ -1903,11 +2005,13 @@ class _UnifiedMarkdownEditor extends StatefulWidget {
     super.key,
     required this.controller,
     required this.focusNode,
+    required this.deleteAttachmentFile,
     required this.onTap,
   });
 
   final _MarkdownEditingController controller;
   final FocusNode focusNode;
+  final Future<bool> Function(String attachmentUri) deleteAttachmentFile;
   final VoidCallback onTap;
 
   @override
@@ -1926,6 +2030,8 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   final Map<String, Size> _attachmentImageSizes = <String, Size>{};
   final Set<String> _loadingAttachmentImageSizes = <String>{};
   _SelectedAttachmentImage? _selectedAttachmentImage;
+  TextSelection? _pendingAttachmentTapSelection;
+  TextSelection? _lastStableEditorSelection;
 
   @override
   void initState() {
@@ -1982,8 +2088,13 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   }
 
   void _handleControllerChanged() {
+    final textChanged = widget.controller.text != _lastRenderedText;
+    if (textChanged && _selectedAttachmentImage != null) {
+      _clearSelectedAttachmentImage();
+    }
     _ensureAttachmentImageSizes();
     _syncSelectedAttachmentImageWithText();
+    _rememberStableEditorSelection();
     if (_keepCaretOutOfSelectedAttachmentImage()) {
       return;
     }
@@ -2011,6 +2122,29 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     if (mounted) {
       setState(() {});
     }
+  }
+
+  void _rememberStableEditorSelection() {
+    if (_pendingAttachmentTapSelection != null) {
+      return;
+    }
+
+    final selection = widget.controller.selection;
+    if (!selection.isValid) {
+      return;
+    }
+
+    final selectedImage = _selectedAttachmentImage;
+    if (selectedImage != null && selection.isCollapsed) {
+      final offset =
+          selection.extentOffset.clamp(0, widget.controller.text.length);
+      if (offset >= selectedImage.deleteStart &&
+          offset < selectedImage.deleteEnd) {
+        return;
+      }
+    }
+
+    _lastStableEditorSelection = selection;
   }
 
   bool _keepCaretOutOfSelectedAttachmentImage() {
@@ -2225,7 +2359,45 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     });
   }
 
-  void _selectAttachmentImage(_AttachmentImageOverlayGeometry overlay) {
+  void _focusEditorPreservingSelection() {
+    _focusEditorWithSelection(widget.controller.selection);
+  }
+
+  void _focusEditorWithSelection(TextSelection selection) {
+    final textLength = widget.controller.text.length;
+    final clampedSelection = selection.isValid
+        ? TextSelection(
+            baseOffset: selection.baseOffset.clamp(0, textLength),
+            extentOffset: selection.extentOffset.clamp(0, textLength),
+          )
+        : TextSelection.collapsed(offset: textLength);
+
+    widget.controller.selection = clampedSelection;
+    FocusScope.of(context).requestFocus(widget.focusNode);
+    widget.focusNode.requestFocus();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      FocusScope.of(context).requestFocus(widget.focusNode);
+      widget.focusNode.requestFocus();
+      widget.controller.selection = clampedSelection;
+    });
+  }
+
+  void _selectAttachmentImage(
+    _AttachmentImageOverlayGeometry overlay, {
+    TextSelection? preservedSelection,
+  }) {
+    final selectionToPreserve =
+        preservedSelection ?? widget.controller.selection;
+    if (_selectedAttachmentImage?.lineIndex == overlay.lineIndex &&
+        _selectedAttachmentImage?.attachmentUri == overlay.attachmentUri) {
+      _focusEditorWithSelection(selectionToPreserve);
+      return;
+    }
+
     setState(() {
       _selectedAttachmentImage = _SelectedAttachmentImage(
         lineIndex: overlay.lineIndex,
@@ -2235,7 +2407,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
         focusOffset: overlay.focusOffset,
       );
     });
-    _focusEditorAt(overlay.focusOffset);
+    _focusEditorWithSelection(selectionToPreserve);
   }
 
   void _clearSelectedAttachmentImage() {
@@ -2302,9 +2474,59 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     return true;
   }
 
+  bool _removeAttachmentReferencesFromCurrentNote(String attachmentUri) {
+    final lines = widget.controller.text.split('\n');
+    final filteredLines = lines
+        .where(
+          (line) =>
+              parseAttachmentImageMarkdownLine(line)?.attachmentUri !=
+              attachmentUri,
+        )
+        .toList(growable: false);
+    if (filteredLines.length == lines.length) {
+      return false;
+    }
+
+    final updatedText = filteredLines.join('\n');
+    final currentSelection = widget.controller.selection;
+    final nextOffset = currentSelection.isValid
+        ? currentSelection.extentOffset.clamp(0, updatedText.length)
+        : updatedText.length;
+
+    _attachmentImageSizes.remove(attachmentUri);
+    setState(() {
+      _selectedAttachmentImage = null;
+    });
+    widget.controller.value = TextEditingValue(
+      text: updatedText,
+      selection: TextSelection.collapsed(offset: nextOffset),
+    );
+    _focusEditorPreservingSelection();
+    return true;
+  }
+
   void _handleEditorTap() {
     _clearSelectedAttachmentImage();
     widget.onTap();
+  }
+
+  Future<void> _handleSelectedAttachmentAction(
+    _SelectedAttachmentAction action,
+    _AttachmentImageOverlayGeometry overlay,
+  ) async {
+    switch (action) {
+      case _SelectedAttachmentAction.removeFromNote:
+        _deleteSelectedAttachmentImage();
+        return;
+      case _SelectedAttachmentAction.deleteFile:
+        final deleted =
+            await widget.deleteAttachmentFile(overlay.attachmentUri);
+        if (!mounted || !deleted) {
+          return;
+        }
+        _removeAttachmentReferencesFromCurrentNote(overlay.attachmentUri);
+        return;
+    }
   }
 
   bool _handleCodeFenceWordJump(KeyEvent event) {
@@ -2567,35 +2789,119 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                         ),
                         cursor: SystemMouseCursors.basic,
                         opaque: false,
-                        child: GestureDetector(
+                        child: Listener(
                           behavior: HitTestBehavior.opaque,
-                          onTap: () => _selectAttachmentImage(overlay),
-                          onSecondaryTap: _clearSelectedAttachmentImage,
-                          child: Align(
-                            alignment: Alignment.topLeft,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: _UnifiedMarkdownEditorState
-                                        ._imagePreviewVerticalInset /
-                                    2,
-                              ),
-                              child: AttachmentImagePreview(
-                                key: ValueKey(
-                                  'attachment-image-overlay-${overlay.lineIndex}',
+                          onPointerDown: (_) {
+                            final selection = _lastStableEditorSelection ??
+                                widget.controller.selection;
+                            final preservedSelection = selection.isValid
+                                ? selection
+                                : TextSelection.collapsed(
+                                    offset: overlay.focusOffset,
+                                  );
+                            _pendingAttachmentTapSelection = preservedSelection;
+                            _selectAttachmentImage(
+                              overlay,
+                              preservedSelection: preservedSelection,
+                            );
+                            _focusEditorWithSelection(preservedSelection);
+                          },
+                          onPointerUp: (_) {
+                            final preservedSelection =
+                                _pendingAttachmentTapSelection;
+                            if (preservedSelection == null) {
+                              return;
+                            }
+                            _focusEditorWithSelection(preservedSelection);
+                          },
+                          onPointerCancel: (_) {
+                            _pendingAttachmentTapSelection = null;
+                          },
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTapCancel: () {
+                              _pendingAttachmentTapSelection = null;
+                            },
+                            onTap: () {
+                              final preservedSelection =
+                                  _pendingAttachmentTapSelection;
+                              _pendingAttachmentTapSelection = null;
+                              _selectAttachmentImage(
+                                overlay,
+                                preservedSelection: preservedSelection,
+                              );
+                            },
+                            onSecondaryTap: _clearSelectedAttachmentImage,
+                            child: Align(
+                              alignment: Alignment.topLeft,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: _UnifiedMarkdownEditorState
+                                          ._imagePreviewVerticalInset /
+                                      2,
                                 ),
-                                attachmentUri: overlay.attachmentUri,
-                                altText: overlay.altText,
-                                maxWidth: overlay.width,
-                                maxHeight: overlay.previewHeight,
-                                ignorePointer: true,
-                                selected: _selectedAttachmentImage?.lineIndex ==
-                                    overlay.lineIndex,
+                                child: AttachmentImagePreview(
+                                  key: ValueKey(
+                                    'attachment-image-overlay-${overlay.lineIndex}',
+                                  ),
+                                  attachmentUri: overlay.attachmentUri,
+                                  altText: overlay.altText,
+                                  maxWidth: overlay.width,
+                                  maxHeight: overlay.previewHeight,
+                                  ignorePointer: true,
+                                  selected:
+                                      _selectedAttachmentImage?.lineIndex ==
+                                          overlay.lineIndex,
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
                     ),
+                  for (final overlay in imageOverlays)
+                    if (_selectedAttachmentImage?.lineIndex ==
+                        overlay.lineIndex)
+                      Positioned(
+                        top: overlay.top + 8,
+                        left: math.max(
+                          overlay.left,
+                          overlay.left + overlay.width - 44,
+                        ),
+                        child: Material(
+                          color: Theme.of(context).colorScheme.surface,
+                          elevation: 2,
+                          borderRadius: BorderRadius.circular(12),
+                          child: PopupMenuButton<_SelectedAttachmentAction>(
+                            tooltip: 'Attachment actions',
+                            onSelected: (action) {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (!mounted) {
+                                  return;
+                                }
+                                unawaited(
+                                  _handleSelectedAttachmentAction(
+                                    action,
+                                    overlay,
+                                  ),
+                                );
+                              });
+                            },
+                            itemBuilder: (context) => const <PopupMenuEntry<
+                                _SelectedAttachmentAction>>[
+                              PopupMenuItem<_SelectedAttachmentAction>(
+                                value: _SelectedAttachmentAction.removeFromNote,
+                                child: Text('Remove from note'),
+                              ),
+                              PopupMenuItem<_SelectedAttachmentAction>(
+                                value: _SelectedAttachmentAction.deleteFile,
+                                child: Text('Delete file...'),
+                              ),
+                            ],
+                            icon: const Icon(Icons.more_horiz, size: 18),
+                          ),
+                        ),
+                      ),
                   for (final overlay in snippetOverlays)
                     Positioned(
                       top: overlay.top + 6,
@@ -2755,7 +3061,8 @@ List<_AttachmentImageOverlayGeometry> _buildAttachmentImageOverlayGeometry(
                     _UnifiedMarkdownEditorState._editorContentPadding.top -
                     scrollOffset,
                 width: displaySize.width,
-                height: math.max(0, lastBox.bottom - firstBox.top),
+                height: displaySize.height +
+                    _UnifiedMarkdownEditorState._imagePreviewVerticalInset,
                 previewHeight: displaySize.height,
               ),
             );
@@ -2865,6 +3172,11 @@ class _SnippetOverlayGeometry {
   final double right;
   final double top;
   final double height;
+}
+
+enum _SelectedAttachmentAction {
+  removeFromNote,
+  deleteFile,
 }
 
 class _AttachmentImageOverlayGeometry {
