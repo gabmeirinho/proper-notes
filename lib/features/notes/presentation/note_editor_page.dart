@@ -1984,6 +1984,9 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   void _handleControllerChanged() {
     _ensureAttachmentImageSizes();
     _syncSelectedAttachmentImageWithText();
+    if (_keepCaretOutOfSelectedAttachmentImage()) {
+      return;
+    }
     final commands = _matchingSlashCommands;
     final nextIndex = commands.isEmpty
         ? 0
@@ -2008,6 +2011,30 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     if (mounted) {
       setState(() {});
     }
+  }
+
+  bool _keepCaretOutOfSelectedAttachmentImage() {
+    final selectedImage = _selectedAttachmentImage;
+    final selection = widget.controller.selection;
+    if (selectedImage == null ||
+        !selection.isValid ||
+        !selection.isCollapsed ||
+        widget.controller.text.isEmpty) {
+      return false;
+    }
+
+    final offset =
+        selection.extentOffset.clamp(0, widget.controller.text.length);
+    if (offset == selectedImage.focusOffset ||
+        offset < selectedImage.deleteStart ||
+        offset >= selectedImage.deleteEnd) {
+      return false;
+    }
+
+    widget.controller.selection = TextSelection.collapsed(
+      offset: selectedImage.focusOffset.clamp(0, widget.controller.text.length),
+    );
+    return true;
   }
 
   bool get _isWholeDocumentSelected {
@@ -2198,8 +2225,16 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     });
   }
 
-  void _focusAfterAttachmentImage(_AttachmentImageOverlayGeometry overlay) {
-    _clearSelectedAttachmentImage();
+  void _selectAttachmentImage(_AttachmentImageOverlayGeometry overlay) {
+    setState(() {
+      _selectedAttachmentImage = _SelectedAttachmentImage(
+        lineIndex: overlay.lineIndex,
+        attachmentUri: overlay.attachmentUri,
+        deleteStart: overlay.deleteStart,
+        deleteEnd: overlay.deleteEnd,
+        focusOffset: overlay.focusOffset,
+      );
+    });
     _focusEditorAt(overlay.focusOffset);
   }
 
@@ -2339,6 +2374,14 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
       return KeyEventResult.handled;
     }
 
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      _clearSelectedAttachmentImage();
+      widget.controller.selection = widget.controller.selection.copyWith(
+        baseOffset: widget.controller.selection.extentOffset,
+      );
+      return KeyEventResult.handled;
+    }
+
     final commands = _matchingSlashCommands;
     if (commands.isEmpty) {
       return KeyEventResult.ignored;
@@ -2364,14 +2407,6 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     if (event.logicalKey == LogicalKeyboardKey.enter ||
         event.logicalKey == LogicalKeyboardKey.numpadEnter) {
       _applySlashCommand(commands[_selectedSlashCommandIndex]);
-      return KeyEventResult.handled;
-    }
-
-    if (event.logicalKey == LogicalKeyboardKey.escape) {
-      _clearSelectedAttachmentImage();
-      widget.controller.selection = widget.controller.selection.copyWith(
-        baseOffset: widget.controller.selection.extentOffset,
-      );
       return KeyEventResult.handled;
     }
 
@@ -2429,7 +2464,9 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                       textSpan: overlayTextSpan,
                       maxWidth: constraints.maxWidth,
                       maxHeight: constraints.maxHeight,
-                      activeLineIndex: widget.focusNode.hasFocus
+                      activeLineIndex: widget.focusNode.hasFocus &&
+                              widget.controller._activeLineIndex !=
+                                  _selectedAttachmentImage?.lineIndex
                           ? widget.controller._activeLineIndex
                           : -1,
                       attachmentImageSizes: _attachmentImageSizes,
@@ -2527,7 +2564,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                         opaque: false,
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
-                          onTap: () => _focusAfterAttachmentImage(overlay),
+                          onTap: () => _selectAttachmentImage(overlay),
                           onSecondaryTap: _clearSelectedAttachmentImage,
                           child: Align(
                             alignment: Alignment.topLeft,

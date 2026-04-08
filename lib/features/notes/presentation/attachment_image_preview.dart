@@ -99,9 +99,10 @@ class _AttachmentImagePreviewState extends State<AttachmentImagePreview> {
 
     final colorScheme = Theme.of(context).colorScheme;
     return DecoratedBox(
+      position: DecorationPosition.foreground,
       decoration: BoxDecoration(
         borderRadius: borderRadius,
-        border: Border.all(color: colorScheme.primary, width: 2),
+        border: Border.all(color: colorScheme.primary, width: 3),
       ),
       child: child,
     );

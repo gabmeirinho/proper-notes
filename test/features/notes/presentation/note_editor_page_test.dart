@@ -360,8 +360,7 @@ void main() {
     expect(find.byType(AttachmentImagePreview), findsNothing);
   });
 
-  testWidgets('clicking attachment preview focuses after the image line',
-      (tester) async {
+  testWidgets('clicking attachment preview selects the image', (tester) async {
     final repository = _StubNoteRepository();
     const imageLine = '![Diagram](attachment://preview.png)';
     final note = Note(
@@ -393,6 +392,9 @@ void main() {
     await tester.pumpAndSettle();
 
     final updatedBodyField = tester.widget<TextField>(_bodyField());
+    final preview = tester.widget<AttachmentImagePreview>(
+      find.byType(AttachmentImagePreview),
+    );
     expect(updatedBodyField.focusNode!.hasFocus, isTrue);
     expect(updatedBodyField.controller!.selection.baseOffset,
         imageLine.length + 1);
@@ -401,12 +403,12 @@ void main() {
       imageLine.length + 1,
     );
     expect(find.byType(AttachmentImagePreview), findsOneWidget);
+    expect(preview.selected, isTrue);
     expect(find.byTooltip('Close image preview'), findsNothing);
     expect(find.byType(Dialog), findsNothing);
   });
 
-  testWidgets(
-      'clicking attachment preview while unfocused focuses editor after image',
+  testWidgets('clicking attachment preview while unfocused selects the image',
       (tester) async {
     final repository = _StubNoteRepository();
     const imageLine = '![Diagram](attachment://preview.png)';
@@ -437,11 +439,168 @@ void main() {
 
     expect(tester.widget<TextField>(_bodyField()).focusNode!.hasFocus, isTrue);
     expect(
+      tester
+          .widget<AttachmentImagePreview>(find.byType(AttachmentImagePreview))
+          .selected,
+      isTrue,
+    );
+    expect(
       tester.widget<TextField>(_bodyField()).controller!.selection.baseOffset,
       imageLine.length + 1,
     );
     expect(find.byType(AttachmentImagePreview), findsOneWidget);
     expect(find.byType(Dialog), findsNothing);
+  });
+
+  testWidgets('repeated clicks keep the attachment preview selected',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-repeat-tap',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final imageFinder =
+        find.byKey(const ValueKey('attachment-image-overlay-0'));
+    await tester.tapAt(tester.getCenter(imageFinder));
+    await tester.pumpAndSettle();
+    await tester.tapAt(tester.getCenter(imageFinder));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
+    expect(
+      tester
+          .widget<AttachmentImagePreview>(find.byType(AttachmentImagePreview))
+          .selected,
+      isTrue,
+    );
+    expect(find.text(imageLine), findsNothing);
+  });
+
+  testWidgets('delete removes a selected attachment preview', (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-delete',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AttachmentImagePreview), findsNothing);
+    expect(
+      tester.widget<TextField>(_bodyField()).controller!.text,
+      '\nNext line',
+    );
+  });
+
+  testWidgets('backspace removes a selected attachment preview',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-backspace',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AttachmentImagePreview), findsNothing);
+    expect(
+      tester.widget<TextField>(_bodyField()).controller!.text,
+      '\nNext line',
+    );
+  });
+
+  testWidgets('escape clears a selected attachment preview', (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-escape',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<AttachmentImagePreview>(find.byType(AttachmentImagePreview))
+          .selected,
+      isTrue,
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<AttachmentImagePreview>(find.byType(AttachmentImagePreview))
+          .selected,
+      isFalse,
+    );
   });
 
   testWidgets(
