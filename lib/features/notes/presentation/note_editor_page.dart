@@ -2302,6 +2302,11 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     return true;
   }
 
+  void _handleEditorTap() {
+    _clearSelectedAttachmentImage();
+    widget.onTap();
+  }
+
   bool _handleCodeFenceWordJump(KeyEvent event) {
     final selection = widget.controller.selection;
     if (!selection.isValid || !selection.isCollapsed) {
@@ -2528,7 +2533,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                           controller: widget.controller,
                           focusNode: widget.focusNode,
                           scrollController: _editorScrollController,
-                          onTap: widget.onTap,
+                          onTap: _handleEditorTap,
                           inputFormatters: const [
                             _MarkdownListEditingFormatter(),
                           ],

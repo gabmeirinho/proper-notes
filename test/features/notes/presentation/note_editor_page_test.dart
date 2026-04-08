@@ -603,6 +603,50 @@ void main() {
     );
   });
 
+  testWidgets('clicking elsewhere clears a selected attachment preview',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-clear-on-text-tap',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<AttachmentImagePreview>(find.byType(AttachmentImagePreview))
+          .selected,
+      isTrue,
+    );
+
+    await tester.tap(_bodyField());
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<AttachmentImagePreview>(find.byType(AttachmentImagePreview))
+          .selected,
+      isFalse,
+    );
+  });
+
   testWidgets(
       'clicking near the bottom of attachment hitbox does not collapse it',
       (tester) async {
