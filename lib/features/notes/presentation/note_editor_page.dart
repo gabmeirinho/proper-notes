@@ -2032,6 +2032,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   _SelectedAttachmentImage? _selectedAttachmentImage;
   TextSelection? _pendingAttachmentTapSelection;
   TextSelection? _lastStableEditorSelection;
+  bool _suppressNextEditorTap = false;
 
   @override
   void initState() {
@@ -2390,11 +2391,10 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     _AttachmentImageOverlayGeometry overlay, {
     TextSelection? preservedSelection,
   }) {
-    final selectionToPreserve =
-        preservedSelection ?? widget.controller.selection;
+    final selectionData = _prepareAttachmentImageSelection(overlay);
     if (_selectedAttachmentImage?.lineIndex == overlay.lineIndex &&
         _selectedAttachmentImage?.attachmentUri == overlay.attachmentUri) {
-      _focusEditorWithSelection(selectionToPreserve);
+      _focusEditorAt(selectionData.focusOffset);
       return;
     }
 
@@ -2402,12 +2402,34 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
       _selectedAttachmentImage = _SelectedAttachmentImage(
         lineIndex: overlay.lineIndex,
         attachmentUri: overlay.attachmentUri,
-        deleteStart: overlay.deleteStart,
-        deleteEnd: overlay.deleteEnd,
-        focusOffset: overlay.focusOffset,
+        deleteStart: selectionData.deleteStart,
+        deleteEnd: selectionData.deleteEnd,
+        focusOffset: selectionData.focusOffset,
       );
     });
-    _focusEditorWithSelection(selectionToPreserve);
+    _focusEditorAt(selectionData.focusOffset);
+  }
+
+  _PreparedAttachmentImageSelection _prepareAttachmentImageSelection(
+    _AttachmentImageOverlayGeometry overlay,
+  ) {
+    var deleteEnd = overlay.deleteEnd;
+    var focusOffset = overlay.focusOffset;
+    final text = widget.controller.text;
+
+    final isTrailingAttachmentLine = deleteEnd == text.length;
+    if (isTrailingAttachmentLine && !text.endsWith('\n')) {
+      final updatedText = '$text\n';
+      widget.controller.text = updatedText;
+      deleteEnd = updatedText.length;
+      focusOffset = updatedText.length;
+    }
+
+    return _PreparedAttachmentImageSelection(
+      deleteStart: overlay.deleteStart,
+      deleteEnd: deleteEnd,
+      focusOffset: focusOffset,
+    );
   }
 
   void _clearSelectedAttachmentImage() {
@@ -2506,6 +2528,9 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   }
 
   void _handleEditorTap() {
+    if (_suppressNextEditorTap) {
+      return;
+    }
     _clearSelectedAttachmentImage();
     widget.onTap();
   }
@@ -2663,7 +2688,8 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
               widget.controller.attachmentImageMaxWidth = contentWidth;
               widget.controller.attachmentImageMaxHeight = contentHeight;
               widget.controller.showActiveMarkdownLine =
-                  widget.focusNode.hasFocus;
+                  widget.focusNode.hasFocus &&
+                  _selectedAttachmentImage == null;
               widget.controller.selectedAttachmentLineIndex =
                   _selectedAttachmentImage?.lineIndex;
               final overlayTextSpan = style == null
@@ -2692,6 +2718,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                       maxWidth: constraints.maxWidth,
                       maxHeight: constraints.maxHeight,
                       activeLineIndex: widget.focusNode.hasFocus &&
+                              _selectedAttachmentImage == null &&
                               widget.controller._activeLineIndex !=
                                   _selectedAttachmentImage?.lineIndex
                           ? widget.controller._activeLineIndex
@@ -2729,12 +2756,12 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                   Positioned.fill(
                     child: GestureDetector(
                       behavior: HitTestBehavior.translucent,
-                      onTapDown: (details) {
+                          onTapDown: (details) {
                         final tappedAttachmentPreview = imageOverlays.any(
                           (overlay) => Rect.fromLTWH(
                             overlay.left,
                             overlay.top,
-                            overlay.width,
+                            overlay.hitboxWidth,
                             overlay.height,
                           ).contains(details.localPosition),
                         );
@@ -2781,7 +2808,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                     Positioned(
                       left: overlay.left,
                       top: overlay.top,
-                      width: overlay.width,
+                      width: overlay.hitboxWidth,
                       height: overlay.height,
                       child: MouseRegion(
                         key: ValueKey(
@@ -2792,28 +2819,12 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                         child: Listener(
                           behavior: HitTestBehavior.opaque,
                           onPointerDown: (_) {
-                            final selection = _lastStableEditorSelection ??
-                                widget.controller.selection;
-                            final preservedSelection = selection.isValid
-                                ? selection
-                                : TextSelection.collapsed(
-                                    offset: overlay.focusOffset,
-                                  );
-                            _pendingAttachmentTapSelection = preservedSelection;
-                            _selectAttachmentImage(
-                              overlay,
-                              preservedSelection: preservedSelection,
+                            _pendingAttachmentTapSelection =
+                                TextSelection.collapsed(
+                              offset: overlay.focusOffset,
                             );
-                            _focusEditorWithSelection(preservedSelection);
                           },
-                          onPointerUp: (_) {
-                            final preservedSelection =
-                                _pendingAttachmentTapSelection;
-                            if (preservedSelection == null) {
-                              return;
-                            }
-                            _focusEditorWithSelection(preservedSelection);
-                          },
+                          onPointerUp: (_) {},
                           onPointerCancel: (_) {
                             _pendingAttachmentTapSelection = null;
                           },
@@ -2826,6 +2837,10 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                               final preservedSelection =
                                   _pendingAttachmentTapSelection;
                               _pendingAttachmentTapSelection = null;
+                              _suppressNextEditorTap = true;
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                _suppressNextEditorTap = false;
+                              });
                               _selectAttachmentImage(
                                 overlay,
                                 preservedSelection: preservedSelection,
@@ -2846,7 +2861,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                                   ),
                                   attachmentUri: overlay.attachmentUri,
                                   altText: overlay.altText,
-                                  maxWidth: overlay.width,
+                                  maxWidth: overlay.previewWidth,
                                   maxHeight: overlay.previewHeight,
                                   ignorePointer: true,
                                   selected:
@@ -2866,7 +2881,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                         top: overlay.top + 8,
                         left: math.max(
                           overlay.left,
-                          overlay.left + overlay.width - 44,
+                          overlay.left + overlay.hitboxWidth - 44,
                         ),
                         child: Material(
                           color: Theme.of(context).colorScheme.surface,
@@ -3044,7 +3059,7 @@ List<_AttachmentImageOverlayGeometry> _buildAttachmentImageOverlayGeometry(
                     : line.length);
             final focusOffset = index < lines.length - 1
                 ? lineStartOffset + line.length + 1
-                : (lineStartOffset > 0 ? lineStartOffset - 1 : 0);
+                : lineStartOffset + line.length;
             overlays.add(
               _AttachmentImageOverlayGeometry(
                 lineIndex: index,
@@ -3060,7 +3075,8 @@ List<_AttachmentImageOverlayGeometry> _buildAttachmentImageOverlayGeometry(
                 top: firstBox.top +
                     _UnifiedMarkdownEditorState._editorContentPadding.top -
                     scrollOffset,
-                width: displaySize.width,
+                hitboxWidth: contentWidth - firstBox.left,
+                previewWidth: displaySize.width,
                 height: displaySize.height +
                     _UnifiedMarkdownEditorState._imagePreviewVerticalInset,
                 previewHeight: displaySize.height,
@@ -3189,7 +3205,8 @@ class _AttachmentImageOverlayGeometry {
     required this.deleteEnd,
     required this.left,
     required this.top,
-    required this.width,
+    required this.hitboxWidth,
+    required this.previewWidth,
     required this.height,
     required this.previewHeight,
   });
@@ -3202,7 +3219,8 @@ class _AttachmentImageOverlayGeometry {
   final int deleteEnd;
   final double left;
   final double top;
-  final double width;
+  final double hitboxWidth;
+  final double previewWidth;
   final double height;
   final double previewHeight;
 }
@@ -3218,6 +3236,18 @@ class _SelectedAttachmentImage {
 
   final int lineIndex;
   final String attachmentUri;
+  final int deleteStart;
+  final int deleteEnd;
+  final int focusOffset;
+}
+
+class _PreparedAttachmentImageSelection {
+  const _PreparedAttachmentImageSelection({
+    required this.deleteStart,
+    required this.deleteEnd,
+    required this.focusOffset,
+  });
+
   final int deleteStart;
   final int deleteEnd;
   final int focusOffset;

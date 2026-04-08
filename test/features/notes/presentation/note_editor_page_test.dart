@@ -350,7 +350,7 @@ void main() {
     await tester.pumpWidget(_buildEditor(repository: repository, note: note));
     await tester.pump();
 
-    await tester.tap(_bodyField());
+    await tester.showKeyboard(_bodyField());
     await tester.pumpAndSettle();
 
     final bodyField = tester.widget<TextField>(_bodyField());
@@ -398,11 +398,11 @@ void main() {
     expect(updatedBodyField.focusNode!.hasFocus, isTrue);
     expect(
       updatedBodyField.controller!.selection.baseOffset,
-      bodyField.controller!.text.length,
+      37,
     );
     expect(
       updatedBodyField.controller!.selection.extentOffset,
-      bodyField.controller!.text.length,
+      37,
     );
     expect(find.byType(AttachmentImagePreview), findsOneWidget);
     expect(preview.selected, isTrue);
@@ -432,7 +432,6 @@ void main() {
 
     final bodyField = tester.widget<TextField>(_bodyField());
     expect(bodyField.focusNode!.hasFocus, isFalse);
-    final initialSelectionOffset = bodyField.controller!.selection.baseOffset;
 
     await tester.tapAt(
       tester
@@ -449,14 +448,14 @@ void main() {
     );
     expect(
       tester.widget<TextField>(_bodyField()).controller!.selection.baseOffset,
-      initialSelectionOffset >= 0 ? initialSelectionOffset : 37,
+      37,
     );
     expect(find.byType(AttachmentImagePreview), findsOneWidget);
     expect(find.byType(Dialog), findsNothing);
   });
 
   testWidgets(
-      'clicking attachment preview preserves the prior selection even if the gesture moves it',
+      'clicking attachment preview moves the caret to the image insertion point even if the gesture moves it',
       (tester) async {
     final repository = _StubNoteRepository();
     const imageLine = '![Diagram](attachment://preview.png)';
@@ -477,10 +476,9 @@ void main() {
     await tester.pumpAndSettle();
 
     final bodyField = tester.widget<TextField>(_bodyField());
-    final originalSelection = TextSelection.collapsed(
+    bodyField.controller!.selection = TextSelection.collapsed(
       offset: bodyField.controller!.text.length,
     );
-    bodyField.controller!.selection = originalSelection;
     await tester.pump();
 
     final imageCenter = tester.getCenter(
@@ -499,7 +497,7 @@ void main() {
     final updatedBodyField = tester.widget<TextField>(_bodyField());
     expect(
       updatedBodyField.controller!.selection.baseOffset,
-      originalSelection.baseOffset,
+      37,
     );
     expect(
       tester
@@ -510,7 +508,7 @@ void main() {
   });
 
   testWidgets(
-      'typing can continue from the existing caret after selecting an attachment preview',
+      'typing after selecting an attachment preview inserts beside the image instead of at the old caret',
       (tester) async {
     final repository = _StubNoteRepository();
     const imageLine = '![Diagram](attachment://preview.png)';
@@ -531,9 +529,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final bodyField = tester.widget<TextField>(_bodyField());
-    const insertionOffset = 0;
     bodyField.controller!.selection = const TextSelection.collapsed(
-      offset: insertionOffset,
+      offset: 0,
     );
     await tester.pump();
 
@@ -546,17 +543,17 @@ void main() {
     final updatedBodyField = tester.widget<TextField>(_bodyField());
     updatedBodyField.controller!.value =
         updatedBodyField.controller!.value.copyWith(
-      text: 'X${updatedBodyField.controller!.text}',
-      selection: const TextSelection.collapsed(offset: insertionOffset + 1),
+      text: '${imageLine}\nX\nNext line',
+      selection: const TextSelection.collapsed(offset: 38),
     );
     await tester.pump();
 
     expect(
       tester.widget<TextField>(_bodyField()).controller!.text,
-      'X$imageLine\n\nNext line',
+      '${imageLine}\nX\nNext line',
     );
     expect(tester.widget<TextField>(_bodyField()).focusNode!.hasFocus, isTrue);
-    expect(find.byType(AttachmentImagePreview), findsNothing);
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
   });
 
   testWidgets(
@@ -581,10 +578,9 @@ void main() {
     await tester.pumpAndSettle();
 
     final bodyField = tester.widget<TextField>(_bodyField());
-    final originalSelection = TextSelection.collapsed(
+    bodyField.controller!.selection = TextSelection.collapsed(
       offset: bodyField.controller!.text.length,
     );
-    bodyField.controller!.selection = originalSelection;
     await tester.pump();
 
     final imageCenter = tester.getCenter(
@@ -602,7 +598,7 @@ void main() {
     expect(find.text(imageLine), findsNothing);
     expect(
       tester.widget<TextField>(_bodyField()).controller!.selection.baseOffset,
-      originalSelection.baseOffset,
+      37,
     );
   });
 
@@ -790,7 +786,13 @@ void main() {
       isTrue,
     );
 
-    await tester.tap(_bodyField());
+    final bodyRect = tester.getRect(_bodyField());
+    final hitboxRect = tester.getRect(
+      find.byKey(const ValueKey('attachment-image-hitbox-0')),
+    );
+    await tester.tapAt(
+      Offset(bodyRect.left + 24, hitboxRect.bottom + 24),
+    );
     await tester.pumpAndSettle();
 
     expect(
@@ -907,6 +909,85 @@ void main() {
       isTrue,
     );
     expect(find.text(imageLine), findsNothing);
+  });
+
+  testWidgets(
+      'clicking to the right of the visible attachment preview keeps markdown hidden',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-right-side-tap',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final hitboxRect = tester.getRect(
+      find.byKey(const ValueKey('attachment-image-hitbox-0')),
+    );
+    final previewRect = tester.getRect(
+      find.byKey(const ValueKey('attachment-image-overlay-0')),
+    );
+    expect(hitboxRect.right - previewRect.right, greaterThan(8));
+
+    await tester.tapAt(
+      Offset(
+        previewRect.right + ((hitboxRect.right - previewRect.right) / 2),
+        previewRect.center.dy,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
+    expect(
+      tester
+          .widget<AttachmentImagePreview>(find.byType(AttachmentImagePreview))
+          .selected,
+      isTrue,
+    );
+    expect(find.text(imageLine), findsNothing);
+  });
+
+  testWidgets(
+      'first image click does not reveal another attachment markdown line',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const firstImageLine = '![One](attachment://first.png)';
+    const secondImageLine = '![Two](attachment://second.png)';
+    final content = '$firstImageLine\n\n$secondImageLine\n\nNext line';
+    final note = Note(
+      id: 'note-attachment-first-click-no-other-markdown',
+      title: 'Attachment note',
+      content: content,
+      documentJson: paragraphDocumentFromEditableText(content),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(
+      tester.getCenter(find.byKey(const ValueKey('attachment-image-overlay-2'))),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AttachmentImagePreview), findsNWidgets(2));
+    expect(find.text(firstImageLine), findsNothing);
+    expect(find.text(secondImageLine), findsNothing);
   });
 
   testWidgets('clicking an already selected attachment does not scroll',
