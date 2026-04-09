@@ -3,6 +3,7 @@ import 'package:proper_notes/core/utils/content_hash.dart';
 import 'package:proper_notes/features/notes/application/create_note.dart';
 import 'package:proper_notes/features/notes/application/delete_note.dart';
 import 'package:proper_notes/features/notes/application/move_note.dart';
+import 'package:proper_notes/features/notes/application/prepare_all_notes_for_sync.dart';
 import 'package:proper_notes/features/notes/application/restore_note.dart';
 import 'package:proper_notes/features/notes/application/search_notes.dart';
 import 'package:proper_notes/features/notes/application/update_note.dart';
@@ -151,12 +152,39 @@ void main() {
       expect(results.map((note) => note.id), ['note-search']);
     });
   });
+
+  group('PrepareAllNotesForSync', () {
+    test('marks synced active notes as pending upload', () async {
+      final synced = _buildNote(
+        id: 'note-sync-all',
+        title: 'Title',
+        content: 'content',
+        syncStatus: SyncStatus.synced,
+        deviceId: 'device-a',
+      );
+      final repository = _FakeNoteRepository(
+        activeNotes: [synced],
+      );
+      final useCase = PrepareAllNotesForSync(
+        repository: repository,
+      );
+
+      final preparedCount = await useCase();
+
+      expect(preparedCount, 1);
+      expect(repository.updatedNotes, hasLength(1));
+      expect(repository.updatedNotes.single.id, 'note-sync-all');
+      expect(repository.updatedNotes.single.syncStatus, SyncStatus.pendingUpload);
+    });
+  });
 }
 
 class _FakeNoteRepository implements NoteRepository {
   _FakeNoteRepository({
     List<Note>? searchResults,
-  }) : _searchResults = searchResults ?? <Note>[];
+    List<Note>? activeNotes,
+  })  : _searchResults = searchResults ?? <Note>[],
+        _activeNotes = activeNotes ?? <Note>[];
 
   final List<Note> createdNotes = [];
   final List<Note> updatedNotes = [];
@@ -165,6 +193,7 @@ class _FakeNoteRepository implements NoteRepository {
   final List<DateTime> softDeleteTimestamps = [];
   final List<String> searchQueries = [];
   final List<Note> _searchResults;
+  final List<Note> _activeNotes;
 
   @override
   Future<int> countAttachmentReferences(String attachmentUri) async => 0;
@@ -178,7 +207,7 @@ class _FakeNoteRepository implements NoteRepository {
   Future<Note?> getById(String id) async => null;
 
   @override
-  Future<List<Note>> getActiveNotesForSync() async => const [];
+  Future<List<Note>> getActiveNotesForSync() async => _activeNotes;
 
   @override
   Future<List<Note>> getDeletedNotesForSync() async => const [];

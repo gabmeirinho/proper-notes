@@ -6,6 +6,8 @@ abstract interface class SyncGateway {
   Future<RemoteSyncBatch> fetchChangesSince(String token);
   Future<List<RemoteNote>> fetchAllNotes();
   Future<RemoteNote> upsertNote(Note note);
+  Future<void> syncNoteAttachments(Note note);
+  Future<void> ensureRemoteAttachmentsAvailable(List<RemoteNote> notes);
 }
 
 class RemoteSyncBatch {

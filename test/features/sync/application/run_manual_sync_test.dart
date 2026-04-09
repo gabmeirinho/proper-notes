@@ -32,7 +32,30 @@ void main() {
 
     expect(result.uploadedCount, 1);
     expect(gateway.uploadedNoteIds, ['local-only']);
+    expect(gateway.syncedAttachmentNoteIds, ['local-only']);
     expect(repository.syncedIds, ['local-only']);
+  });
+
+  test('ensures remote attachments are downloaded before reconciliation',
+      () async {
+    final repository = _FakeNoteRepository();
+    final gateway = _FakeSyncGateway(
+      remoteNotes: [
+        _remoteNote(
+          id: 'remote-with-attachment',
+          content: '![Screenshot](attachment://shot.png)',
+        ),
+      ],
+    );
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: _FakeSyncStateRepository(),
+    );
+
+    await useCase();
+
+    expect(gateway.ensuredAttachmentRemoteIds, ['remote-with-attachment']);
   });
 
   test('downloads remote-only notes', () async {
@@ -83,6 +106,38 @@ void main() {
     expect(result.uploadedCount, 0);
     expect(result.unchangedCount, 1);
     expect(gateway.uploadedNoteIds, isEmpty);
+    expect(gateway.syncedAttachmentNoteIds, isEmpty);
+  });
+
+  test('does not sync attachments for already-synced unchanged notes',
+      () async {
+    const content = '![Screenshot](attachment://shot.png)';
+    final repository = _FakeNoteRepository(
+      localNotes: [
+        _localNote(
+          id: 'same-with-attachment',
+          content: content,
+          baseContentHash: computeContentHash(content),
+          syncStatus: SyncStatus.synced,
+          remoteFileId: 'remote-same-with-attachment',
+        ),
+      ],
+    );
+    final gateway = _FakeSyncGateway(
+      remoteNotes: const [],
+      changeBatchIsFullSnapshot: false,
+    );
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: _FakeSyncStateRepository(initialToken: 'token-1'),
+    );
+
+    final result = await useCase();
+
+    expect(result.uploadedCount, 0);
+    expect(result.unchangedCount, 1);
+    expect(gateway.syncedAttachmentNoteIds, isEmpty);
   });
 
   test('delta sync still uploads local pending notes without remote changes',
@@ -138,6 +193,93 @@ void main() {
 
     expect(result.unchangedCount, 1);
     expect(repository.syncedIds, ['same']);
+  });
+
+  test('re-downloads a remote note when local content does not match its hash',
+      () async {
+    const remoteContent = 'Organização com ação e ç';
+    final repository = _FakeNoteRepository(
+      localNotes: [
+        Note(
+          id: 'same',
+          title: 'same',
+          content: 'OrganizaÃ§Ã£o com aÃ§Ã£o e Ã§',
+          createdAt: DateTime.utc(2026, 3, 24, 10),
+          updatedAt: DateTime.utc(2026, 3, 24, 11),
+          syncStatus: SyncStatus.synced,
+          contentHash: computeContentHash(remoteContent),
+          baseContentHash: computeContentHash(remoteContent),
+          deviceId: 'device-a',
+          remoteFileId: 'remote-same',
+        ),
+      ],
+    );
+    final gateway = _FakeSyncGateway(
+      remoteNotes: [
+        _remoteNote(
+          id: 'same',
+          content: remoteContent,
+          remoteFileId: 'remote-same',
+        ),
+      ],
+    );
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: _FakeSyncStateRepository(initialToken: 'token-1'),
+    );
+
+    final result = await useCase();
+
+    expect(result.downloadedCount, 1);
+    expect(result.unchangedCount, 0);
+    expect(repository.upsertedRemoteIds, ['same']);
+  });
+
+  test('uploads local metadata-only changes when content hash is unchanged',
+      () async {
+    const content = 'same content';
+    final repository = _FakeNoteRepository(
+      localNotes: [
+        Note(
+          id: 'renamed-note',
+          title: 'Local title',
+          content: content,
+          createdAt: DateTime.utc(2026, 3, 24, 10),
+          updatedAt: DateTime.utc(2026, 3, 24, 11),
+          syncStatus: SyncStatus.pendingUpload,
+          contentHash: computeContentHash(content),
+          baseContentHash: computeContentHash(content),
+          deviceId: 'device-a',
+          remoteFileId: 'remote-renamed-note',
+        ),
+      ],
+    );
+    final gateway = _FakeSyncGateway(
+      remoteNotes: [
+        RemoteNote(
+          id: 'renamed-note',
+          title: 'Remote title',
+          content: content,
+          createdAt: DateTime.utc(2026, 3, 24, 10),
+          updatedAt: DateTime.utc(2026, 3, 24, 11),
+          contentHash: computeContentHash(content),
+          deviceId: 'device-b',
+          remoteFileId: 'remote-renamed-note',
+        ),
+      ],
+    );
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: _FakeSyncStateRepository(initialToken: 'token-1'),
+    );
+
+    final result = await useCase();
+
+    expect(result.uploadedCount, 1);
+    expect(gateway.uploadedNoteIds, ['renamed-note']);
+    expect(repository.syncedIds, ['renamed-note']);
   });
 
   test('does not rewrite already-synced unchanged notes', () async {
@@ -199,7 +341,9 @@ void main() {
     final result = await useCase();
 
     expect(result.conflictCount, 1);
-    expect(repository.conflictedIds, ['conflict']);
+    expect(repository.conflictedIds, isEmpty);
+    expect(repository.syncedIds, ['conflict']);
+    expect(gateway.uploadedNoteIds, ['conflict-copy-id', 'conflict']);
     expect(repository.createdConflictCopies, hasLength(1));
     expect(repository.createdConflictCopies.single.id, 'conflict-copy-id');
     expect(
@@ -539,6 +683,8 @@ class _FakeSyncGateway implements SyncGateway {
   final List<RemoteNote> _remoteNotes;
   final bool changeBatchIsFullSnapshot;
   final List<String> uploadedNoteIds = [];
+  final List<String> syncedAttachmentNoteIds = [];
+  final List<String> ensuredAttachmentRemoteIds = [];
   int bootstrapCalls = 0;
   final List<String> changeTokens = [];
 
@@ -573,6 +719,16 @@ class _FakeSyncGateway implements SyncGateway {
       content: note.content,
       remoteFileId: 'remote-${note.id}',
     );
+  }
+
+  @override
+  Future<void> syncNoteAttachments(Note note) async {
+    syncedAttachmentNoteIds.add(note.id);
+  }
+
+  @override
+  Future<void> ensureRemoteAttachmentsAvailable(List<RemoteNote> notes) async {
+    ensuredAttachmentRemoteIds.addAll(notes.map((note) => note.id));
   }
 }
 

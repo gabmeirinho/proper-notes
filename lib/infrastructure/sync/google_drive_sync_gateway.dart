@@ -1,10 +1,12 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 
+import '../../core/utils/attachments.dart';
 import '../../features/notes/domain/note.dart';
 import '../../features/sync/domain/remote_note.dart';
 import '../../features/sync/domain/sync_gateway.dart';
@@ -25,6 +27,7 @@ class GoogleDriveSyncGateway implements SyncGateway {
 
   static const _remoteNoteMimeType = 'application/vnd.proper-notes.note+json';
   static const _legacyRemoteNoteMimeType = 'application/json';
+  static const _remoteAttachmentPrefix = 'attachment_';
   static const _remoteFetchBatchSize = 8;
   static const _desktopAccessTokenExpirySkew = Duration(minutes: 1);
   static const _androidAccessTokenExpirySkew = Duration(minutes: 1);
@@ -76,7 +79,7 @@ class GoogleDriveSyncGateway implements SyncGateway {
         throw Exception('Failed to list Drive changes: ${response.body}');
       }
 
-      final payload = json.decode(response.body) as Map<String, dynamic>;
+      final payload = _decodeJsonResponse(response);
       final changes =
           (payload['changes'] as List<dynamic>? ?? const <dynamic>[])
               .cast<Map<String, dynamic>>();
@@ -142,7 +145,7 @@ class GoogleDriveSyncGateway implements SyncGateway {
           'Failed to list Drive app data files: ${listResponse.body}');
     }
 
-    final payload = json.decode(listResponse.body) as Map<String, dynamic>;
+    final payload = _decodeJsonResponse(listResponse);
     final files = (payload['files'] as List<dynamic>? ?? const <dynamic>[])
         .cast<Map<String, dynamic>>();
 
@@ -229,7 +232,7 @@ class GoogleDriveSyncGateway implements SyncGateway {
       throw Exception('Failed to upload Drive note: ${response.body}');
     }
 
-    final responsePayload = json.decode(response.body) as Map<String, dynamic>;
+    final responsePayload = _decodeJsonResponse(response);
     return RemoteNote(
       id: note.id,
       title: note.title,
@@ -242,6 +245,76 @@ class GoogleDriveSyncGateway implements SyncGateway {
       folderPath: note.folderPath,
       remoteFileId: responsePayload['id'] as String?,
     );
+  }
+
+  @override
+  Future<void> syncNoteAttachments(Note note) async {
+    final authHeaders = await _getAuthHeaders();
+    final attachmentUris = extractAttachmentUrisFromText(note.content);
+    for (final attachmentUri in attachmentUris) {
+      final file = await resolveAttachmentFile(attachmentUri);
+      if (file == null || !await file.exists()) {
+        continue;
+      }
+
+      final fileName = attachmentFileNameFromUri(attachmentUri);
+      if (fileName == null || fileName.isEmpty) {
+        continue;
+      }
+
+      await _upsertAttachmentFile(
+        remoteName: '$_remoteAttachmentPrefix$fileName',
+        file: file,
+        authHeaders: authHeaders,
+      );
+    }
+  }
+
+  @override
+  Future<void> ensureRemoteAttachmentsAvailable(List<RemoteNote> notes) async {
+    final authHeaders = await _getAuthHeaders();
+    final attachmentUris = <String>{};
+    for (final note in notes) {
+      attachmentUris.addAll(extractAttachmentUrisFromText(note.content));
+    }
+
+    for (final attachmentUri in attachmentUris) {
+      final localFile = await resolveAttachmentFile(attachmentUri);
+      if (localFile == null) {
+        continue;
+      }
+      if (await localFile.exists()) {
+        continue;
+      }
+
+      final fileName = attachmentFileNameFromUri(attachmentUri);
+      if (fileName == null || fileName.isEmpty) {
+        continue;
+      }
+
+      final remoteFileId = await _findRemoteFileIdByName(
+        '$_remoteAttachmentPrefix$fileName',
+        authHeaders: authHeaders,
+      );
+      if (remoteFileId == null) {
+        continue;
+      }
+
+      final response = await _httpClient.get(
+        Uri.https(
+          'www.googleapis.com',
+          '/drive/v3/files/$remoteFileId',
+          {'alt': 'media'},
+        ),
+        headers: authHeaders,
+      );
+      if (response.statusCode != 200) {
+        continue;
+      }
+
+      await localFile.parent.create(recursive: true);
+      await localFile.writeAsBytes(response.bodyBytes, flush: true);
+    }
   }
 
   Future<Map<String, String>> _getAuthHeaders() async {
@@ -301,6 +374,126 @@ class GoogleDriveSyncGateway implements SyncGateway {
     }
   }
 
+  Future<void> _upsertAttachmentFile({
+    required String remoteName,
+    required File file,
+    required Map<String, String> authHeaders,
+  }) async {
+    final remoteFileId = await _findRemoteFileIdByName(
+      remoteName,
+      authHeaders: authHeaders,
+    );
+    final metadata = <String, dynamic>{
+      'name': remoteName,
+      if (remoteFileId == null) 'parents': ['appDataFolder'],
+    };
+    final bytes = await file.readAsBytes();
+    final mimeType = _guessAttachmentMimeType(file.path);
+    final boundary =
+        'proper_notes_attachment_${DateTime.now().microsecondsSinceEpoch}';
+    final body = _buildMultipartRelatedBody(
+      boundary: boundary,
+      metadataJson: json.encode(metadata),
+      mediaMimeType: mimeType,
+      mediaBytes: bytes,
+    );
+    final uri = remoteFileId == null
+        ? Uri.parse(
+            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+          )
+        : Uri.parse(
+            'https://www.googleapis.com/upload/drive/v3/files/$remoteFileId?uploadType=multipart',
+          );
+    final response = await (remoteFileId == null
+        ? _httpClient.post(
+            uri,
+            headers: {
+              ...authHeaders,
+              'Content-Type': 'multipart/related; boundary=$boundary',
+            },
+            body: body,
+          )
+        : _httpClient.patch(
+            uri,
+            headers: {
+              ...authHeaders,
+              'Content-Type': 'multipart/related; boundary=$boundary',
+            },
+            body: body,
+          ));
+
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception('Failed to upload Drive attachment: ${response.body}');
+    }
+  }
+
+  Future<String?> _findRemoteFileIdByName(
+    String remoteName, {
+    required Map<String, String> authHeaders,
+  }) async {
+    final response = await _httpClient.get(
+      Uri.https('www.googleapis.com', '/drive/v3/files', {
+        'spaces': 'appDataFolder',
+        'q': "name = '${_escapeDriveQueryLiteral(remoteName)}'",
+        'fields': 'files(id,name)',
+        'pageSize': '1',
+      }),
+      headers: authHeaders,
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to query Drive file: ${response.body}');
+    }
+
+    final payload = _decodeJsonResponse(response);
+    final files = (payload['files'] as List<dynamic>? ?? const <dynamic>[])
+        .cast<Map<String, dynamic>>();
+    if (files.isEmpty) {
+      return null;
+    }
+
+    return files.first['id'] as String?;
+  }
+
+  String _escapeDriveQueryLiteral(String value) {
+    return value.replaceAll("'", "\\'");
+  }
+
+  String _guessAttachmentMimeType(String path) {
+    final lowerPath = path.toLowerCase();
+    if (lowerPath.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (lowerPath.endsWith('.jpg') || lowerPath.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+    if (lowerPath.endsWith('.gif')) {
+      return 'image/gif';
+    }
+    if (lowerPath.endsWith('.webp')) {
+      return 'image/webp';
+    }
+    return 'application/octet-stream';
+  }
+
+  Uint8List _buildMultipartRelatedBody({
+    required String boundary,
+    required String metadataJson,
+    required String mediaMimeType,
+    required Uint8List mediaBytes,
+  }) {
+    final builder = BytesBuilder();
+    builder.add(utf8.encode('--$boundary\r\n'));
+    builder.add(
+        utf8.encode('Content-Type: application/json; charset=UTF-8\r\n\r\n'));
+    builder.add(utf8.encode(metadataJson));
+    builder.add(utf8.encode('\r\n--$boundary\r\n'));
+    builder.add(utf8.encode('Content-Type: $mediaMimeType\r\n\r\n'));
+    builder.add(mediaBytes);
+    builder.add(utf8.encode('\r\n--$boundary--\r\n'));
+    return builder.toBytes();
+  }
+
   Future<String> _getDesktopAccessToken() async {
     final now = DateTime.now().toUtc();
     if (_desktopAccessToken != null &&
@@ -354,7 +547,7 @@ class GoogleDriveSyncGateway implements SyncGateway {
       );
     }
 
-    final payload = json.decode(response.body) as Map<String, dynamic>;
+    final payload = _decodeJsonResponse(response);
     final token = payload['startPageToken'] as String?;
     if (token == null || token.isEmpty) {
       throw Exception('Drive did not return a startPageToken.');
@@ -377,8 +570,7 @@ class GoogleDriveSyncGateway implements SyncGateway {
           'Failed to download Drive note $fileId: ${contentResponse.body}');
     }
 
-    final jsonPayload =
-        json.decode(contentResponse.body) as Map<String, dynamic>;
+    final jsonPayload = _decodeJsonResponse(contentResponse);
     return RemoteNote(
       id: jsonPayload['id'] as String,
       title: jsonPayload['title'] as String? ?? '',
@@ -434,6 +626,11 @@ class GoogleDriveSyncGateway implements SyncGateway {
     return <String, String>{
       'Authorization': 'Bearer $accessToken',
     };
+  }
+
+  Map<String, dynamic> _decodeJsonResponse(http.Response response) {
+    final decodedBody = utf8.decode(response.bodyBytes);
+    return json.decode(decodedBody) as Map<String, dynamic>;
   }
 
   String? _extractBearerToken(Map<String, String>? authHeaders) {

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -23,6 +24,7 @@ class NoteEditorPage extends StatefulWidget {
     this.note,
     this.initialFolderPath,
     this.embedded = false,
+    this.mobileTextScale = 0.92,
     this.onClose,
     this.onPersisted,
     super.key,
@@ -34,6 +36,7 @@ class NoteEditorPage extends StatefulWidget {
   final Note? note;
   final String? initialFolderPath;
   final bool embedded;
+  final double mobileTextScale;
   final VoidCallback? onClose;
   final ValueChanged<Note>? onPersisted;
 
@@ -59,7 +62,10 @@ class _NoteEditorPageState extends State<NoteEditorPage>
   bool _isSaving = false;
   bool _saveQueued = false;
   bool _isClosing = false;
+  bool _isApplyingExternalNoteUpdate = false;
   String? _saveErrorMessage;
+  TextSelection _lastKnownContentSelection =
+      const TextSelection.collapsed(offset: 0);
 
   @override
   void initState() {
@@ -71,6 +77,10 @@ class _NoteEditorPageState extends State<NoteEditorPage>
     _contentController = _MarkdownEditingController(
       text: initialContent,
     );
+    _contentController.clearHistory();
+    _lastKnownContentSelection = _contentController.selection.isValid
+        ? _contentController.selection
+        : TextSelection.collapsed(offset: initialContent.length);
     _titleFocusNode = FocusNode();
     _contentFocusNode = FocusNode(skipTraversal: true);
     _persistedNote = widget.note;
@@ -97,7 +107,45 @@ class _NoteEditorPageState extends State<NoteEditorPage>
     super.dispose();
   }
 
+  @override
+  void didUpdateWidget(covariant NoteEditorPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    final incomingNote = widget.note;
+    if (incomingNote == null) {
+      return;
+    }
+
+    final incomingSnapshot = _snapshotFromNote(incomingNote);
+    final lastPersistedSnapshot = _lastPersistedSnapshot;
+    final persistedNote = _persistedNote;
+    final isSamePersistedSnapshot = persistedNote?.id == incomingNote.id &&
+        lastPersistedSnapshot == incomingSnapshot;
+
+    if (isSamePersistedSnapshot) {
+      _persistedNote = incomingNote;
+      return;
+    }
+
+    if (_hasUnsavedChanges) {
+      return;
+    }
+
+    _applyExternalNoteUpdate(
+      incomingNote,
+      snapshot: incomingSnapshot,
+    );
+  }
+
   void _handleTextChanged() {
+    if (_isApplyingExternalNoteUpdate) {
+      return;
+    }
+
+    if (_contentController.selection.isValid) {
+      _lastKnownContentSelection = _contentController.selection;
+    }
+
     _autosaveTimer?.cancel();
     if (_hasUnsavedChanges) {
       _autosaveTimer = Timer(_autosaveDelay, () {
@@ -115,6 +163,10 @@ class _NoteEditorPageState extends State<NoteEditorPage>
   }
 
   void _handleEditorFocusChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -145,12 +197,29 @@ class _NoteEditorPageState extends State<NoteEditorPage>
     final manualTitle = _titleController.text.trim();
     final derivedTitle = deriveTitleFromMarkdown(_contentController.text);
     final effectiveTitle = manualTitle.isNotEmpty ? manualTitle : derivedTitle;
+    final isMobileLayout = MediaQuery.sizeOf(context).width < 900;
 
     final content = Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.keyS, control: true):
             _SaveNoteIntent(),
         SingleActivator(LogicalKeyboardKey.keyS, meta: true): _SaveNoteIntent(),
+        SingleActivator(LogicalKeyboardKey.keyZ, control: true):
+            _UndoEditIntent(),
+        SingleActivator(LogicalKeyboardKey.keyZ, meta: true): _UndoEditIntent(),
+        SingleActivator(
+          LogicalKeyboardKey.keyZ,
+          control: true,
+          shift: true,
+        ): _RedoEditIntent(),
+        SingleActivator(
+          LogicalKeyboardKey.keyZ,
+          meta: true,
+          shift: true,
+        ): _RedoEditIntent(),
+        SingleActivator(LogicalKeyboardKey.keyY, control: true):
+            _RedoEditIntent(),
+        SingleActivator(LogicalKeyboardKey.keyY, meta: true): _RedoEditIntent(),
         SingleActivator(LogicalKeyboardKey.keyB, control: true):
             _ToggleBoldIntent(),
         SingleActivator(LogicalKeyboardKey.keyB, meta: true):
@@ -189,6 +258,18 @@ class _NoteEditorPageState extends State<NoteEditorPage>
               return null;
             },
           ),
+          _UndoEditIntent: CallbackAction<_UndoEditIntent>(
+            onInvoke: (_) {
+              _undoEdit();
+              return null;
+            },
+          ),
+          _RedoEditIntent: CallbackAction<_RedoEditIntent>(
+            onInvoke: (_) {
+              _redoEdit();
+              return null;
+            },
+          ),
           _ToggleBoldIntent: CallbackAction<_ToggleBoldIntent>(
             onInvoke: (_) {
               _toggleInlineMarkdown('**', placeholder: 'bold text');
@@ -221,8 +302,12 @@ class _NoteEditorPageState extends State<NoteEditorPage>
           status: _saveStatus,
           canRetrySave: _saveErrorMessage != null,
           embedded: widget.embedded,
+          mobileLayout: isMobileLayout,
+          mobileTextScale: widget.mobileTextScale,
+          mobileFormattingToolbarVisible: _contentFocusNode.hasFocus,
           onRetrySave: _flushPendingChanges,
-          onClose: widget.embedded ? _requestClose : null,
+          undoEdit: _undoEdit,
+          redoEdit: _redoEdit,
           applyHeading: _applyHeading,
           toggleBold: () =>
               _toggleInlineMarkdown('**', placeholder: 'bold text'),
@@ -232,7 +317,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
           toggleBulletList: _toggleBulletList,
           toggleQuote: _toggleQuote,
           insertCodeSnippet: _insertCodeSnippet,
-          copyCurrentCodeSnippet: _copyCurrentCodeSnippet,
+          attachImage: _attachImageFromFile,
           deleteAttachmentFile: _deleteAttachmentFileWithConfirmation,
           onContentTap: _handleContentTap,
         ),
@@ -246,18 +331,14 @@ class _NoteEditorPageState extends State<NoteEditorPage>
     return WillPopScope(
       onWillPop: _handleWillPop,
       child: Scaffold(
-        appBar: AppBar(
-          title: Text(
-            effectiveTitle.isEmpty ? title : effectiveTitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
+        backgroundColor: Theme.of(context).colorScheme.surface,
         body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: content,
-          ),
+          child: isMobileLayout
+              ? content
+              : Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: content,
+                ),
         ),
       ),
     );
@@ -288,6 +369,55 @@ class _NoteEditorPageState extends State<NoteEditorPage>
   String _editableContentForNote(Note note) {
     final editableText = editableTextFromDocument(note.document);
     return editableText.isEmpty ? note.content : editableText;
+  }
+
+  void _applyExternalNoteUpdate(
+    Note note, {
+    required _EditorSnapshot snapshot,
+  }) {
+    final clampedTitleSelection = TextSelection.collapsed(
+      offset: math
+          .min(_titleController.selection.baseOffset, note.title.length)
+          .clamp(0, note.title.length),
+    );
+    final content = snapshot.content;
+    final currentContentSelection = _contentController.selection;
+    final clampedContentSelection = currentContentSelection.isValid
+        ? TextSelection(
+            baseOffset: currentContentSelection.baseOffset.clamp(
+              0,
+              content.length,
+            ),
+            extentOffset: currentContentSelection.extentOffset.clamp(
+              0,
+              content.length,
+            ),
+          )
+        : TextSelection.collapsed(offset: content.length);
+
+    _isApplyingExternalNoteUpdate = true;
+    try {
+      _titleController.value = TextEditingValue(
+        text: note.title,
+        selection: clampedTitleSelection,
+      );
+      _contentController.value = TextEditingValue(
+        text: content,
+        selection: clampedContentSelection,
+      );
+      _contentController.clearHistory();
+      _persistedNote = note;
+      _lastPersistedSnapshot = snapshot;
+      if (mounted) {
+        setState(() {
+          _saveErrorMessage = null;
+        });
+      } else {
+        _saveErrorMessage = null;
+      }
+    } finally {
+      _isApplyingExternalNoteUpdate = false;
+    }
   }
 
   bool get _hasUnsavedChanges {
@@ -573,6 +703,24 @@ class _NoteEditorPageState extends State<NoteEditorPage>
     }
   }
 
+  @visibleForTesting
+  Future<void> debugRequestClose() => _requestClose();
+
+  @visibleForTesting
+  void debugSetBodySelection(TextSelection selection) {
+    final clampedSelection = TextSelection(
+      baseOffset: selection.baseOffset.clamp(0, _contentController.text.length),
+      extentOffset:
+          selection.extentOffset.clamp(0, _contentController.text.length),
+    );
+    _contentController.selection = clampedSelection;
+    _lastKnownContentSelection = clampedSelection;
+
+    if (_documentEditorKey.currentState case final editor?) {
+      editor.debugSetPrimaryParagraphSelection(clampedSelection);
+    }
+  }
+
   void _applyHeading(int level) {
     _applySelectedLinesTransform((lines) {
       final nonEmptyLines = lines.where((line) => line.trim().isNotEmpty);
@@ -609,7 +757,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
 
       return lines.map((line) {
         if (line.trim().isEmpty) {
-          return line;
+          return allBulleted ? line : '${_leadingWhitespace(line)}- ';
         }
 
         final indent = _leadingWhitespace(line);
@@ -631,7 +779,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
 
       return lines.map((line) {
         if (line.trim().isEmpty) {
-          return line;
+          return allChecklistItems ? line : '${_leadingWhitespace(line)}- [ ] ';
         }
 
         final indent = _leadingWhitespace(line);
@@ -675,18 +823,35 @@ class _NoteEditorPageState extends State<NoteEditorPage>
     String marker, {
     required String placeholder,
   }) {
-    _contentFocusNode.requestFocus();
     final text = _contentController.text;
-    final selection = _validSelection(text);
+    final rawSelection = _validSelection(text);
+    final collapsedSpan = rawSelection.isCollapsed
+        ? _enclosingInlineMarkdownContentRange(
+            text,
+            marker: marker,
+            cursorOffset: rawSelection.extentOffset.clamp(0, text.length),
+          )
+        : null;
+    final selection = collapsedSpan ??
+        (rawSelection.isCollapsed
+            ? (_collapsedSelectionForCurrentWord(
+                  text,
+                  cursorOffset: rawSelection.extentOffset.clamp(0, text.length),
+                ) ??
+                rawSelection)
+            : rawSelection);
     final start =
         math.min(selection.start, selection.end).clamp(0, text.length);
     final end = math.max(selection.start, selection.end).clamp(0, text.length);
-    final selectedText = text.substring(start, end);
+    final hasSelectedContent = start != end;
 
-    if (selection.isCollapsed) {
+    if (rawSelection.isCollapsed &&
+        collapsedSpan == null &&
+        !hasSelectedContent) {
       final replacement = '$marker$placeholder$marker';
       final updatedText = text.replaceRange(start, end, replacement);
       final placeholderStart = start + marker.length;
+      _contentFocusNode.requestFocus();
       _contentController.value = TextEditingValue(
         text: updatedText,
         selection: TextSelection(
@@ -697,15 +862,94 @@ class _NoteEditorPageState extends State<NoteEditorPage>
       return;
     }
 
-    final updatedText =
-        text.replaceRange(start, end, '$marker$selectedText$marker');
+    final isWrappedSelection = start >= marker.length &&
+        end + marker.length <= text.length &&
+        text.substring(start - marker.length, start) == marker &&
+        text.substring(end, end + marker.length) == marker;
+    final updatedText = isWrappedSelection
+        ? text.replaceRange(start - marker.length, end + marker.length,
+            text.substring(start, end))
+        : text.replaceRange(
+            start, end, '$marker${text.substring(start, end)}$marker');
+    _contentFocusNode.requestFocus();
     _contentController.value = TextEditingValue(
       text: updatedText,
       selection: TextSelection(
-        baseOffset: start + marker.length,
-        extentOffset: start + marker.length + selectedText.length,
+        baseOffset:
+            isWrappedSelection ? start - marker.length : start + marker.length,
+        extentOffset:
+            isWrappedSelection ? end - marker.length : end + marker.length,
       ),
     );
+  }
+
+  TextSelection? _collapsedSelectionForCurrentWord(
+    String text, {
+    required int cursorOffset,
+  }) {
+    if (text.isEmpty) {
+      return null;
+    }
+
+    int? anchorIndex;
+    if (cursorOffset < text.length &&
+        _isInlineWordCharacter(text[cursorOffset])) {
+      anchorIndex = cursorOffset;
+    } else if (cursorOffset > 0 &&
+        _isInlineWordCharacter(text[cursorOffset - 1])) {
+      anchorIndex = cursorOffset - 1;
+    }
+
+    if (anchorIndex == null) {
+      return null;
+    }
+
+    var start = anchorIndex;
+    var end = anchorIndex + 1;
+    while (start > 0 && _isInlineWordCharacter(text[start - 1])) {
+      start -= 1;
+    }
+    while (end < text.length && _isInlineWordCharacter(text[end])) {
+      end += 1;
+    }
+
+    return TextSelection(baseOffset: start, extentOffset: end);
+  }
+
+  TextSelection? _enclosingInlineMarkdownContentRange(
+    String text, {
+    required String marker,
+    required int cursorOffset,
+  }) {
+    if (text.isEmpty || cursorOffset < 0 || cursorOffset > text.length) {
+      return null;
+    }
+
+    final openingSearchStart =
+        (cursorOffset - marker.length).clamp(0, text.length);
+    final openingStart = text.lastIndexOf(marker, openingSearchStart);
+    if (openingStart == -1) {
+      return null;
+    }
+
+    final contentStart = openingStart + marker.length;
+    final closingStart = text.indexOf(marker, contentStart);
+    if (closingStart == -1 || closingStart < cursorOffset) {
+      return null;
+    }
+
+    if (cursorOffset < contentStart || contentStart == closingStart) {
+      return null;
+    }
+
+    return TextSelection(
+      baseOffset: contentStart,
+      extentOffset: closingStart,
+    );
+  }
+
+  bool _isInlineWordCharacter(String character) {
+    return RegExp(r'[A-Za-z0-9_]').hasMatch(character);
   }
 
   void _insertCodeSnippet() {
@@ -732,40 +976,87 @@ class _NoteEditorPageState extends State<NoteEditorPage>
     );
   }
 
-  Future<void> _copyCurrentCodeSnippet() async {
-    if (_documentEditorKey.currentState case final editor?) {
-      final copied = await editor.copyFocusedCodeBlock(context);
-      if (copied) {
-        return;
-      }
-    }
+  Future<void> _attachImageFromFile() async {
+    const imageTypes = XTypeGroup(
+      label: 'images',
+      extensions: <String>['png', 'jpg', 'jpeg', 'gif', 'webp'],
+      mimeTypes: <String>[
+        'image/png',
+        'image/jpeg',
+        'image/gif',
+        'image/webp',
+      ],
+    );
 
-    final snippet = _contentController.currentCodeSnippet;
-    if (snippet == null) {
+    XFile? file;
+    try {
+      file = await openFile(
+        acceptedTypeGroups: const <XTypeGroup>[imageTypes],
+      );
+    } catch (_) {
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Place the cursor inside a code snippet to copy it.'),
-        ),
+        const SnackBar(content: Text('Could not open the image picker.')),
       );
       return;
     }
 
-    await Clipboard.setData(ClipboardData(text: snippet.code));
-    if (!mounted) {
+    if (file == null) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          snippet.language.isEmpty
-              ? 'Code snippet copied'
-              : '${snippet.language.toUpperCase()} snippet copied',
-        ),
-      ),
+
+    final fileName = file.name;
+    final extensionIndex = fileName.lastIndexOf('.');
+    final extension = extensionIndex == -1
+        ? 'png'
+        : fileName.substring(extensionIndex + 1).toLowerCase();
+
+    try {
+      final bytes = await file.readAsBytes();
+      final savedImage = await saveAttachmentImageBytes(
+        bytes,
+        extension: extension,
+      );
+      final markdown = buildAttachmentImageMarkdown(savedImage.attachmentUri);
+      final replacement = _normalizeImageInsertion(markdown);
+      _replaceSelectionWithText(replacement);
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not attach the selected image.')),
+      );
+    }
+  }
+
+  String _normalizeImageInsertion(String markdown) {
+    final text = _contentController.text;
+    final selection = _contentController.selection;
+    final start = selection.start.clamp(0, text.length);
+    final end = selection.end.clamp(0, text.length);
+    final needsLeadingBreak = start > 0 && text[start - 1] != '\n';
+    final trailingBreak = end < text.length && text[end] == '\n' ? '' : '\n';
+
+    return '${needsLeadingBreak ? '\n' : ''}$markdown$trailingBreak';
+  }
+
+  void _replaceSelectionWithText(String replacement) {
+    final text = _contentController.text;
+    final selection = _validSelection(text);
+    final start =
+        math.min(selection.start, selection.end).clamp(0, text.length);
+    final end = math.max(selection.start, selection.end).clamp(0, text.length);
+    final updatedText = text.replaceRange(start, end, replacement);
+    final nextOffset = start + replacement.length;
+
+    _contentController.value = TextEditingValue(
+      text: updatedText,
+      selection: TextSelection.collapsed(offset: nextOffset),
     );
+    _contentFocusNode.requestFocus();
   }
 
   void _applySelectedLinesTransform(
@@ -825,15 +1116,37 @@ class _NoteEditorPageState extends State<NoteEditorPage>
 
   TextSelection _validSelection(String text) {
     final selection = _contentController.selection;
-    if (!selection.isValid) {
-      return TextSelection.collapsed(offset: text.length);
+    if (!_contentFocusNode.hasFocus && _lastKnownContentSelection.isValid) {
+      return TextSelection(
+        baseOffset: _lastKnownContentSelection.baseOffset.clamp(0, text.length),
+        extentOffset:
+            _lastKnownContentSelection.extentOffset.clamp(0, text.length),
+      );
     }
+    if (!selection.isValid) {
+      return TextSelection(
+        baseOffset: _lastKnownContentSelection.baseOffset.clamp(0, text.length),
+        extentOffset:
+            _lastKnownContentSelection.extentOffset.clamp(0, text.length),
+      );
+    }
+    _lastKnownContentSelection = selection;
     return selection;
   }
 
   String _leadingWhitespace(String text) {
     final match = RegExp(r'^\s*').firstMatch(text);
     return match?.group(0) ?? '';
+  }
+
+  void _undoEdit() {
+    _contentFocusNode.requestFocus();
+    _contentController.undo();
+  }
+
+  void _redoEdit() {
+    _contentFocusNode.requestFocus();
+    _contentController.redo();
   }
 
   String? get _effectiveFolderPath =>
@@ -863,8 +1176,12 @@ class _NoteEditorContent extends StatelessWidget {
     required this.status,
     required this.canRetrySave,
     required this.embedded,
+    required this.mobileLayout,
+    required this.mobileTextScale,
+    required this.mobileFormattingToolbarVisible,
     required this.onRetrySave,
-    required this.onClose,
+    required this.undoEdit,
+    required this.redoEdit,
     required this.applyHeading,
     required this.toggleBold,
     required this.toggleItalic,
@@ -872,7 +1189,7 @@ class _NoteEditorContent extends StatelessWidget {
     required this.toggleBulletList,
     required this.toggleQuote,
     required this.insertCodeSnippet,
-    required this.copyCurrentCodeSnippet,
+    required this.attachImage,
     required this.deleteAttachmentFile,
     required this.onContentTap,
   });
@@ -889,8 +1206,12 @@ class _NoteEditorContent extends StatelessWidget {
   final _EditorSaveStatus status;
   final bool canRetrySave;
   final bool embedded;
+  final bool mobileLayout;
+  final double mobileTextScale;
+  final bool mobileFormattingToolbarVisible;
   final Future<bool> Function() onRetrySave;
-  final Future<void> Function()? onClose;
+  final VoidCallback undoEdit;
+  final VoidCallback redoEdit;
   final void Function(int level) applyHeading;
   final VoidCallback toggleBold;
   final VoidCallback toggleItalic;
@@ -898,7 +1219,7 @@ class _NoteEditorContent extends StatelessWidget {
   final VoidCallback toggleBulletList;
   final VoidCallback toggleQuote;
   final VoidCallback insertCodeSnippet;
-  final Future<void> Function() copyCurrentCodeSnippet;
+  final Future<void> Function() attachImage;
   final Future<bool> Function(String attachmentUri) deleteAttachmentFile;
   final VoidCallback onContentTap;
 
@@ -906,20 +1227,21 @@ class _NoteEditorContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDesktopEmbedded = embedded;
+    final isMobile = mobileLayout;
+    final mobileBodyStyle = Theme.of(context).textTheme.bodyLarge?.copyWith(
+          fontSize: 15.0 * mobileTextScale,
+          height: 1.5,
+        );
+    final mobileTitleStyle =
+        Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontSize: 26.0 * mobileTextScale,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -1.0,
+              height: 1.02,
+            );
 
     return Column(
       children: [
-        if (isDesktopEmbedded && onClose != null) ...[
-          Align(
-            alignment: Alignment.centerRight,
-            child: IconButton(
-              onPressed: onClose,
-              tooltip: 'Close editor',
-              icon: const Icon(Icons.close),
-            ),
-          ),
-          const SizedBox(height: 2),
-        ],
         TextField(
           controller: titleController,
           focusNode: titleFocusNode,
@@ -929,17 +1251,25 @@ class _NoteEditorContent extends StatelessWidget {
                   border: InputBorder.none,
                   contentPadding: EdgeInsets.zero,
                 )
-              : const InputDecoration(
-                  labelText: 'Title',
-                  helperText:
-                      'Optional. Leave empty to use the first Markdown heading.',
-                  border: OutlineInputBorder(),
-                ),
+              : isMobile
+                  ? const InputDecoration(
+                      hintText: 'Untitled',
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.zero,
+                    )
+                  : const InputDecoration(
+                      labelText: 'Title',
+                      helperText:
+                          'Optional. Leave empty to use the first Markdown heading.',
+                      border: OutlineInputBorder(),
+                    ),
           style: isDesktopEmbedded
               ? Theme.of(context).textTheme.headlineMedium?.copyWith(
                     fontWeight: FontWeight.w700,
                   )
-              : null,
+              : isMobile
+                  ? mobileTitleStyle
+                  : null,
           textInputAction: TextInputAction.next,
           onSubmitted: (_) => contentFocusNode.requestFocus(),
         ),
@@ -956,8 +1286,8 @@ class _NoteEditorContent extends StatelessWidget {
             ),
           ),
         ],
-        const SizedBox(height: 16),
-        if (!isDesktopEmbedded)
+        SizedBox(height: isMobile ? 8 : 16),
+        if (!isDesktopEmbedded && !isMobile)
           Align(
             alignment: Alignment.centerLeft,
             child: Wrap(
@@ -999,51 +1329,284 @@ class _NoteEditorContent extends StatelessWidget {
               ],
             ),
           ),
-        SizedBox(height: isDesktopEmbedded ? 8 : 16),
+        SizedBox(height: isDesktopEmbedded ? 8 : (isMobile ? 4 : 16)),
         Expanded(
-          child: _MarkdownEditorPane(
-            controller: contentController,
-            documentEditorKey: editorKey,
-            focusNode: contentFocusNode,
-            embedded: embedded,
-            deleteAttachmentFile: deleteAttachmentFile,
-            onTap: onContentTap,
+          child: DecoratedBox(
+            decoration: isMobile
+                ? const BoxDecoration()
+                : BoxDecoration(
+                    color: colorScheme.surface,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+            child: _MarkdownEditorPane(
+              controller: contentController,
+              documentEditorKey: editorKey,
+              focusNode: contentFocusNode,
+              embedded: embedded,
+              mobileLayout: mobileLayout,
+              mobileTextScale: mobileTextScale,
+              mobileBodyStyle: mobileBodyStyle,
+              deleteAttachmentFile: deleteAttachmentFile,
+              onTap: onContentTap,
+            ),
           ),
         ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: Row(
-                children: [
-                  Icon(
-                    status.icon,
-                    size: 18,
-                    color: status.color,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      status.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: status.color,
-                            fontWeight: FontWeight.w600,
-                          ),
+        SizedBox(height: isMobile ? 12 : 16),
+        if (isMobile)
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            switchInCurve: Curves.easeOut,
+            switchOutCurve: Curves.easeIn,
+            child: mobileFormattingToolbarVisible
+                ? _MobileEditorToolbar(
+                    key: const ValueKey('mobile-editor-toolbar'),
+                    status: status,
+                    canRetrySave: canRetrySave,
+                    isSaving: isSaving,
+                    onRetrySave: onRetrySave,
+                    undoEdit: undoEdit,
+                    redoEdit: redoEdit,
+                    toggleBold: toggleBold,
+                    toggleItalic: toggleItalic,
+                    toggleChecklist: toggleChecklist,
+                    toggleBulletList: toggleBulletList,
+                    toggleQuote: toggleQuote,
+                    insertCodeSnippet: insertCodeSnippet,
+                    attachImage: attachImage,
+                  )
+                : const SizedBox.shrink(
+                    key: ValueKey('mobile-editor-toolbar-hidden')),
+          )
+        else
+          Row(
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    Icon(
+                      status.icon,
+                      size: 18,
+                      color: status.color,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        status.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: status.color,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            if (canRetrySave)
-              TextButton(
-                onPressed: isSaving ? null : onRetrySave,
-                child: const Text('Retry'),
-              ),
-          ],
-        ),
+              if (canRetrySave)
+                TextButton(
+                  onPressed: isSaving ? null : onRetrySave,
+                  child: const Text('Retry'),
+                ),
+            ],
+          ),
       ],
+    );
+  }
+}
+
+class _MobileEditorToolbar extends StatelessWidget {
+  const _MobileEditorToolbar({
+    super.key,
+    required this.status,
+    required this.canRetrySave,
+    required this.isSaving,
+    required this.onRetrySave,
+    required this.undoEdit,
+    required this.redoEdit,
+    required this.toggleBold,
+    required this.toggleItalic,
+    required this.toggleChecklist,
+    required this.toggleBulletList,
+    required this.toggleQuote,
+    required this.insertCodeSnippet,
+    required this.attachImage,
+  });
+
+  final _EditorSaveStatus status;
+  final bool canRetrySave;
+  final bool isSaving;
+  final Future<bool> Function() onRetrySave;
+  final VoidCallback undoEdit;
+  final VoidCallback redoEdit;
+  final VoidCallback toggleBold;
+  final VoidCallback toggleItalic;
+  final VoidCallback toggleChecklist;
+  final VoidCallback toggleBulletList;
+  final VoidCallback toggleQuote;
+  final VoidCallback insertCodeSnippet;
+  final Future<void> Function() attachImage;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.55),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                _MobileToolbarButton(
+                  tooltip: 'Undo',
+                  icon: Icons.undo_rounded,
+                  onPressed: undoEdit,
+                ),
+                _MobileToolbarButton(
+                  tooltip: 'Redo',
+                  icon: Icons.redo_rounded,
+                  onPressed: redoEdit,
+                ),
+                _MobileToolbarDivider(color: colorScheme.outlineVariant),
+                _MobileToolbarButton(
+                  tooltip: 'Bold',
+                  icon: Icons.format_bold_rounded,
+                  onPressed: toggleBold,
+                ),
+                _MobileToolbarButton(
+                  tooltip: 'Italic',
+                  icon: Icons.format_italic_rounded,
+                  onPressed: toggleItalic,
+                ),
+                _MobileToolbarButton(
+                  tooltip: 'Checklist',
+                  icon: Icons.check_box_outlined,
+                  onPressed: toggleChecklist,
+                ),
+                _MobileToolbarButton(
+                  tooltip: 'Bullet list',
+                  icon: Icons.format_list_bulleted_rounded,
+                  onPressed: toggleBulletList,
+                ),
+                _MobileToolbarDivider(color: colorScheme.outlineVariant),
+                _MobileToolbarButton(
+                  tooltip: 'Quote',
+                  icon: Icons.format_quote_rounded,
+                  onPressed: toggleQuote,
+                ),
+                _MobileToolbarButton(
+                  tooltip: 'Code block',
+                  icon: Icons.data_object_rounded,
+                  onPressed: insertCodeSnippet,
+                ),
+                _MobileToolbarButton(
+                  tooltip: 'Attach image',
+                  icon: Icons.image_outlined,
+                  onPressed: () {
+                    attachImage();
+                  },
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(14, 0, 10, 10),
+            child: Row(
+              children: [
+                Icon(
+                  status.icon,
+                  size: 16,
+                  color: status.color,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    status.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: status.color,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ),
+                if (canRetrySave)
+                  TextButton(
+                    onPressed: isSaving ? null : onRetrySave,
+                    child: const Text('Retry'),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MobileToolbarDivider extends StatelessWidget {
+  const _MobileToolbarDivider({
+    required this.color,
+  });
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 1,
+      height: 28,
+      margin: const EdgeInsets.symmetric(horizontal: 6),
+      color: color.withValues(alpha: 0.7),
+    );
+  }
+}
+
+class _MobileToolbarButton extends StatelessWidget {
+  const _MobileToolbarButton({
+    required this.tooltip,
+    required this.onPressed,
+    this.icon,
+  });
+
+  final String tooltip;
+  final VoidCallback onPressed;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = Icon(icon, size: 22);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 1),
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: content,
+        splashRadius: 22,
+        constraints: const BoxConstraints(
+          minWidth: 42,
+          minHeight: 42,
+        ),
+      ),
     );
   }
 }
@@ -1114,6 +1677,14 @@ class _ToggleItalicIntent extends Intent {
   const _ToggleItalicIntent();
 }
 
+class _UndoEditIntent extends Intent {
+  const _UndoEditIntent();
+}
+
+class _RedoEditIntent extends Intent {
+  const _RedoEditIntent();
+}
+
 class _SelectAllDocumentIntent extends Intent {
   const _SelectAllDocumentIntent();
 }
@@ -1134,6 +1705,60 @@ class _MarkdownEditingController extends TextEditingController {
   double attachmentImageMaxHeight = 240;
   bool showActiveMarkdownLine = true;
   int? selectedAttachmentLineIndex;
+  final List<TextEditingValue> _undoHistory = <TextEditingValue>[];
+  final List<TextEditingValue> _redoHistory = <TextEditingValue>[];
+  bool _isApplyingHistoryChange = false;
+
+  @override
+  set value(TextEditingValue newValue) {
+    final previousValue = super.value;
+    if (!_isApplyingHistoryChange && previousValue.text != newValue.text) {
+      _undoHistory.add(previousValue);
+      if (_undoHistory.length > 100) {
+        _undoHistory.removeAt(0);
+      }
+      _redoHistory.clear();
+    }
+    super.value = newValue;
+  }
+
+  bool get canUndo => _undoHistory.isNotEmpty;
+  bool get canRedo => _redoHistory.isNotEmpty;
+
+  void undo() {
+    if (!canUndo) {
+      return;
+    }
+
+    final previousValue = _undoHistory.removeLast();
+    _redoHistory.add(value);
+    _isApplyingHistoryChange = true;
+    try {
+      super.value = previousValue;
+    } finally {
+      _isApplyingHistoryChange = false;
+    }
+  }
+
+  void redo() {
+    if (!canRedo) {
+      return;
+    }
+
+    final nextValue = _redoHistory.removeLast();
+    _undoHistory.add(value);
+    _isApplyingHistoryChange = true;
+    try {
+      super.value = nextValue;
+    } finally {
+      _isApplyingHistoryChange = false;
+    }
+  }
+
+  void clearHistory() {
+    _undoHistory.clear();
+    _redoHistory.clear();
+  }
 
   _CodeSnippetSelection? get currentCodeSnippet {
     if (text.isEmpty) {
@@ -1967,6 +2592,9 @@ class _MarkdownEditorPane extends StatelessWidget {
     required this.documentEditorKey,
     required this.focusNode,
     required this.embedded,
+    required this.mobileLayout,
+    required this.mobileTextScale,
+    required this.mobileBodyStyle,
     required this.deleteAttachmentFile,
     required this.onTap,
   });
@@ -1975,6 +2603,9 @@ class _MarkdownEditorPane extends StatelessWidget {
   final GlobalKey<_DocumentBlocksEditorState> documentEditorKey;
   final FocusNode focusNode;
   final bool embedded;
+  final bool mobileLayout;
+  final double mobileTextScale;
+  final TextStyle? mobileBodyStyle;
   final Future<bool> Function(String attachmentUri) deleteAttachmentFile;
   final VoidCallback onTap;
 
@@ -1993,6 +2624,9 @@ class _MarkdownEditorPane extends StatelessWidget {
         key: const ValueKey('document-block-editor'),
         controller: controller,
         focusNode: focusNode,
+        mobileLayout: mobileLayout,
+        mobileTextScale: mobileTextScale,
+        mobileBodyStyle: mobileBodyStyle,
         deleteAttachmentFile: deleteAttachmentFile,
         onTap: onTap,
       ),
@@ -2005,12 +2639,18 @@ class _UnifiedMarkdownEditor extends StatefulWidget {
     super.key,
     required this.controller,
     required this.focusNode,
+    required this.mobileLayout,
+    required this.mobileTextScale,
+    required this.mobileBodyStyle,
     required this.deleteAttachmentFile,
     required this.onTap,
   });
 
   final _MarkdownEditingController controller;
   final FocusNode focusNode;
+  final bool mobileLayout;
+  final double mobileTextScale;
+  final TextStyle? mobileBodyStyle;
   final Future<bool> Function(String attachmentUri) deleteAttachmentFile;
   final VoidCallback onTap;
 
@@ -2680,7 +3320,9 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   @override
   Widget build(BuildContext context) {
     final commands = _matchingSlashCommands;
-    final style = Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.6);
+    final style = widget.mobileLayout
+        ? widget.mobileBodyStyle
+        : Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.6);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2700,8 +3342,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
               widget.controller.attachmentImageMaxWidth = contentWidth;
               widget.controller.attachmentImageMaxHeight = contentHeight;
               widget.controller.showActiveMarkdownLine =
-                  widget.focusNode.hasFocus &&
-                  _selectedAttachmentImage == null;
+                  widget.focusNode.hasFocus && _selectedAttachmentImage == null;
               widget.controller.selectedAttachmentLineIndex =
                   _selectedAttachmentImage?.lineIndex;
               final overlayTextSpan = style == null
@@ -2751,16 +3392,35 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                       child: IgnorePointer(
                         child: DecoratedBox(
                           decoration: BoxDecoration(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHigh,
-                            borderRadius: BorderRadius.circular(14),
+                            color: widget.mobileLayout
+                                ? Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHigh
+                                    .withValues(alpha: 0.76)
+                                : Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHigh,
+                            borderRadius: BorderRadius.circular(
+                              widget.mobileLayout ? 20 : 14,
+                            ),
                             border: Border.all(
                               color: Theme.of(context)
                                   .colorScheme
                                   .outlineVariant
-                                  .withValues(alpha: 0.7),
+                                  .withValues(
+                                    alpha: widget.mobileLayout ? 0.38 : 0.7,
+                                  ),
                             ),
+                            boxShadow: widget.mobileLayout
+                                ? [
+                                    BoxShadow(
+                                      color:
+                                          Colors.black.withValues(alpha: 0.03),
+                                      blurRadius: 14,
+                                      offset: const Offset(0, 8),
+                                    ),
+                                  ]
+                                : null,
                           ),
                         ),
                       ),
@@ -2768,7 +3428,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                   Positioned.fill(
                     child: GestureDetector(
                       behavior: HitTestBehavior.translucent,
-                          onTapDown: (details) {
+                      onTapDown: (details) {
                         final tappedAttachmentPreview = imageOverlays.any(
                           (overlay) => Rect.fromLTWH(
                             overlay.left,
@@ -2935,6 +3595,14 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                       right: overlay.right + 6,
                       child: IconButton(
                         tooltip: 'Copy code',
+                        style: widget.mobileLayout
+                            ? IconButton.styleFrom(
+                                backgroundColor: Theme.of(context)
+                                    .colorScheme
+                                    .surface
+                                    .withValues(alpha: 0.92),
+                              )
+                            : null,
                         onPressed: () async {
                           await Clipboard.setData(
                             ClipboardData(text: overlay.snippet.code),
@@ -3600,7 +4268,12 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
   }
 
   void _attachBlockListeners(_DocumentEditorBlock block) {
-    block.controller.addListener(_syncMasterFromBlocks);
+    block.controller.addListener(() {
+      if (block.controller.selection.isValid) {
+        block.lastKnownSelection = block.controller.selection;
+      }
+      _syncMasterFromBlocks();
+    });
     block.languageController.addListener(_syncMasterFromBlocks);
     block.focusNode.addListener(_syncMasterFromBlocks);
   }
@@ -3778,6 +4451,187 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
       }
       _focusBlock(insertIndex.clamp(0, _blocks.length - 1), placeAtEnd: false);
     });
+  }
+
+  void toggleInlineMarkdown(
+    String marker, {
+    required String placeholder,
+  }) {
+    final targetIndex = _inlineMarkdownTargetBlockIndex();
+    if (targetIndex == -1) {
+      return;
+    }
+
+    final block = _blocks[targetIndex];
+    if (block.isCode) {
+      return;
+    }
+
+    final text = block.controller.text;
+    final rawSelection = _validBlockSelection(block);
+    final collapsedSpan = rawSelection.isCollapsed
+        ? _enclosingBlockInlineMarkdownContentRange(
+            text,
+            marker: marker,
+            cursorOffset: rawSelection.extentOffset.clamp(0, text.length),
+          )
+        : null;
+    final selection = collapsedSpan ??
+        (rawSelection.isCollapsed
+            ? (_collapsedBlockSelectionForCurrentWord(
+                  text,
+                  cursorOffset: rawSelection.extentOffset.clamp(0, text.length),
+                ) ??
+                rawSelection)
+            : rawSelection);
+    final start =
+        math.min(selection.start, selection.end).clamp(0, text.length);
+    final end = math.max(selection.start, selection.end).clamp(0, text.length);
+
+    if (rawSelection.isCollapsed && collapsedSpan == null) {
+      final replacement = '$marker$placeholder$marker';
+      final updatedText = text.replaceRange(start, end, replacement);
+      final placeholderStart = start + marker.length;
+      block.controller.value = TextEditingValue(
+        text: updatedText,
+        selection: TextSelection(
+          baseOffset: placeholderStart,
+          extentOffset: placeholderStart + placeholder.length,
+        ),
+      );
+      block.focusNode.requestFocus();
+      _syncMasterFromBlocks();
+      return;
+    }
+
+    final isWrappedSelection = start >= marker.length &&
+        end + marker.length <= text.length &&
+        text.substring(start - marker.length, start) == marker &&
+        text.substring(end, end + marker.length) == marker;
+    final updatedText = isWrappedSelection
+        ? text.replaceRange(
+            start - marker.length,
+            end + marker.length,
+            text.substring(start, end),
+          )
+        : text.replaceRange(
+            start,
+            end,
+            '$marker${text.substring(start, end)}$marker',
+          );
+    block.controller.value = TextEditingValue(
+      text: updatedText,
+      selection: TextSelection(
+        baseOffset:
+            isWrappedSelection ? start - marker.length : start + marker.length,
+        extentOffset:
+            isWrappedSelection ? end - marker.length : end + marker.length,
+      ),
+    );
+    block.focusNode.requestFocus();
+    _syncMasterFromBlocks();
+  }
+
+  int _inlineMarkdownTargetBlockIndex() {
+    final focusedIndex = _activeBlockIndex();
+    if (focusedIndex != -1) {
+      return focusedIndex;
+    }
+
+    for (var index = 0; index < _blocks.length; index++) {
+      final selection = _blocks[index].controller.selection;
+      if (!selection.isValid) {
+        continue;
+      }
+      if (!selection.isCollapsed || selection.extentOffset != 0) {
+        return index;
+      }
+    }
+
+    return _blocks.isEmpty ? -1 : 0;
+  }
+
+  TextSelection _validBlockSelection(_DocumentEditorBlock block) {
+    final selection = block.controller.selection;
+    if (!selection.isValid) {
+      return TextSelection(
+        baseOffset: block.lastKnownSelection.baseOffset
+            .clamp(0, block.controller.text.length),
+        extentOffset: block.lastKnownSelection.extentOffset
+            .clamp(0, block.controller.text.length),
+      );
+    }
+    block.lastKnownSelection = selection;
+    return selection;
+  }
+
+  TextSelection? _collapsedBlockSelectionForCurrentWord(
+    String text, {
+    required int cursorOffset,
+  }) {
+    if (text.isEmpty) {
+      return null;
+    }
+
+    int? anchorIndex;
+    if (cursorOffset < text.length &&
+        _isBlockInlineWordCharacter(text[cursorOffset])) {
+      anchorIndex = cursorOffset;
+    } else if (cursorOffset > 0 &&
+        _isBlockInlineWordCharacter(text[cursorOffset - 1])) {
+      anchorIndex = cursorOffset - 1;
+    }
+
+    if (anchorIndex == null) {
+      return null;
+    }
+
+    var start = anchorIndex;
+    var end = anchorIndex + 1;
+    while (start > 0 && _isBlockInlineWordCharacter(text[start - 1])) {
+      start -= 1;
+    }
+    while (end < text.length && _isBlockInlineWordCharacter(text[end])) {
+      end += 1;
+    }
+
+    return TextSelection(baseOffset: start, extentOffset: end);
+  }
+
+  bool _isBlockInlineWordCharacter(String character) {
+    return RegExp(r'[A-Za-z0-9_]').hasMatch(character);
+  }
+
+  TextSelection? _enclosingBlockInlineMarkdownContentRange(
+    String text, {
+    required String marker,
+    required int cursorOffset,
+  }) {
+    if (text.isEmpty || cursorOffset < 0 || cursorOffset > text.length) {
+      return null;
+    }
+
+    final openingSearchStart =
+        (cursorOffset - marker.length).clamp(0, text.length);
+    final openingStart = text.lastIndexOf(marker, openingSearchStart);
+    if (openingStart == -1) {
+      return null;
+    }
+
+    final contentStart = openingStart + marker.length;
+    final closingStart = text.indexOf(marker, contentStart);
+    if (closingStart == -1 || closingStart < cursorOffset) {
+      return null;
+    }
+
+    if (cursorOffset < contentStart || contentStart == closingStart) {
+      return null;
+    }
+
+    return TextSelection(
+      baseOffset: contentStart,
+      extentOffset: closingStart,
+    );
   }
 
   void convertBlockToCode(
@@ -4375,6 +5229,26 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
     return true;
   }
 
+  @visibleForTesting
+  void debugSetPrimaryParagraphSelection(TextSelection selection) {
+    final index = _blocks.indexWhere((block) => !block.isCode);
+    if (index == -1) {
+      return;
+    }
+
+    final block = _blocks[index];
+    final nextSelection = TextSelection(
+      baseOffset: selection.baseOffset.clamp(0, block.controller.text.length),
+      extentOffset:
+          selection.extentOffset.clamp(0, block.controller.text.length),
+    );
+    block.lastKnownSelection = nextSelection;
+    block.controller.selection = nextSelection;
+    widget.focusNode.requestFocus();
+    block.focusNode.requestFocus();
+    _syncMasterFromBlocks();
+  }
+
   bool _matchesMasterStructure(String text) {
     final parsedSignatures = blocksFromEditableText(text)
         .map(_DocumentEditorBlock.structureSignatureForNoteBlock)
@@ -4584,12 +5458,15 @@ class _DocumentEditorBlock {
     required this.languageController,
     required this.focusNode,
     required this.isCode,
-  });
+  }) : lastKnownSelection = controller.selection.isValid
+            ? controller.selection
+            : TextSelection.collapsed(offset: controller.text.length);
 
   final TextEditingController controller;
   final TextEditingController languageController;
   final FocusNode focusNode;
   final bool isCode;
+  TextSelection lastKnownSelection;
 
   factory _DocumentEditorBlock.fromNoteBlock(
     NoteBlock block, {
@@ -4724,20 +5601,34 @@ class _CodeEditorBlockCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isMobile = MediaQuery.sizeOf(context).width < 900;
 
     return Container(
       decoration: BoxDecoration(
         color: highlightSelection
-            ? colorScheme.primary.withValues(alpha: 0.14)
-            : colorScheme.onSurface.withValues(alpha: 0.96),
-        borderRadius: BorderRadius.circular(14),
+            ? colorScheme.primary.withValues(alpha: isMobile ? 0.12 : 0.14)
+            : (isMobile
+                ? colorScheme.surfaceContainerLow
+                : colorScheme.onSurface.withValues(alpha: 0.96)),
+        borderRadius: BorderRadius.circular(isMobile ? 20 : 14),
         border: Border.all(
           color: highlightSelection
               ? colorScheme.primary.withValues(alpha: 0.42)
-              : colorScheme.onSurface.withValues(alpha: 0.12),
+              : (isMobile
+                  ? colorScheme.outlineVariant.withValues(alpha: 0.35)
+                  : colorScheme.onSurface.withValues(alpha: 0.12)),
         ),
+        boxShadow: isMobile
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.03),
+                  blurRadius: 14,
+                  offset: const Offset(0, 8),
+                ),
+              ]
+            : null,
       ),
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.all(isMobile ? 16 : 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -4747,7 +5638,9 @@ class _CodeEditorBlockCard extends StatelessWidget {
                 Text(
                   block.languageController.text.trim().toUpperCase(),
                   style: theme.textTheme.labelMedium?.copyWith(
-                    color: colorScheme.primary,
+                    color: isMobile
+                        ? colorScheme.onSurfaceVariant
+                        : colorScheme.primary,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.6,
                   ),
@@ -4755,6 +5648,12 @@ class _CodeEditorBlockCard extends StatelessWidget {
               const Spacer(),
               IconButton(
                 tooltip: 'Copy code',
+                style: isMobile
+                    ? IconButton.styleFrom(
+                        backgroundColor:
+                            colorScheme.surface.withValues(alpha: 0.92),
+                      )
+                    : null,
                 onPressed: () async {
                   await Clipboard.setData(
                     ClipboardData(text: block.controller.text),
@@ -4775,12 +5674,20 @@ class _CodeEditorBlockCard extends StatelessWidget {
                 icon: Icon(
                   Icons.content_copy_outlined,
                   size: 18,
-                  color: colorScheme.onInverseSurface,
+                  color: isMobile
+                      ? colorScheme.onSurfaceVariant
+                      : colorScheme.onInverseSurface,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 8),
+          if (isMobile)
+            Divider(
+              height: 1,
+              color: colorScheme.outlineVariant.withValues(alpha: 0.45),
+            ),
+          if (isMobile) const SizedBox(height: 10),
           Focus(
             onKeyEvent: (_, event) => onKeyEvent(event),
             child: TextField(
@@ -4794,8 +5701,11 @@ class _CodeEditorBlockCard extends StatelessWidget {
               ),
               style: theme.textTheme.bodyMedium?.copyWith(
                 fontFamily: 'monospace',
-                color: colorScheme.onInverseSurface,
-                height: 1.5,
+                fontSize: isMobile ? 13.5 : null,
+                color: isMobile
+                    ? colorScheme.onSurface
+                    : colorScheme.onInverseSurface,
+                height: isMobile ? 1.4 : 1.5,
               ),
               keyboardType: TextInputType.multiline,
               textInputAction: TextInputAction.newline,

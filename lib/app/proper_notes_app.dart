@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../features/auth/application/auth_controller.dart';
 import '../features/notes/application/create_folder.dart';
@@ -6,6 +7,7 @@ import '../features/notes/application/create_note.dart';
 import '../features/notes/application/delete_folder.dart';
 import '../features/notes/application/delete_note.dart';
 import '../features/notes/application/move_note.dart';
+import '../features/notes/application/prepare_all_notes_for_sync.dart';
 import '../features/notes/application/rename_folder.dart';
 import '../features/notes/application/restore_note.dart';
 import '../features/notes/application/search_notes.dart';
@@ -102,10 +104,8 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
     if (deviceId == null) {
       return MaterialApp(
         title: 'Proper Notes',
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-          useMaterial3: true,
-        ),
+        theme: _buildTheme(),
+        builder: _wrapWithSystemUiStyle,
         home: const Scaffold(
           body: Center(
             child: CircularProgressIndicator(),
@@ -116,10 +116,8 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
 
     return MaterialApp(
       title: 'Proper Notes',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-        useMaterial3: true,
-      ),
+      theme: _buildTheme(),
+      builder: _wrapWithSystemUiStyle,
       home: NotesHomePage(
         createNote: CreateNote(
           repository: widget.noteRepository,
@@ -132,6 +130,9 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
           repository: widget.noteRepository,
           deviceId: deviceId,
         ),
+        prepareAllNotesForSync: PrepareAllNotesForSync(
+          repository: widget.noteRepository,
+        ),
         updateNote: UpdateNote(
           repository: widget.noteRepository,
           deviceId: deviceId,
@@ -143,6 +144,116 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
         noteRepository: widget.noteRepository,
         authController: _authController,
         syncController: _syncController,
+      ),
+    );
+  }
+
+  Widget _wrapWithSystemUiStyle(BuildContext context, Widget? child) {
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: Brightness.dark,
+      ),
+      child: child ?? const SizedBox.shrink(),
+    );
+  }
+
+  ThemeData _buildTheme() {
+    const background = Color(0xFFFFFFFF);
+    const surface = Color(0xFFFFFFFF);
+    const primary = Color(0xFF161616);
+    const secondary = Color(0xFF6E6A64);
+    final scheme = const ColorScheme.light(
+      primary: primary,
+      onPrimary: Colors.white,
+      secondary: secondary,
+      onSecondary: Colors.white,
+      surface: surface,
+      onSurface: primary,
+      error: Color(0xFFB3261E),
+      onError: Colors.white,
+    ).copyWith(
+      surfaceContainerLowest: const Color(0xFFFBFAF8),
+      surfaceContainerLow: const Color(0xFFF3F0EB),
+      surfaceContainerHighest: const Color(0xFFEAE5DE),
+      outlineVariant: const Color(0xFFD9D2C9),
+      secondaryContainer: const Color(0xFFEAE6DF),
+      onSecondaryContainer: primary,
+      primaryContainer: const Color(0xFFEAE6DF),
+      onPrimaryContainer: primary,
+    );
+
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: scheme,
+      scaffoldBackgroundColor: background,
+      canvasColor: background,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: background,
+        foregroundColor: primary,
+        elevation: 0,
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: primary,
+        contentTextStyle: const TextStyle(color: Colors.white),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+      ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: surface,
+        foregroundColor: primary,
+        extendedTextStyle: const TextStyle(
+          fontWeight: FontWeight.w700,
+          fontSize: 22,
+          color: primary,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(28),
+        ),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: background,
+        showDragHandle: true,
+      ),
+      dividerColor: const Color(0xFFD9D2C9),
+      textTheme: Typography.blackMountainView.copyWith(
+        headlineSmall: const TextStyle(
+          fontSize: 26,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.8,
+          color: primary,
+        ),
+        titleLarge: const TextStyle(
+          fontSize: 24,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.6,
+          color: primary,
+        ),
+        titleMedium: const TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+          color: primary,
+        ),
+        bodyLarge: const TextStyle(
+          fontSize: 18,
+          height: 1.45,
+          color: primary,
+        ),
+        bodyMedium: const TextStyle(
+          fontSize: 16,
+          height: 1.4,
+          color: primary,
+        ),
+        bodySmall: const TextStyle(
+          fontSize: 14,
+          height: 1.35,
+          color: secondary,
+        ),
       ),
     );
   }

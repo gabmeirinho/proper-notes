@@ -145,6 +145,22 @@ String buildAttachmentImageMarkdown(
   return '![$altText]($attachmentUri)';
 }
 
+List<String> extractAttachmentUrisFromText(String text) {
+  if (text.isEmpty) {
+    return const <String>[];
+  }
+
+  final attachmentUris = <String>{};
+  for (final match in RegExp(r'attachment://[^)\s]+').allMatches(text)) {
+    final attachmentUri = match.group(0);
+    if (attachmentUri != null && attachmentUri.isNotEmpty) {
+      attachmentUris.add(attachmentUri);
+    }
+  }
+
+  return attachmentUris.toList(growable: false);
+}
+
 int countAttachmentReferencesInText(String text, String attachmentUri) {
   if (text.isEmpty || attachmentUri.isEmpty) {
     return 0;

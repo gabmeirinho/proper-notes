@@ -17,6 +17,7 @@ import '../application/delete_folder.dart';
 import '../application/delete_note.dart';
 import '../application/import_obsidian_vault.dart';
 import '../application/move_note.dart';
+import '../application/prepare_all_notes_for_sync.dart';
 import '../application/rename_folder.dart';
 import '../application/restore_note.dart';
 import '../application/search_notes.dart';
@@ -37,6 +38,7 @@ class NotesHomePage extends StatefulWidget {
     required this.deleteFolder,
     required this.renameFolder,
     required this.moveNote,
+    this.prepareAllNotesForSync,
     required this.updateNote,
     required this.deleteNote,
     required this.restoreNote,
@@ -53,6 +55,7 @@ class NotesHomePage extends StatefulWidget {
   final DeleteFolder deleteFolder;
   final RenameFolder renameFolder;
   final MoveNote moveNote;
+  final PrepareAllNotesForSync? prepareAllNotesForSync;
   final UpdateNote updateNote;
   final DeleteNote deleteNote;
   final RestoreNote restoreNote;
@@ -70,6 +73,12 @@ class _NotesHomePageState extends State<NotesHomePage> {
   static const double _desktopBreakpoint = 900;
   static const double _desktopSidebarWidth = 320;
   static const Duration _timedSnackBarDuration = Duration(seconds: 4);
+  static const String _conflictCopySuffix = ' (Conflict Copy)';
+  static const double _mobileMinTextScale = 0.8;
+  static const double _mobileMaxTextScale = 1.2;
+  static const double _defaultMobileTextScale = 0.92;
+  final GlobalKey<ScaffoldState> _mobileScaffoldKey =
+      GlobalKey<ScaffoldState>();
 
   String? _selectedFolderPath;
   _DesktopEditorSession? _desktopEditorSession;
@@ -83,6 +92,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
   String? _lastSeenSyncNotice;
   final Set<String> _expandedFolderPaths = <String>{};
   late final ImportObsidianVault _importObsidianVault;
+  double _mobileNoteTextScale = _defaultMobileTextScale;
 
   @override
   void initState() {
@@ -174,13 +184,16 @@ class _NotesHomePageState extends State<NotesHomePage> {
           ),
         },
         child: Scaffold(
-          appBar: isDesktopWide ? null : _buildMobileAppBar(),
+          key: isDesktopWide ? null : _mobileScaffoldKey,
+          appBar: null,
+          drawer: isDesktopWide ? null : _buildMobileDrawer(),
           body: LayoutBuilder(
             builder: (context, constraints) {
               final isWide = constraints.maxWidth >= _desktopBreakpoint;
 
-              return Column(
+              final body = Column(
                 children: [
+                  if (!isWide) _buildMobileTopBar(),
                   if (isWide) _buildDesktopTopBar(),
                   AnimatedBuilder(
                     animation: widget.syncController,
@@ -284,10 +297,14 @@ class _NotesHomePageState extends State<NotesHomePage> {
                     },
                   ),
                   Expanded(
-                    child: isWide ? _buildDesktopWorkspace() : _buildContent(),
+                    child: isWide
+                        ? _buildDesktopWorkspace()
+                        : _buildMobileContent(),
                   ),
                 ],
               );
+
+              return body;
             },
           ),
           floatingActionButton: _showNewNoteButton
@@ -346,92 +363,118 @@ class _NotesHomePageState extends State<NotesHomePage> {
     );
   }
 
-  PreferredSizeWidget _buildMobileAppBar() {
-    final showFolderContext = _workspaceSection == _WorkspaceSection.notes &&
-        _selectedFolderPath != null;
-
-    return AppBar(
-      title: showFolderContext
-          ? Column(
+  Widget _buildMobileTopBar() {
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+        child: Row(
+          children: [
+            IconButton(
+              onPressed: () => _mobileScaffoldKey.currentState?.openDrawer(),
+              tooltip: 'Folders',
+              icon: const Icon(Icons.menu_rounded),
+            ),
+            const Spacer(),
+            Row(
               mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Proper Notes'),
-                Text(
-                  _selectedFolderPath!,
-                  key: const ValueKey('mobile-folder-path-title'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
+                IconButton(
+                  onPressed: _showSearch,
+                  tooltip: 'Search',
+                  icon: const Icon(Icons.search_rounded),
+                ),
+                PopupMenuButton<_MobileAppMenuAction>(
+                  tooltip: 'More app actions',
+                  onSelected: (action) async {
+                    switch (action) {
+                      case _MobileAppMenuAction.sync:
+                        await _runSync();
+                      case _MobileAppMenuAction.forceReuploadAllNotes:
+                        await _forceReuploadAllNotes();
+                      case _MobileAppMenuAction.account:
+                        await _showAccountSheet();
+                      case _MobileAppMenuAction.noteTextSize:
+                        await _showMobileTextSizeSheet();
+                      case _MobileAppMenuAction.importObsidianNotes:
+                        await _importObsidianNotes();
+                      case _MobileAppMenuAction.showAttachmentsFolder:
+                        await _showAttachmentsFolder();
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: _MobileAppMenuAction.sync,
+                      child: Text('Sync now'),
+                    ),
+                    PopupMenuItem(
+                      value: _MobileAppMenuAction.forceReuploadAllNotes,
+                      child: Text('Force re-upload all notes'),
+                    ),
+                    PopupMenuItem(
+                      value: _MobileAppMenuAction.account,
+                      child: Text('Account'),
+                    ),
+                    PopupMenuItem(
+                      value: _MobileAppMenuAction.noteTextSize,
+                      child: Text('Note text size'),
+                    ),
+                    PopupMenuItem(
+                      value: _MobileAppMenuAction.importObsidianNotes,
+                      child: Text('Import Obsidian notes'),
+                    ),
+                    PopupMenuItem(
+                      value: _MobileAppMenuAction.showAttachmentsFolder,
+                      child: Text('Show attachments folder'),
+                    ),
+                  ],
+                  icon: const Icon(Icons.more_vert_rounded),
                 ),
               ],
-            )
-          : const Text('Proper Notes'),
-      leading: IconButton(
-        onPressed: _showFoldersSheet,
-        tooltip: 'Folders',
-        icon: const Icon(Icons.folder_open_outlined),
-      ),
-      actions: [
-        IconButton(
-          onPressed: _showSearch,
-          tooltip: 'Search',
-          icon: const Icon(Icons.search),
+            ),
+          ],
         ),
-        _buildSyncButton(),
-        _buildAccountButton(),
-        _buildTopBarActionsMenu(),
-      ],
+      ),
     );
   }
 
   Widget _buildDesktopTopBar() {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Container(
+    return Padding(
       key: const ValueKey('desktop-top-bar'),
-      height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
-        border: Border(
-          bottom: BorderSide(
-            color: colorScheme.outlineVariant,
-          ),
-        ),
-      ),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       child: Row(
         children: [
-          IconButton(
-            onPressed: _toggleDesktopSidebar,
-            tooltip: _isDesktopSidebarCollapsed
-                ? 'Expand sidebar'
-                : 'Collapse sidebar',
-            icon: Icon(
-              _isDesktopSidebarCollapsed
-                  ? Icons.view_sidebar_outlined
-                  : Icons.view_sidebar,
-              size: 18,
+          _MobileChromeSurface(
+            child: IconButton(
+              onPressed: _toggleDesktopSidebar,
+              tooltip: _isDesktopSidebarCollapsed
+                  ? 'Expand sidebar'
+                  : 'Collapse sidebar',
+              icon: Icon(
+                _isDesktopSidebarCollapsed
+                    ? Icons.view_sidebar_outlined
+                    : Icons.view_sidebar,
+                size: 18,
+              ),
             ),
           ),
-          Expanded(
-            child: Text(
-              _desktopTopBarTitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+          const Spacer(),
+          _MobileChromeSurface(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  onPressed: _showSearch,
+                  tooltip: 'Search',
+                  icon: const Icon(Icons.search, size: 18),
+                ),
+                _buildSyncButton(iconSize: 18),
+                _buildAccountButton(iconSize: 18),
+                _buildTopBarActionsMenu(iconSize: 18),
+              ],
             ),
           ),
-          IconButton(
-            onPressed: _showSearch,
-            tooltip: 'Search',
-            icon: const Icon(Icons.search, size: 18),
-          ),
-          _buildSyncButton(iconSize: 18),
-          _buildAccountButton(iconSize: 18),
-          _buildTopBarActionsMenu(iconSize: 18),
         ],
       ),
     );
@@ -502,6 +545,8 @@ class _NotesHomePageState extends State<NotesHomePage> {
       icon: Icon(Icons.more_vert, size: iconSize),
       onSelected: (action) async {
         switch (action) {
+          case _TopBarMenuAction.forceReuploadAllNotes:
+            await _forceReuploadAllNotes();
           case _TopBarMenuAction.importObsidianNotes:
             await _importObsidianNotes();
           case _TopBarMenuAction.showAttachmentsFolder:
@@ -509,6 +554,10 @@ class _NotesHomePageState extends State<NotesHomePage> {
         }
       },
       itemBuilder: (context) => const [
+        PopupMenuItem(
+          value: _TopBarMenuAction.forceReuploadAllNotes,
+          child: Text('Force re-upload all notes'),
+        ),
         PopupMenuItem(
           value: _TopBarMenuAction.importObsidianNotes,
           child: Text('Import Obsidian notes'),
@@ -521,29 +570,8 @@ class _NotesHomePageState extends State<NotesHomePage> {
     );
   }
 
-  String get _desktopTopBarTitle {
-    if (_workspaceSection == _WorkspaceSection.trash) {
-      return 'Trash';
-    }
-
-    final openNote = _desktopEditorSession?.note;
-    if (openNote != null) {
-      return openNote.title.isEmpty ? 'Untitled note' : openNote.title;
-    }
-
-    if (_desktopEditorSession != null) {
-      return 'New note';
-    }
-
-    if (_selectedFolderPath != null) {
-      return _selectedFolderPath!;
-    }
-
-    return 'Proper Notes';
-  }
-
   Future<void> _createNote() async {
-    if (_isDesktopWideLayout) {
+    if (_workspaceSection == _WorkspaceSection.notes) {
       setState(() {
         _workspaceSection = _WorkspaceSection.notes;
         _desktopEditorSession = _DesktopEditorSession(
@@ -553,17 +581,6 @@ class _NotesHomePageState extends State<NotesHomePage> {
       });
       return;
     }
-
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => NoteEditorPage(
-          createNote: widget.createNote,
-          updateNote: widget.updateNote,
-          noteRepository: widget.noteRepository,
-          initialFolderPath: _selectedFolderPath,
-        ),
-      ),
-    );
   }
 
   Future<void> _showSearch() async {
@@ -622,8 +639,111 @@ class _NotesHomePageState extends State<NotesHomePage> {
     await _openEditor(note);
   }
 
+  Future<void> _resolveConflict(Note conflictNote) async {
+    final baseTitle = _baseTitleForConflict(conflictNote.title);
+    final activeNotes = await widget.noteRepository.getActiveNotesForSync();
+    final candidates = activeNotes
+        .where(
+          (note) =>
+              note.id != conflictNote.id &&
+              note.syncStatus != SyncStatus.conflicted &&
+              note.title.trim() == baseTitle &&
+              note.folderPath == conflictNote.folderPath,
+        )
+        .toList(growable: false);
+    final originalNote = candidates.length == 1 ? candidates.single : null;
+
+    if (!mounted) {
+      return;
+    }
+
+    final action = await showModalBottomSheet<_ConflictResolutionAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return _ConflictResolutionSheet(
+          conflictNote: conflictNote,
+          originalNote: originalNote,
+          baseTitle: baseTitle,
+        );
+      },
+    );
+
+    if (!mounted || action == null) {
+      return;
+    }
+
+    switch (action) {
+      case _ConflictResolutionAction.openConflictCopy:
+        await _openEditor(conflictNote);
+      case _ConflictResolutionAction.openOriginal:
+        if (originalNote != null) {
+          await _openEditor(originalNote);
+        }
+      case _ConflictResolutionAction.keepOriginal:
+        await _keepOriginalVersion(conflictNote);
+      case _ConflictResolutionAction.keepConflictCopy:
+        await _keepConflictVersion(
+          conflictNote,
+          originalNote: originalNote,
+          baseTitle: baseTitle,
+        );
+    }
+  }
+
+  Future<void> _keepOriginalVersion(Note conflictNote) async {
+    await widget.deleteNote(conflictNote.id);
+    if (!mounted) {
+      return;
+    }
+    _showTimedSnackBar('Conflict copy deleted. Original note kept.');
+  }
+
+  Future<void> _keepConflictVersion(
+    Note conflictNote, {
+    required Note? originalNote,
+    required String baseTitle,
+  }) async {
+    if (originalNote != null) {
+      await widget.deleteNote(originalNote.id);
+    }
+
+    final resolvedNote = await widget.updateNote(
+      original: conflictNote,
+      title: baseTitle,
+      content: conflictNote.content,
+      folderPath: conflictNote.folderPath,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      if (_desktopEditorSession?.note?.id == conflictNote.id) {
+        _desktopEditorSession = _desktopEditorSession!.copyWith(
+          note: resolvedNote,
+        );
+      }
+    });
+
+    _showTimedSnackBar(
+      originalNote == null
+          ? 'Conflict copy converted to a normal note.'
+          : 'Conflict copy kept. Original note moved to trash.',
+    );
+  }
+
+  String _baseTitleForConflict(String title) {
+    if (!title.endsWith(_conflictCopySuffix)) {
+      return title.trim();
+    }
+
+    return title.substring(0, title.length - _conflictCopySuffix.length).trim();
+  }
+
   Future<void> _openEditor(Note note) async {
-    if (_isDesktopWideLayout) {
+    if (_workspaceSection == _WorkspaceSection.notes) {
       setState(() {
         _workspaceSection = _WorkspaceSection.notes;
         _selectedFolderPath = _normalizeFolderPath(note.folderPath);
@@ -635,17 +755,6 @@ class _NotesHomePageState extends State<NotesHomePage> {
       });
       return;
     }
-
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => NoteEditorPage(
-          createNote: widget.createNote,
-          updateNote: widget.updateNote,
-          noteRepository: widget.noteRepository,
-          note: note,
-        ),
-      ),
-    );
   }
 
   Future<void> _importObsidianNotes() async {
@@ -687,6 +796,87 @@ class _NotesHomePageState extends State<NotesHomePage> {
         ? 'Imported ${result.importedNoteCount} Obsidian notes. Skipped ${result.failedFileCount} files.'
         : 'Imported ${result.importedNoteCount} Obsidian notes.';
     _showTimedSnackBar(summary);
+  }
+
+  Future<void> _forceReuploadAllNotes() async {
+    final prepareAllNotesForSync = widget.prepareAllNotesForSync ??
+        PrepareAllNotesForSync(
+          repository: widget.noteRepository,
+        );
+    final preparedCount = await prepareAllNotesForSync();
+    if (!mounted) {
+      return;
+    }
+
+    final prepLabel = preparedCount == 1
+        ? 'Prepared 1 note for sync.'
+        : 'Prepared $preparedCount notes for sync.';
+    _showTimedSnackBar(prepLabel);
+    await _runSync();
+  }
+
+  Future<void> _showMobileTextSizeSheet() async {
+    if (!mounted) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final percent = (_mobileNoteTextScale * 100).round();
+
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Note text size',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '$percent%',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  Slider(
+                    value: _mobileNoteTextScale,
+                    min: _mobileMinTextScale,
+                    max: _mobileMaxTextScale,
+                    divisions: 8,
+                    label: '$percent%',
+                    onChanged: (value) {
+                      setState(() {
+                        _mobileNoteTextScale = value;
+                      });
+                      setModalState(() {});
+                    },
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _mobileNoteTextScale = _defaultMobileTextScale;
+                        });
+                        setModalState(() {});
+                      },
+                      child: const Text('Reset'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _showAttachmentsFolder() async {
@@ -747,6 +937,16 @@ class _NotesHomePageState extends State<NotesHomePage> {
   }
 
   Future<void> _moveNote(Note note) async {
+    if (!_isDesktopWideLayout) {
+      final destination = await _showMoveNoteSheet(note);
+      if (destination == null) {
+        return;
+      }
+      await _moveNoteToFolderPath(
+          note, destination.isEmpty ? null : destination);
+      return;
+    }
+
     final destination = await _showTextEntryDialog(
       title: 'Move note',
       labelText: 'Folder path',
@@ -760,6 +960,24 @@ class _NotesHomePageState extends State<NotesHomePage> {
     }
 
     await _moveNoteToFolderPath(note, destination);
+  }
+
+  Future<String?> _showMoveNoteSheet(Note note) async {
+    return showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: SizedBox(
+            height: 420,
+            child: _MoveNoteFolderSheet(
+              foldersStream: widget.folderRepository.watchFolders(),
+              currentFolderPath: note.folderPath,
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _renameFolder(Folder folder) async {
@@ -1130,16 +1348,21 @@ class _NotesHomePageState extends State<NotesHomePage> {
   Future<void> _showActiveNoteMenu(Note note, Offset position) async {
     final action = await _showPopupMenu<_NoteMenuAction>(
       position: position,
-      items: const [
-        PopupMenuItem(
+      items: [
+        const PopupMenuItem(
           value: _NoteMenuAction.open,
           child: Text('Open'),
         ),
-        PopupMenuItem(
+        if (note.syncStatus == SyncStatus.conflicted)
+          const PopupMenuItem(
+            value: _NoteMenuAction.resolveConflict,
+            child: Text('Resolve conflict'),
+          ),
+        const PopupMenuItem(
           value: _NoteMenuAction.move,
           child: Text('Move'),
         ),
-        PopupMenuItem(
+        const PopupMenuItem(
           value: _NoteMenuAction.delete,
           child: Text('Delete'),
         ),
@@ -1157,6 +1380,8 @@ class _NotesHomePageState extends State<NotesHomePage> {
         } else {
           await _openEditor(note);
         }
+      case _NoteMenuAction.resolveConflict:
+        await _resolveConflict(note);
       case _NoteMenuAction.move:
         await _moveNote(note);
       case _NoteMenuAction.delete:
@@ -1185,6 +1410,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
       case _NoteMenuAction.restore:
         await _restore(note);
       case _NoteMenuAction.open:
+      case _NoteMenuAction.resolveConflict:
       case _NoteMenuAction.move:
       case _NoteMenuAction.delete:
         break;
@@ -1202,6 +1428,8 @@ class _NotesHomePageState extends State<NotesHomePage> {
         } else {
           await _openEditor(note);
         }
+      case _NoteMenuAction.resolveConflict:
+        await _resolveConflict(note);
       case _NoteMenuAction.move:
         await _moveNote(note);
       case _NoteMenuAction.delete:
@@ -1211,37 +1439,86 @@ class _NotesHomePageState extends State<NotesHomePage> {
     }
   }
 
+  Future<void> _showMobileNoteActions(Note note) async {
+    final action = await showModalBottomSheet<_NoteMenuAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return _MobileNoteActionsSheet(
+          note: note,
+          showMoveAction: _workspaceSection == _WorkspaceSection.notes,
+          showResolveConflictAction: note.syncStatus == SyncStatus.conflicted,
+        );
+      },
+    );
+
+    if (!mounted || action == null) {
+      return;
+    }
+
+    await _handleActiveNoteAction(note, action);
+  }
+
   Widget _buildContent() {
     return _workspaceSection == _WorkspaceSection.trash
         ? _buildTrashList()
         : _buildNotesList();
   }
 
+  Widget _buildMobileContent() {
+    if (_workspaceSection == _WorkspaceSection.trash) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: _buildTrashList(),
+      );
+    }
+
+    return _buildDesktopEditorPane();
+  }
+
   Widget _buildNotesList() {
+    final isDesktopWide = _isDesktopWideLayout;
+
     return _NotesList(
       stream: widget.noteRepository.watchActiveNotes(
         folderPath: _selectedFolderPath,
       ),
+      mobileLayout: !isDesktopWide,
       emptyState: _selectedFolderPath == null
           ? 'No notes yet. Create your first note.'
           : 'No notes in this folder yet.',
       onTap: _openEditor,
       onRestoreConflictCopy: _restoreConflictCopy,
-      onShowContextMenu: _showActiveNoteMenu,
+      onShowContextMenu: isDesktopWide
+          ? _showActiveNoteMenu
+          : (note, _) => _showMobileNoteActions(note),
       trailingBuilder: (context, note) {
+        if (!isDesktopWide) {
+          return IconButton(
+            tooltip: 'Note actions',
+            icon: const Icon(Icons.more_vert),
+            onPressed: () => _showMobileNoteActions(note),
+          );
+        }
+
         return PopupMenuButton<_NoteMenuAction>(
           tooltip: 'Note actions',
           onSelected: (action) => _handleActiveNoteAction(note, action),
-          itemBuilder: (context) => const [
-            PopupMenuItem(
+          itemBuilder: (context) => [
+            const PopupMenuItem(
               value: _NoteMenuAction.open,
               child: Text('Open'),
             ),
-            PopupMenuItem(
+            if (note.syncStatus == SyncStatus.conflicted)
+              const PopupMenuItem(
+                value: _NoteMenuAction.resolveConflict,
+                child: Text('Resolve conflict'),
+              ),
+            const PopupMenuItem(
               value: _NoteMenuAction.move,
               child: Text('Move'),
             ),
-            PopupMenuItem(
+            const PopupMenuItem(
               value: _NoteMenuAction.delete,
               child: Text('Delete'),
             ),
@@ -1256,6 +1533,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
       stream: widget.noteRepository.watchDeletedNotes(
         folderPath: _selectedFolderPath,
       ),
+      mobileLayout: !_isDesktopWideLayout,
       emptyState: _selectedFolderPath == null
           ? 'Trash is empty.'
           : 'No deleted notes in this folder.',
@@ -1322,6 +1600,56 @@ class _NotesHomePageState extends State<NotesHomePage> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildMobileDrawer() {
+    return Drawer(
+      child: SafeArea(
+        child: _MobileSidebarTree(
+          foldersStream: widget.folderRepository.watchFolders(),
+          notesStream: widget.noteRepository.watchActiveNotes(),
+          selectedFolderPath: _selectedFolderPath,
+          selectedNoteId: _desktopEditorSession?.note?.id,
+          selectedSection: _workspaceSection,
+          expandedFolderPaths: _expandedFolderPaths,
+          onSelectFolder: (path) {
+            _selectFolder(path);
+          },
+          onSelectSection: (section) {
+            Navigator.of(context).pop();
+            _selectWorkspaceSection(section);
+          },
+          onToggleFolderExpansion: _toggleFolderExpansion,
+          onOpenNote: (note) async {
+            Navigator.of(context).pop();
+            await _openEditor(note);
+          },
+          onShowNoteMenu: (note, _) => _showMobileNoteActions(note),
+          onShowRootMenu: _showDesktopRootMenu,
+          onCreateNoteInFolder: (path) async {
+            Navigator.of(context).pop();
+            _selectFolder(path);
+            await _createNote();
+          },
+          onDeleteFolder: (folder) async {
+            Navigator.of(context).pop();
+            await _deleteFolder(folder);
+          },
+          onCreateFolder: (parentPath) async {
+            Navigator.of(context).pop();
+            await _showCreateFolderDialog(parentPath);
+          },
+          onRenameFolder: (folder) async {
+            Navigator.of(context).pop();
+            await _renameFolder(folder);
+          },
+          onMoveFolder: (folder) async {
+            Navigator.of(context).pop();
+            await _moveFolder(folder);
+          },
+        ),
+      ),
     );
   }
 
@@ -1501,20 +1829,47 @@ class _NotesHomePageState extends State<NotesHomePage> {
 
     final session = _desktopEditorSession!;
 
+    final editor = session.note == null
+        ? _buildDesktopNoteEditor(session: session, note: null)
+        : StreamBuilder<List<Note>>(
+            stream: widget.noteRepository.watchActiveNotes(),
+            builder: (context, snapshot) {
+              Note? liveNote;
+              for (final candidate in snapshot.data ?? const <Note>[]) {
+                if (candidate.id == session.note!.id) {
+                  liveNote = candidate;
+                  break;
+                }
+              }
+              return _buildDesktopNoteEditor(
+                session: session,
+                note: liveNote ?? session.note,
+              );
+            },
+          );
+
     return Container(
       color: Theme.of(context).colorScheme.surface,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-      child: NoteEditorPage(
-        key: ValueKey('desktop-editor-${session.sessionId}'),
-        createNote: widget.createNote,
-        updateNote: widget.updateNote,
-        noteRepository: widget.noteRepository,
-        note: session.note,
-        initialFolderPath: session.initialFolderPath,
-        embedded: true,
-        onPersisted: _handleDesktopEditorPersisted,
-        onClose: _closeDesktopEditor,
-      ),
+      child: editor,
+    );
+  }
+
+  Widget _buildDesktopNoteEditor({
+    required _DesktopEditorSession session,
+    required Note? note,
+  }) {
+    return NoteEditorPage(
+      key: ValueKey('desktop-editor-${session.sessionId}'),
+      createNote: widget.createNote,
+      updateNote: widget.updateNote,
+      noteRepository: widget.noteRepository,
+      note: note,
+      initialFolderPath: session.initialFolderPath,
+      embedded: true,
+      mobileTextScale: _mobileNoteTextScale,
+      onPersisted: _handleDesktopEditorPersisted,
+      onClose: _closeDesktopEditor,
     );
   }
 
@@ -1682,6 +2037,7 @@ class _DesktopSidebarTree extends StatelessWidget {
                 selectedNoteId: selectedNoteId,
                 selectedSection: selectedSection,
                 expandedFolderPaths: expandedFolderPaths,
+                enableDragDrop: true,
                 onSelectFolder: onSelectFolder,
                 onSelectSection: onSelectSection,
                 onToggleFolderExpansion: onToggleFolderExpansion,
@@ -1730,6 +2086,102 @@ class _DesktopSidebarTree extends StatelessWidget {
   }
 }
 
+class _MobileSidebarTree extends StatelessWidget {
+  const _MobileSidebarTree({
+    required this.foldersStream,
+    required this.notesStream,
+    required this.selectedFolderPath,
+    required this.selectedNoteId,
+    required this.selectedSection,
+    required this.expandedFolderPaths,
+    required this.onSelectFolder,
+    required this.onSelectSection,
+    required this.onToggleFolderExpansion,
+    required this.onOpenNote,
+    required this.onShowNoteMenu,
+    required this.onShowRootMenu,
+    required this.onCreateNoteInFolder,
+    required this.onDeleteFolder,
+    required this.onCreateFolder,
+    required this.onRenameFolder,
+    required this.onMoveFolder,
+  });
+
+  final Stream<List<Folder>> foldersStream;
+  final Stream<List<Note>> notesStream;
+  final String? selectedFolderPath;
+  final String? selectedNoteId;
+  final _WorkspaceSection selectedSection;
+  final Set<String> expandedFolderPaths;
+  final ValueChanged<String?> onSelectFolder;
+  final ValueChanged<_WorkspaceSection> onSelectSection;
+  final ValueChanged<String> onToggleFolderExpansion;
+  final Future<void> Function(Note note) onOpenNote;
+  final Future<void> Function(Note note, Offset position) onShowNoteMenu;
+  final Future<void> Function(Offset position) onShowRootMenu;
+  final Future<void> Function(String? path) onCreateNoteInFolder;
+  final Future<void> Function(Folder folder) onDeleteFolder;
+  final Future<void> Function(String? parentPath) onCreateFolder;
+  final Future<void> Function(Folder folder) onRenameFolder;
+  final Future<void> Function(Folder folder) onMoveFolder;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceContainerLowest,
+      child: StreamBuilder<List<Folder>>(
+        stream: foldersStream,
+        builder: (context, folderSnapshot) {
+          final folders = folderSnapshot.data ?? const <Folder>[];
+
+          return StreamBuilder<List<Note>>(
+            stream: notesStream,
+            builder: (context, noteSnapshot) {
+              final notes = noteSnapshot.data ?? const <Note>[];
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 10),
+                    child: Text(
+                      'Files',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  Expanded(
+                    child: _DesktopSidebarTreeContent(
+                      folders: folders,
+                      notes: notes,
+                      selectedFolderPath: selectedFolderPath,
+                      selectedNoteId: selectedNoteId,
+                      selectedSection: selectedSection,
+                      expandedFolderPaths: expandedFolderPaths,
+                      enableDragDrop: false,
+                      onSelectFolder: onSelectFolder,
+                      onSelectSection: onSelectSection,
+                      onToggleFolderExpansion: onToggleFolderExpansion,
+                      onOpenNote: onOpenNote,
+                      onShowNoteMenu: onShowNoteMenu,
+                      onShowRootMenu: onShowRootMenu,
+                      onCreateNoteInFolder: onCreateNoteInFolder,
+                      onDeleteFolder: onDeleteFolder,
+                      onCreateFolder: onCreateFolder,
+                      onRenameFolder: onRenameFolder,
+                      onMoveFolder: onMoveFolder,
+                      onMoveNoteToFolderPath: (_, __) async {},
+                      onMoveFolderToParentPath: (_, __) async {},
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _DesktopSidebarTreeContent extends StatelessWidget {
   const _DesktopSidebarTreeContent({
     required this.folders,
@@ -1738,6 +2190,7 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
     required this.selectedNoteId,
     required this.selectedSection,
     required this.expandedFolderPaths,
+    required this.enableDragDrop,
     required this.onSelectFolder,
     required this.onSelectSection,
     required this.onToggleFolderExpansion,
@@ -1759,6 +2212,7 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
   final String? selectedNoteId;
   final _WorkspaceSection selectedSection;
   final Set<String> expandedFolderPaths;
+  final bool enableDragDrop;
   final ValueChanged<String?> onSelectFolder;
   final ValueChanged<_WorkspaceSection> onSelectSection;
   final ValueChanged<String> onToggleFolderExpansion;
@@ -1800,27 +2254,6 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
 
     final children = <Widget>[
       _SidebarHeaderRow(
-        icon: Icons.notes_outlined,
-        label: 'All notes',
-        selected: selectedSection == _WorkspaceSection.notes &&
-            selectedFolderPath == null,
-        onTap: () => onSelectFolder(null),
-        onShowContextMenu: onShowRootMenu,
-        canAcceptDrop: (data) => switch (data) {
-          _DesktopSidebarDragDataNote(:final note) => note.folderPath != null,
-          _DesktopSidebarDragDataFolder(:final folder) =>
-            folder.parentPath != null,
-        },
-        onAcceptDrop: (data) async {
-          switch (data) {
-            case _DesktopSidebarDragDataNote(:final note):
-              await onMoveNoteToFolderPath(note, null);
-            case _DesktopSidebarDragDataFolder(:final folder):
-              await onMoveFolderToParentPath(folder, null);
-          }
-        },
-      ),
-      _SidebarHeaderRow(
         icon: Icons.delete_outline,
         label: 'Trash',
         selected: selectedSection == _WorkspaceSection.trash,
@@ -1848,6 +2281,7 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
           selected: note.id == selectedNoteId,
           onOpen: onOpenNote,
           onShowContextMenu: onShowNoteMenu,
+          enableDragDrop: enableDragDrop,
           dragData: _DesktopSidebarDragDataNote(note),
         ),
       );
@@ -1899,10 +2333,18 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
         expanded: isExpanded,
         hasChildren: hasChildren,
         onTap: () {
-          onSelectFolder(folder.path);
-          if (hasChildren && isExpanded) {
-            onToggleFolderExpansion(folder.path);
+          if (hasChildren) {
+            if (isExpanded && selectedFolderPath == folder.path) {
+              onToggleFolderExpansion(folder.path);
+              return;
+            }
+
+            if (!isExpanded) {
+              onToggleFolderExpansion(folder.path);
+            }
           }
+
+          onSelectFolder(folder.path);
         },
         onToggleExpanded: () => onToggleFolderExpansion(folder.path),
         onCreateNote: () => onCreateNoteInFolder(folder.path),
@@ -1910,7 +2352,11 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
         onRenameFolder: () => onRenameFolder(folder),
         onMoveFolder: () => onMoveFolder(folder),
         onDeleteFolder: onDeleteFolder,
+        enableDragDrop: enableDragDrop,
         canAcceptDrop: (data) {
+          if (!enableDragDrop) {
+            return false;
+          }
           if (data is _DesktopSidebarDragDataNote) {
             return data.note.folderPath != folder.path;
           }
@@ -1921,6 +2367,9 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
           return false;
         },
         onAcceptDrop: (data) async {
+          if (!enableDragDrop) {
+            return;
+          }
           if (data is _DesktopSidebarDragDataNote) {
             await onMoveNoteToFolderPath(data.note, folder.path);
             return;
@@ -1954,6 +2403,7 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
           selected: note.id == selectedNoteId,
           onOpen: onOpenNote,
           onShowContextMenu: onShowNoteMenu,
+          enableDragDrop: enableDragDrop,
           dragData: _DesktopSidebarDragDataNote(note),
         ),
       );
@@ -2080,6 +2530,7 @@ class _SidebarFolderTile extends StatelessWidget {
     required this.onRenameFolder,
     required this.onMoveFolder,
     required this.onDeleteFolder,
+    required this.enableDragDrop,
     required this.canAcceptDrop,
     required this.onAcceptDrop,
   });
@@ -2094,6 +2545,7 @@ class _SidebarFolderTile extends StatelessWidget {
   final Future<void> Function() onRenameFolder;
   final Future<void> Function() onMoveFolder;
   final Future<void> Function(Folder folder) onDeleteFolder;
+  final bool enableDragDrop;
   final bool Function(_DesktopSidebarDragData data) canAcceptDrop;
   final Future<void> Function(_DesktopSidebarDragData data) onAcceptDrop;
 
@@ -2110,7 +2562,7 @@ class _SidebarFolderTile extends StatelessWidget {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'Folder move was not accepted. Drop it on another folder or All notes.',
+                'Folder move was not accepted. Drop it on another folder or the root level.',
               ),
               behavior: SnackBarBehavior.floating,
             ),
@@ -2206,13 +2658,14 @@ class _SidebarFolderTile extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    Tooltip(
-                      message: 'Drag folder',
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: buildDragHandle(),
+                    if (enableDragDrop)
+                      Tooltip(
+                        message: 'Drag folder',
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: buildDragHandle(),
+                        ),
                       ),
-                    ),
                     PopupMenuButton<_FolderMenuAction>(
                       tooltip: 'Folder actions',
                       onSelected: (action) => _handleFolderAction(action),
@@ -2246,6 +2699,10 @@ class _SidebarFolderTile extends StatelessWidget {
           ),
         ),
       );
+    }
+
+    if (!enableDragDrop) {
+      return buildTile(false);
     }
 
     return DragTarget<_DesktopSidebarDragData>(
@@ -2321,6 +2778,7 @@ class _SidebarNoteTile extends StatelessWidget {
     required this.selected,
     required this.onOpen,
     required this.onShowContextMenu,
+    required this.enableDragDrop,
     required this.dragData,
   });
 
@@ -2329,6 +2787,7 @@ class _SidebarNoteTile extends StatelessWidget {
   final bool selected;
   final Future<void> Function(Note note) onOpen;
   final Future<void> Function(Note note, Offset position) onShowContextMenu;
+  final bool enableDragDrop;
   final _DesktopSidebarDragDataNote dragData;
 
   @override
@@ -2336,6 +2795,7 @@ class _SidebarNoteTile extends StatelessWidget {
     final title = note.title.isEmpty ? 'Untitled note' : note.title;
     final colorScheme = Theme.of(context).colorScheme;
     final titleStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+          fontWeight: selected ? FontWeight.w700 : null,
           color: note.syncStatus == SyncStatus.conflicted
               ? colorScheme.tertiary
               : null,
@@ -2352,8 +2812,10 @@ class _SidebarNoteTile extends StatelessWidget {
           onLongPressStart: (details) =>
               onShowContextMenu(note, details.globalPosition),
           child: Material(
-            color:
-                selected ? colorScheme.secondaryContainer : Colors.transparent,
+            key: ValueKey('sidebar-note-surface-${note.id}'),
+            color: selected
+                ? colorScheme.surfaceContainerHigh
+                : Colors.transparent,
             child: InkWell(
               key: ValueKey('sidebar-note-${note.id}'),
               onTap: () => onOpen(note),
@@ -2386,6 +2848,10 @@ class _SidebarNoteTile extends StatelessWidget {
       );
     }
 
+    if (!enableDragDrop) {
+      return buildTile();
+    }
+
     return Draggable<_DesktopSidebarDragData>(
       data: dragData,
       onDragEnd: (details) {
@@ -2395,7 +2861,7 @@ class _SidebarNoteTile extends StatelessWidget {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Note move was not accepted. Drop it on a folder or All notes.',
+              'Note move was not accepted. Drop it on a folder or the root level.',
             ),
             behavior: SnackBarBehavior.floating,
           ),
@@ -2503,6 +2969,7 @@ class _SidebarNoteSyncIndicator extends StatelessWidget {
 }
 
 enum _TopBarMenuAction {
+  forceReuploadAllNotes,
   importObsidianNotes,
   showAttachmentsFolder,
 }
@@ -2510,6 +2977,7 @@ enum _TopBarMenuAction {
 class _NotesList extends StatelessWidget {
   const _NotesList({
     required this.stream,
+    required this.mobileLayout,
     required this.emptyState,
     required this.onTap,
     required this.onRestoreConflictCopy,
@@ -2518,6 +2986,7 @@ class _NotesList extends StatelessWidget {
   });
 
   final Stream<List<Note>> stream;
+  final bool mobileLayout;
   final String emptyState;
   final Future<void> Function(Note note) onTap;
   final Future<void> Function(Note note) onRestoreConflictCopy;
@@ -2540,9 +3009,9 @@ class _NotesList extends StatelessWidget {
         }
 
         return ListView.separated(
-          padding: const EdgeInsets.all(12),
+          padding: EdgeInsets.fromLTRB(4, mobileLayout ? 4 : 12, 4, 140),
           itemCount: notes.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          separatorBuilder: (_, __) => SizedBox(height: mobileLayout ? 10 : 8),
           itemBuilder: (context, index) {
             final note = notes[index];
             final title = note.title.isEmpty ? 'Untitled note' : note.title;
@@ -2557,63 +3026,156 @@ class _NotesList extends StatelessWidget {
               onLongPressStart: (details) =>
                   onShowContextMenu(note, details.globalPosition),
               child: Material(
-                color: isConflictCopy
-                    ? colorScheme.tertiaryContainer.withValues(alpha: 0.32)
-                    : Colors.transparent,
-                child: ListTile(
-                  hoverColor: colorScheme.primary.withValues(alpha: 0.18),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  title: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _SyncStatusChip(status: note.syncStatus),
-                    ],
-                  ),
-                  subtitle: Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (isConflictCopy) ...[
-                          Text(
-                            'Conflict copy preserved during sync. Review before editing further.',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(fontWeight: FontWeight.w600),
-                          ),
-                          const SizedBox(height: 8),
-                        ],
-                        MarkdownPreview(
-                          document: note.document,
-                          compact: true,
-                          maxBlocks: 2,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          secondaryLine,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(28),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(28),
                   onTap: () => isConflictCopy
                       ? onRestoreConflictCopy(note)
                       : onTap(note),
-                  trailing: trailingBuilder(context, note),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isConflictCopy
+                          ? colorScheme.tertiaryContainer
+                              .withValues(alpha: 0.36)
+                          : colorScheme.surface,
+                      borderRadius:
+                          BorderRadius.circular(mobileLayout ? 28 : 22),
+                      boxShadow: mobileLayout
+                          ? [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.04),
+                                blurRadius: 18,
+                                offset: const Offset(0, 10),
+                              ),
+                            ]
+                          : null,
+                    ),
+                    padding: EdgeInsets.fromLTRB(
+                      mobileLayout ? 20 : 16,
+                      mobileLayout ? 18 : 10,
+                      mobileLayout ? 10 : 16,
+                      mobileLayout ? 18 : 10,
+                    ),
+                    child: mobileLayout
+                        ? Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .headlineSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: -0.6,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    if (isConflictCopy) ...[
+                                      Text(
+                                        'Conflict copy preserved during sync.',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                    ],
+                                    Text(
+                                      _buildPlainExcerpt(note),
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyLarge
+                                          ?.copyWith(
+                                            color: colorScheme.onSurfaceVariant,
+                                            height: 1.45,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 14),
+                                    Text(
+                                      secondaryLine,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            color: colorScheme.onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              trailingBuilder(context, note),
+                            ],
+                          )
+                        : ListTile(
+                            hoverColor:
+                                colorScheme.primary.withValues(alpha: 0.18),
+                            contentPadding: EdgeInsets.zero,
+                            title: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style:
+                                        Theme.of(context).textTheme.titleMedium,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                _SyncStatusChip(status: note.syncStatus),
+                              ],
+                            ),
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (isConflictCopy) ...[
+                                    Text(
+                                      'Conflict copy preserved during sync. Review before editing further.',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                  ],
+                                  MarkdownPreview(
+                                    document: note.document,
+                                    compact: true,
+                                    maxBlocks: 2,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    secondaryLine,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            trailing: trailingBuilder(context, note),
+                          ),
+                  ),
                 ),
               ),
             );
@@ -2632,6 +3194,66 @@ class _NotesList extends StatelessWidget {
 
     return '$timestamp  •  $folderPath';
   }
+
+  String _buildPlainExcerpt(Note note) {
+    final lines = note.content
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .where((line) => !line.startsWith('!['))
+        .toList(growable: false);
+    if (lines.isEmpty) {
+      return 'Start writing...';
+    }
+
+    final cleaned = lines.first
+        .replaceAll(RegExp(r'^#{1,6}\s*'), '')
+        .replaceAll(RegExp(r'^-\s+\[[ xX]\]\s*'), '')
+        .replaceAll(RegExp(r'^-\s+'), '')
+        .replaceAll(RegExp(r'^>\s+'), '')
+        .trim();
+    return cleaned.isEmpty ? 'Start writing...' : cleaned;
+  }
+}
+
+class _MobileChromeSurface extends StatelessWidget {
+  const _MobileChromeSurface({
+    required this.child,
+    this.padding = const EdgeInsets.all(2),
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: padding,
+        child: child,
+      ),
+    );
+  }
+}
+
+enum _MobileAppMenuAction {
+  sync,
+  forceReuploadAllNotes,
+  account,
+  noteTextSize,
+  importObsidianNotes,
+  showAttachmentsFolder,
 }
 
 class _FolderSidebar extends StatelessWidget {
@@ -2677,13 +3299,6 @@ class _FolderSidebar extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-          ListTile(
-            selected: selectedSection == _WorkspaceSection.notes &&
-                selectedFolderPath == null,
-            leading: const Icon(Icons.notes_outlined),
-            title: const Text('All notes'),
-            onTap: () => onSelectFolder(null),
           ),
           ListTile(
             selected: selectedSection == _WorkspaceSection.trash,
@@ -2929,6 +3544,278 @@ class _SyncStatusChip extends StatelessWidget {
   }
 }
 
+class _MobileNoteActionsSheet extends StatelessWidget {
+  const _MobileNoteActionsSheet({
+    required this.note,
+    required this.showMoveAction,
+    required this.showResolveConflictAction,
+  });
+
+  final Note note;
+  final bool showMoveAction;
+  final bool showResolveConflictAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = note.title.isEmpty ? 'Untitled note' : note.title;
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            _MobileActionTile(
+              icon: Icons.open_in_new,
+              label: 'Open',
+              onTap: () => Navigator.of(context).pop(_NoteMenuAction.open),
+            ),
+            if (showMoveAction)
+              _MobileActionTile(
+                icon: Icons.drive_file_move_outline,
+                label: 'Move to folder',
+                onTap: () => Navigator.of(context).pop(_NoteMenuAction.move),
+              ),
+            if (showResolveConflictAction)
+              _MobileActionTile(
+                icon: Icons.rule_folder_outlined,
+                label: 'Resolve conflict',
+                onTap: () =>
+                    Navigator.of(context).pop(_NoteMenuAction.resolveConflict),
+              ),
+            _MobileActionTile(
+              icon: Icons.delete_outline,
+              label: 'Delete',
+              destructive: true,
+              onTap: () => Navigator.of(context).pop(_NoteMenuAction.delete),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileActionTile extends StatelessWidget {
+  const _MobileActionTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.destructive = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = destructive ? Theme.of(context).colorScheme.error : null;
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+      leading: Icon(icon, color: color),
+      title: Text(
+        label,
+        style: color == null ? null : TextStyle(color: color),
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
+class _MoveNoteFolderSheet extends StatelessWidget {
+  const _MoveNoteFolderSheet({
+    required this.foldersStream,
+    required this.currentFolderPath,
+  });
+
+  final Stream<List<Folder>> foldersStream;
+  final String? currentFolderPath;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Folder>>(
+      stream: foldersStream,
+      builder: (context, snapshot) {
+        final folders = List<Folder>.from(snapshot.data ?? const <Folder>[])
+          ..sort((a, b) => a.path.compareTo(b.path));
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+              child: Text(
+                'Move note',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(
+                'Choose a destination folder',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                children: [
+                  _FolderDestinationTile(
+                    label: 'All notes',
+                    subtitle: 'Move note to root',
+                    selected: currentFolderPath == null,
+                    depth: 0,
+                    onTap: () => Navigator.of(context).pop(''),
+                  ),
+                  for (final folder in folders)
+                    _FolderDestinationTile(
+                      label: folder.name,
+                      subtitle: folder.parentPath == null ? null : folder.path,
+                      selected: currentFolderPath == folder.path,
+                      depth: folder.depth,
+                      onTap: () =>
+                          Navigator.of(context).pop<String?>(folder.path),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ConflictResolutionSheet extends StatelessWidget {
+  const _ConflictResolutionSheet({
+    required this.conflictNote,
+    required this.originalNote,
+    required this.baseTitle,
+  });
+
+  final Note conflictNote;
+  final Note? originalNote;
+  final String baseTitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Text(
+                'Resolve conflict',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Text(
+                originalNote == null
+                    ? 'This conflict copy can be converted back into a normal note.'
+                    : 'Choose which version to keep. The other one will be moved to trash.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+            _MobileActionTile(
+              icon: Icons.open_in_new,
+              label: 'Open conflict copy',
+              onTap: () => Navigator.of(context).pop(
+                _ConflictResolutionAction.openConflictCopy,
+              ),
+            ),
+            if (originalNote != null)
+              _MobileActionTile(
+                icon: Icons.article_outlined,
+                label: 'Open original',
+                onTap: () => Navigator.of(context)
+                    .pop(_ConflictResolutionAction.openOriginal),
+              ),
+            if (originalNote != null)
+              _MobileActionTile(
+                icon: Icons.check_circle_outline,
+                label: 'Keep original',
+                onTap: () => Navigator.of(context)
+                    .pop(_ConflictResolutionAction.keepOriginal),
+              ),
+            _MobileActionTile(
+              icon: Icons.check_circle,
+              label: originalNote == null
+                  ? 'Convert to normal note'
+                  : 'Keep conflict copy',
+              onTap: () => Navigator.of(context).pop(
+                _ConflictResolutionAction.keepConflictCopy,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Text(
+                'Resolved title: $baseTitle',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FolderDestinationTile extends StatelessWidget {
+  const _FolderDestinationTile({
+    required this.label,
+    required this.selected,
+    required this.depth,
+    required this.onTap,
+    this.subtitle,
+  });
+
+  final String label;
+  final String? subtitle;
+  final bool selected;
+  final int depth;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      key: ValueKey('move-note-folder-$label'),
+      selected: selected,
+      contentPadding: EdgeInsets.only(
+        left: 20 + (depth * 20),
+        right: 16,
+      ),
+      leading: Icon(selected ? Icons.check : Icons.folder_outlined),
+      title: Text(label),
+      subtitle: subtitle == null
+          ? null
+          : Text(
+              subtitle!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+      onTap: onTap,
+    );
+  }
+}
+
 class _TextEntryDialog extends StatefulWidget {
   const _TextEntryDialog({
     required this.title,
@@ -3023,9 +3910,17 @@ const _monthNames = <String>[
 
 enum _NoteMenuAction {
   open,
+  resolveConflict,
   move,
   delete,
   restore,
+}
+
+enum _ConflictResolutionAction {
+  openConflictCopy,
+  openOriginal,
+  keepOriginal,
+  keepConflictCopy,
 }
 
 enum _FolderMenuAction {

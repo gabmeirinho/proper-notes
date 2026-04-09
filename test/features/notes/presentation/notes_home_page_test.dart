@@ -92,13 +92,14 @@ void main() {
       await tester.tap(find.byTooltip('More app actions'));
       await tester.pumpAndSettle();
 
+      expect(find.text('Force re-upload all notes'), findsOneWidget);
       expect(find.text('Import Obsidian notes'), findsOneWidget);
       expect(find.text('Show attachments folder'), findsOneWidget);
     },
   );
 
   testWidgets(
-    'mobile layout removes banner boxes and shows folder path in the app bar',
+    'mobile layout keeps only the top corner actions and removes the title label',
     (tester) async {
       tester.view.physicalSize = const Size(430, 900);
       tester.view.devicePixelRatio = 1;
@@ -162,20 +163,111 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Projects'));
       await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(420, 120));
+      await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('mobile-folder-path-title')),
-          findsOneWidget);
-      expect(find.text('Projects'), findsAtLeastNWidgets(1));
+      expect(find.text('Proper Notes'), findsNothing);
+      expect(
+          find.byKey(const ValueKey('mobile-folder-path-title')), findsNothing);
       expect(find.textContaining('Shortcuts:'), findsNothing);
       expect(find.text('Sync ready'), findsNothing);
       expect(find.text('Folder: Projects'), findsNothing);
+      expect(find.byTooltip('Folders'), findsOneWidget);
+      expect(find.byTooltip('Search'), findsOneWidget);
       expect(find.byTooltip('More app actions'), findsOneWidget);
 
       await tester.tap(find.byTooltip('More app actions'));
       await tester.pumpAndSettle();
 
+      expect(find.text('Note text size'), findsOneWidget);
       expect(find.text('Import Obsidian notes'), findsOneWidget);
       expect(find.text('Show attachments folder'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'mobile drawer shows folder tree notes for navigation',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final folderRepository = _FakeFolderRepository(
+        initialFolders: [
+          Folder(
+            path: 'Projects',
+            parentPath: null,
+            createdAt: DateTime(2026, 1, 1),
+          ),
+        ],
+      );
+      final noteRepository = _FakeNoteRepository(
+        initialActiveNotes: [
+          Note(
+            id: 'note-projects',
+            title: 'Roadmap',
+            content: 'Plan',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 2),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'hash-1',
+            deviceId: 'device-1',
+            folderPath: 'Projects',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NotesHomePage(
+            createNote: CreateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            createFolder: CreateFolder(repository: folderRepository),
+            deleteFolder: DeleteFolder(repository: folderRepository),
+            renameFolder: RenameFolder(repository: folderRepository),
+            moveNote: MoveNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            updateNote: UpdateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            deleteNote: DeleteNote(repository: noteRepository),
+            restoreNote: RestoreNote(repository: noteRepository),
+            searchNotes: SearchNotes(repository: noteRepository),
+            folderRepository: folderRepository,
+            noteRepository: noteRepository,
+            authController: AuthController(authService: _FakeAuthService()),
+            syncController: SyncController(
+              runManualSync: RunManualSync(
+                noteRepository: noteRepository,
+                syncGateway: _FakeSyncGateway(),
+                syncStateRepository: _FakeSyncStateRepository(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(find.byTooltip('Folders'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Files'), findsOneWidget);
+      expect(find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+          findsOneWidget);
+
+      await tester
+          .tap(find.byKey(const ValueKey('sidebar-folder-tile-Projects')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('sidebar-note-note-projects')),
+          findsOneWidget);
     },
   );
 
@@ -245,13 +337,135 @@ void main() {
         find.byKey(const ValueKey('desktop-editor-placeholder')),
         findsNothing,
       );
-      expect(find.byTooltip('Close editor'), findsOneWidget);
+      expect(find.byTooltip('Close editor'), findsNothing);
       expect(find.byType(TextField), findsWidgets);
     },
   );
 
+  testWidgets('mobile drawer does not show an All notes button',
+      (tester) async {
+    tester.view.physicalSize = const Size(430, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final noteRepository = _FakeNoteRepository();
+    final folderRepository = _FakeFolderRepository();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    await tester.tap(find.byTooltip('Folders'));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(ListTile, 'All notes'), findsNothing);
+  });
+
+  testWidgets('opening a note highlights it in the desktop sidebar',
+      (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'note-1',
+          title: 'Roadmap',
+          content: 'Plan',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.synced,
+          contentHash: 'hash-1',
+          deviceId: 'device-1',
+        ),
+      ],
+    );
+    final folderRepository = _FakeFolderRepository();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    await tester.tap(find.byKey(const ValueKey('sidebar-note-note-1')));
+    await tester.pumpAndSettle();
+
+    final surface = tester.widget<Material>(
+      find.byKey(const ValueKey('sidebar-note-surface-note-1')),
+    );
+    expect(surface.color, isNot(Colors.transparent));
+  });
+
   testWidgets(
-    'desktop sidebar folder click toggles note visibility',
+    'desktop sidebar folder toggle icon collapses note visibility',
     (tester) async {
       tester.view.physicalSize = const Size(1400, 900);
       tester.view.devicePixelRatio = 1;
@@ -328,20 +542,102 @@ void main() {
       expect(find.text('Roadmap'), findsNothing);
 
       await tester.tap(
-        find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+        find.byKey(const ValueKey('sidebar-folder-toggle-Projects')),
       );
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('sidebar-note-note-1')), findsOneWidget);
       expect(find.text('Roadmap'), findsOneWidget);
 
       await tester.tap(
-        find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+        find.byKey(const ValueKey('sidebar-folder-toggle-Projects')),
       );
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('sidebar-note-note-1')), findsNothing);
       expect(find.text('Roadmap'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'desktop editor refreshes when the open note changes in the repository',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final originalNote = Note(
+        id: 'note-1',
+        title: 'Roadmap',
+        content: 'Initial content',
+        createdAt: DateTime(2026, 1, 1),
+        updatedAt: DateTime(2026, 1, 2),
+        syncStatus: SyncStatus.synced,
+        contentHash: 'hash-1',
+        deviceId: 'device-1',
+      );
+      final noteRepository = _FakeNoteRepository(
+        initialActiveNotes: [originalNote],
+      );
+      final folderRepository = _FakeFolderRepository();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NotesHomePage(
+            createNote: CreateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            createFolder: CreateFolder(repository: folderRepository),
+            deleteFolder: DeleteFolder(repository: folderRepository),
+            renameFolder: RenameFolder(repository: folderRepository),
+            moveNote: MoveNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            updateNote: UpdateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            deleteNote: DeleteNote(repository: noteRepository),
+            restoreNote: RestoreNote(repository: noteRepository),
+            searchNotes: SearchNotes(repository: noteRepository),
+            folderRepository: folderRepository,
+            noteRepository: noteRepository,
+            authController: AuthController(authService: _FakeAuthService()),
+            syncController: SyncController(
+              runManualSync: RunManualSync(
+                noteRepository: noteRepository,
+                syncGateway: _FakeSyncGateway(),
+                syncStateRepository: _FakeSyncStateRepository(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(find.text('Roadmap'));
+      await tester.pumpAndSettle();
+
+      var bodyField = tester.widget<TextField>(find.byType(TextField).last);
+      expect(bodyField.controller!.text, 'Initial content');
+
+      await noteRepository.update(
+        originalNote.copyWith(
+          title: 'Roadmap synced',
+          content: 'Conteúdo com ç e ~ atualizado',
+          updatedAt: DateTime(2026, 1, 3),
+          contentHash: 'hash-2',
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      bodyField = tester.widget<TextField>(find.byType(TextField).last);
+      expect(bodyField.controller!.text, 'Conteúdo com ç e ~ atualizado');
+      expect(find.text('Roadmap synced'), findsWidgets);
     },
   );
 
@@ -922,9 +1218,22 @@ void main() {
   );
 
   testWidgets(
-    'note actions menu offers move and updates the note folder',
+    'mobile note long press opens move sheet and updates the note folder',
     (tester) async {
-      final folderRepository = _FakeFolderRepository();
+      final folderRepository = _FakeFolderRepository(
+        initialFolders: [
+          Folder(
+            path: 'Projects',
+            parentPath: null,
+            createdAt: DateTime(2026, 1, 1),
+          ),
+          Folder(
+            path: 'Archive',
+            parentPath: null,
+            createdAt: DateTime(2026, 1, 1),
+          ),
+        ],
+      );
       final noteRepository = _FakeNoteRepository(
         initialActiveNotes: [
           Note(
@@ -979,13 +1288,17 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      await tester.tap(find.byTooltip('Note actions'));
+      await tester.tap(find.byTooltip('Folders'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Move').last);
+      await tester
+          .tap(find.byKey(const ValueKey('sidebar-folder-toggle-Projects')));
+      await tester.pumpAndSettle();
+      await tester.longPress(find.byKey(const ValueKey('sidebar-note-note-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Move to folder'));
       await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextFormField).last, 'Archive');
-      await tester.tap(find.widgetWithText(FilledButton, 'Move'));
+      await tester.tap(find.byKey(const ValueKey('move-note-folder-Archive')));
       await tester.pumpAndSettle();
 
       expect(noteRepository.updatedNotes, hasLength(1));
@@ -1139,6 +1452,101 @@ void main() {
 
       expect(find.text('Move folder'), findsOneWidget);
       expect(find.byType(TextFormField), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'mobile drawer note long press opens the mobile move flow',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final folderRepository = _FakeFolderRepository(
+        initialFolders: [
+          Folder(
+            path: 'Projects',
+            parentPath: null,
+            createdAt: DateTime(2026, 1, 1),
+          ),
+          Folder(
+            path: 'Archive',
+            parentPath: null,
+            createdAt: DateTime(2026, 1, 1),
+          ),
+        ],
+      );
+      final noteRepository = _FakeNoteRepository(
+        initialActiveNotes: [
+          Note(
+            id: 'note-1',
+            title: 'Roadmap',
+            content: 'Plan the next release',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 2),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'hash-1',
+            deviceId: 'device-1',
+            folderPath: 'Projects',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NotesHomePage(
+            createNote: CreateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            createFolder: CreateFolder(repository: folderRepository),
+            deleteFolder: DeleteFolder(repository: folderRepository),
+            renameFolder: RenameFolder(repository: folderRepository),
+            moveNote: MoveNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            updateNote: UpdateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            deleteNote: DeleteNote(repository: noteRepository),
+            restoreNote: RestoreNote(repository: noteRepository),
+            searchNotes: SearchNotes(repository: noteRepository),
+            folderRepository: folderRepository,
+            noteRepository: noteRepository,
+            authController: AuthController(authService: _FakeAuthService()),
+            syncController: SyncController(
+              runManualSync: RunManualSync(
+                noteRepository: noteRepository,
+                syncGateway: _FakeSyncGateway(),
+                syncStateRepository: _FakeSyncStateRepository(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(find.byTooltip('Folders'));
+      await tester.pumpAndSettle();
+      await tester
+          .tap(find.byKey(const ValueKey('sidebar-folder-tile-Projects')));
+      await tester.pumpAndSettle();
+      await tester.longPress(find.byKey(const ValueKey('sidebar-note-note-1')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Move to folder'), findsOneWidget);
+
+      await tester.tap(find.text('Move to folder'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('move-note-folder-Archive')));
+      await tester.pumpAndSettle();
+
+      expect(noteRepository.updatedNotes, hasLength(1));
+      expect(noteRepository.updatedNotes.single.folderPath, 'Archive');
     },
   );
 
@@ -1586,10 +1994,12 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      await tester.tap(find.byTooltip('Note actions'));
+      await tester.tap(find.byTooltip('Folders'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Delete').last);
-      await tester.pump();
+      await tester.longPress(find.byKey(const ValueKey('sidebar-note-note-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
 
       expect(find.text('"Roadmap" deleted'), findsOneWidget);
       expect(find.text('Undo'), findsOneWidget);
@@ -2121,6 +2531,12 @@ class _FakeSyncGateway implements SyncGateway {
         deletedAt: note.deletedAt,
         remoteFileId: 'remote-${note.id}',
       );
+
+  @override
+  Future<void> syncNoteAttachments(Note note) async {}
+
+  @override
+  Future<void> ensureRemoteAttachmentsAvailable(List<RemoteNote> notes) async {}
 }
 
 class _FakeSyncStateRepository implements SyncStateRepository {

@@ -981,7 +981,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tapAt(
-      tester.getCenter(find.byKey(const ValueKey('attachment-image-overlay-2'))),
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-2'))),
     );
     await tester.pumpAndSettle();
 
@@ -1013,7 +1014,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tapAt(
-      tester.getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
     );
     await tester.pumpAndSettle();
 
@@ -1310,13 +1312,105 @@ void main() {
         const TextSelection(baseOffset: 0, extentOffset: 5);
     await tester.pump();
 
-    await tester.tap(find.text('Bold'));
+    await tester.tap(find.byTooltip('Bold'));
     await tester.pumpAndSettle();
 
     final updatedBodyField = tester.widget<TextField>(_bodyField());
     expect(updatedBodyField.controller?.text, '**hello**');
     expect(updatedBodyField.controller?.selection.baseOffset, 2);
     expect(updatedBodyField.controller?.selection.extentOffset, 7);
+  });
+
+  testWidgets('bold button wraps the current word at the caret',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), 'hello world');
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(NoteEditorPage)) as dynamic;
+    state.debugSetBodySelection(const TextSelection.collapsed(offset: 3));
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Bold'));
+    await tester.pumpAndSettle();
+
+    final updatedBodyField = tester.widget<TextField>(_bodyField());
+    expect(updatedBodyField.controller?.text, '**hello** world');
+    expect(updatedBodyField.controller?.selection.baseOffset, 2);
+    expect(updatedBodyField.controller?.selection.extentOffset, 7);
+  });
+
+  testWidgets('bold button removes markdown from an already bold selection',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), '**hello**');
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    bodyField.controller!.selection =
+        const TextSelection(baseOffset: 2, extentOffset: 7);
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Bold'));
+    await tester.pumpAndSettle();
+
+    final updatedBodyField = tester.widget<TextField>(_bodyField());
+    expect(updatedBodyField.controller?.text, 'hello');
+    expect(updatedBodyField.controller?.selection.baseOffset, 0);
+    expect(updatedBodyField.controller?.selection.extentOffset, 5);
+  });
+
+  testWidgets(
+      'bold button removes the entire bold sentence when caret is inside it',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), 'Before **bold sentence** after');
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(NoteEditorPage)) as dynamic;
+    state.debugSetBodySelection(const TextSelection.collapsed(offset: 11));
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Bold'));
+    await tester.pumpAndSettle();
+
+    final updatedBodyField = tester.widget<TextField>(_bodyField());
+    expect(updatedBodyField.controller?.text, 'Before bold sentence after');
+    expect(updatedBodyField.controller?.selection.baseOffset, 7);
+    expect(updatedBodyField.controller?.selection.extentOffset, 20);
+  });
+
+  testWidgets('bold button wraps a multi-line selection in markdown',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.enterText(_bodyField(), 'first line\nsecond line');
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(NoteEditorPage)) as dynamic;
+    state.debugSetBodySelection(
+      const TextSelection(baseOffset: 0, extentOffset: 22),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Bold'));
+    await tester.pumpAndSettle();
+
+    final updatedBodyField = tester.widget<TextField>(_bodyField());
+    expect(updatedBodyField.controller?.text, '**first line\nsecond line**');
+    expect(updatedBodyField.controller?.selection.baseOffset, 2);
+    expect(updatedBodyField.controller?.selection.extentOffset, 24);
   });
 
   testWidgets('checklist button prefixes the current line with task markdown',
@@ -1328,11 +1422,43 @@ void main() {
     await tester.enterText(_bodyField(), 'Task item');
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Checklist'));
+    await tester.tap(find.byTooltip('Checklist'));
     await tester.pumpAndSettle();
 
     final bodyField = tester.widget<TextField>(_bodyField());
     expect(bodyField.controller?.text, '- [ ] Task item');
+  });
+
+  testWidgets('checklist button inserts an empty checklist on a blank line',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.tap(_bodyField());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Checklist'));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.controller?.text, '- [ ] ');
+  });
+
+  testWidgets('bullet list button inserts an empty list item on a blank line',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.tap(_bodyField());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Bullet list'));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.controller?.text, '- ');
   });
 
   testWidgets('italic shortcut inserts markdown placeholder at the caret',
@@ -1381,6 +1507,103 @@ void main() {
         'First paragraph\n\nSecond paragraph');
   });
 
+  testWidgets(
+      'embedded narrow layout shows the mobile toolbar only while editing',
+      (tester) async {
+    tester.view.physicalSize = const Size(430, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = _StubNoteRepository();
+    final note = Note(
+      id: 'note-mobile-embedded',
+      title: 'Doc note',
+      content: 'content',
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(
+        repository: repository,
+        note: note,
+        embedded: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Back'), findsNothing);
+    expect(find.byTooltip('Bold'), findsNothing);
+
+    await tester.tap(_bodyField());
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Undo'), findsOneWidget);
+    expect(find.byTooltip('Redo'), findsOneWidget);
+    expect(find.byTooltip('Bold'), findsOneWidget);
+    expect(find.byTooltip('Attach image'), findsOneWidget);
+    expect(find.text('All changes saved'), findsOneWidget);
+    expect(
+      tester.getCenter(find.byTooltip('Undo')).dx,
+      lessThan(tester.getCenter(find.byTooltip('Redo')).dx),
+    );
+    expect(
+      tester.getCenter(find.byTooltip('Redo')).dx,
+      lessThan(tester.getCenter(find.byTooltip('Bold')).dx),
+    );
+
+    await tester.tap(find.byType(TextField).first);
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Bold'), findsNothing);
+  });
+
+  testWidgets('mobile toolbar undo and redo buttons edit the body history',
+      (tester) async {
+    tester.view.physicalSize = const Size(430, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(
+      _buildEditor(
+        repository: repository,
+        embedded: true,
+      ),
+    );
+
+    await tester.tap(_bodyField());
+    await tester.pumpAndSettle();
+    await tester.enterText(_bodyField(), 'hello');
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Undo'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(_bodyField()).controller?.text, '');
+
+    await tester.tap(find.byTooltip('Redo'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(_bodyField()).controller?.text, 'hello');
+  });
+
+  testWidgets('standalone desktop editor does not show an app bar title',
+      (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AppBar), findsNothing);
+  });
+
   testWidgets('editing keeps the same body controller', (tester) async {
     final repository = _StubNoteRepository();
 
@@ -1393,6 +1616,34 @@ void main() {
 
     expect(identical(before, after), isTrue);
     expect(after?.text, 'Hello world');
+  });
+
+  testWidgets('control z undoes and control shift z redoes body edits',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+
+    await tester.tap(_bodyField());
+    await tester.pumpAndSettle();
+    await tester.enterText(_bodyField(), 'hello');
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<TextField>(_bodyField()).controller?.text, '');
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<TextField>(_bodyField()).controller?.text, 'hello');
   });
 
   testWidgets('loads code blocks as editable markdown content', (tester) async {

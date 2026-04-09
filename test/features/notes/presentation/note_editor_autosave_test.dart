@@ -103,7 +103,8 @@ void main() {
         ),
       );
 
-      await tester.tap(find.byTooltip('Close editor'));
+      final state = tester.state(find.byType(NoteEditorPage)) as dynamic;
+      await state.debugRequestClose();
       await tester.pumpAndSettle();
 
       expect(closed, isTrue);
@@ -133,7 +134,8 @@ void main() {
       await tester.enterText(find.byType(TextField).at(1), 'Draft body');
       await tester.pump(const Duration(milliseconds: 100));
 
-      await tester.tap(find.byTooltip('Close editor'));
+      final state = tester.state(find.byType(NoteEditorPage)) as dynamic;
+      unawaited(state.debugRequestClose());
       await tester.pump();
 
       expect(closed, isFalse);
