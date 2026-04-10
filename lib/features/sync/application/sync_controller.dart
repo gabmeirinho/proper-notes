@@ -15,6 +15,7 @@ class SyncController extends ChangeNotifier {
   String? _errorMessage;
   String? _errorDetails;
   DateTime? _lastCompletedAt;
+  Future<ManualSyncResult?>? _activeSync;
 
   bool get isSyncing => _isSyncing;
   String? get lastMessage => _lastMessage;
@@ -23,6 +24,24 @@ class SyncController extends ChangeNotifier {
   DateTime? get lastCompletedAt => _lastCompletedAt;
 
   Future<ManualSyncResult?> syncNow() async {
+    final activeSync = _activeSync;
+    if (activeSync != null) {
+      return activeSync;
+    }
+
+    final sync = _runSync();
+    _activeSync = sync;
+
+    try {
+      return await sync;
+    } finally {
+      if (identical(_activeSync, sync)) {
+        _activeSync = null;
+      }
+    }
+  }
+
+  Future<ManualSyncResult?> _runSync() async {
     _isSyncing = true;
     _errorMessage = null;
     _errorDetails = null;

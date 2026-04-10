@@ -1,6 +1,11 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/services/window_control_service.dart';
 import '../features/auth/application/auth_controller.dart';
 import '../features/notes/application/create_folder.dart';
 import '../features/notes/application/create_note.dart';
@@ -15,6 +20,7 @@ import '../features/notes/application/update_note.dart';
 import '../features/notes/domain/folder_repository.dart';
 import '../features/notes/domain/note_repository.dart';
 import '../features/notes/presentation/notes_home_page.dart';
+import '../features/sync/application/auto_sync_coordinator.dart';
 import '../features/sync/application/run_manual_sync.dart';
 import '../features/sync/application/sync_controller.dart';
 import '../infrastructure/auth/google_auth_config.dart';
@@ -41,13 +47,20 @@ class ProperNotesApp extends StatefulWidget {
 }
 
 class _ProperNotesAppState extends State<ProperNotesApp> {
+  static const Duration _desktopExitSyncTimeout = Duration(seconds: 3);
   late final AuthController _authController;
   late final SyncController _syncController;
+  late final AutoSyncCoordinator _autoSyncCoordinator;
   late final GoogleAuthConfig _googleAuthConfig;
   late final SharedPreferencesOAuthSessionStore _sessionStore;
   late final GoogleOAuthTokenClient _tokenClient;
   late final DriftSyncStateRepository _syncStateRepository;
   late final FolderRepository _folderRepository;
+  late final AppLifecycleListener _appLifecycleListener;
+  final GlobalKey<NotesHomePageState> _homePageKey =
+      GlobalKey<NotesHomePageState>();
+  final WindowControlService _windowControlService =
+      const WindowControlService();
   String? _deviceId;
 
   @override
@@ -76,6 +89,20 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
         syncStateRepository: _syncStateRepository,
       ),
     );
+    _autoSyncCoordinator = AutoSyncCoordinator(
+      noteRepository: widget.noteRepository,
+      authController: _authController,
+      syncController: _syncController,
+    );
+    _appLifecycleListener = AppLifecycleListener(
+      onResume: () {
+        unawaited(_autoSyncCoordinator.syncOnResume());
+      },
+      onPause: () {
+        unawaited(_flushAndSyncOnBackground());
+      },
+      onExitRequested: _handleExitRequested,
+    );
     _restoreBootstrapState();
   }
 
@@ -92,6 +119,8 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
 
   @override
   void dispose() {
+    _appLifecycleListener.dispose();
+    _autoSyncCoordinator.dispose();
     _authController.dispose();
     _syncController.dispose();
     widget.database.close();
@@ -119,6 +148,7 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
       theme: _buildTheme(),
       builder: _wrapWithSystemUiStyle,
       home: NotesHomePage(
+        key: _homePageKey,
         createNote: CreateNote(
           repository: widget.noteRepository,
           deviceId: deviceId,
@@ -144,8 +174,41 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
         noteRepository: widget.noteRepository,
         authController: _authController,
         syncController: _syncController,
+        onLocalChangePersisted: _autoSyncCoordinator.notifyLocalChangePersisted,
       ),
     );
+  }
+
+  Future<void> _flushAndSyncOnBackground() async {
+    await _homePageKey.currentState?.flushPendingEdits();
+    await _autoSyncCoordinator.syncOnBackground();
+  }
+
+  Future<ui.AppExitResponse> _handleExitRequested() async {
+    final flushedSuccessfully =
+        await _homePageKey.currentState?.flushPendingEdits() ?? true;
+    if (!flushedSuccessfully) {
+      return ui.AppExitResponse.cancel;
+    }
+
+    if (!Platform.isLinux) {
+      return ui.AppExitResponse.exit;
+    }
+
+    if (!_authController.isSignedIn) {
+      return ui.AppExitResponse.exit;
+    }
+
+    await _windowControlService.hideWindowForExit();
+    unawaited(_finishDesktopExitAfterSync());
+    return ui.AppExitResponse.cancel;
+  }
+
+  Future<void> _finishDesktopExitAfterSync() async {
+    await _autoSyncCoordinator.syncBeforeExit(
+      timeout: _desktopExitSyncTimeout,
+    );
+    await ServicesBinding.instance.exitApplication(ui.AppExitType.required);
   }
 
   Widget _wrapWithSystemUiStyle(BuildContext context, Widget? child) {

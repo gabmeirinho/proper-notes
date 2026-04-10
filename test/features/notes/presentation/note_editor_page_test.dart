@@ -455,6 +455,46 @@ void main() {
   });
 
   testWidgets(
+      'desktop mouse click keeps the attachment preview visible instead of activating raw markdown',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-desktop-mouse-click',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
+    expect(find.text(imageLine), findsNothing);
+    expect(
+      tester
+          .widget<AttachmentImagePreview>(find.byType(AttachmentImagePreview))
+          .selected,
+      isTrue,
+    );
+  });
+
+  testWidgets(
       'clicking attachment preview moves the caret to the image insertion point even if the gesture moves it',
       (tester) async {
     final repository = _StubNoteRepository();
@@ -1545,7 +1585,7 @@ void main() {
     expect(find.byTooltip('Redo'), findsOneWidget);
     expect(find.byTooltip('Bold'), findsOneWidget);
     expect(find.byTooltip('Attach image'), findsOneWidget);
-    expect(find.text('All changes saved'), findsOneWidget);
+    expect(find.textContaining('Saved'), findsOneWidget);
     expect(
       tester.getCenter(find.byTooltip('Undo')).dx,
       lessThan(tester.getCenter(find.byTooltip('Redo')).dx),
@@ -1860,6 +1900,45 @@ void main() {
     final bodyField = tester.widget<TextField>(_bodyField());
     expect(bodyField.focusNode?.hasFocus, isTrue);
     expect(bodyField.controller?.selection.baseOffset, 0);
+  });
+
+  testWidgets('tapping a lower line keeps the caret near the tapped line',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    final note = Note(
+      id: 'note-tap-line-selection',
+      title: 'Tap line note',
+      content: 'First line\nSecond line\nThird line',
+      documentJson: paragraphDocumentFromEditableText(
+        'First line\nSecond line\nThird line',
+      ),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final editorRect = tester.getRect(
+      find.byKey(const ValueKey('document-block-editor')),
+    );
+    await tester.tapAt(
+      Offset(
+        editorRect.left + 60,
+        editorRect.top + 18 + (16 * 1.6 * 2) + 8,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.focusNode?.hasFocus, isTrue);
+    expect(
+      bodyField.controller!.selection.baseOffset,
+      greaterThan('First line\n'.length),
+    );
   });
 
   testWidgets('inactive checklist checkbox toggles markdown state',

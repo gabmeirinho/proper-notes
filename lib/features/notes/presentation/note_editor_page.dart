@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -15,6 +16,7 @@ import '../application/create_note.dart';
 import '../application/update_note.dart';
 import '../domain/note.dart';
 import '../domain/note_repository.dart';
+import '../domain/sync_status.dart';
 
 class NoteEditorPage extends StatefulWidget {
   const NoteEditorPage({
@@ -24,9 +26,11 @@ class NoteEditorPage extends StatefulWidget {
     this.note,
     this.initialFolderPath,
     this.embedded = false,
+    this.showInlineStatus = true,
     this.mobileTextScale = 0.92,
     this.onClose,
     this.onPersisted,
+    this.onStatusChanged,
     super.key,
   });
 
@@ -36,17 +40,19 @@ class NoteEditorPage extends StatefulWidget {
   final Note? note;
   final String? initialFolderPath;
   final bool embedded;
+  final bool showInlineStatus;
   final double mobileTextScale;
   final VoidCallback? onClose;
   final ValueChanged<Note>? onPersisted;
+  final ValueChanged<NoteEditorStatusSnapshot>? onStatusChanged;
 
   bool get isEditing => note != null;
 
   @override
-  State<NoteEditorPage> createState() => _NoteEditorPageState();
+  State<NoteEditorPage> createState() => NoteEditorPageState();
 }
 
-class _NoteEditorPageState extends State<NoteEditorPage>
+class NoteEditorPageState extends State<NoteEditorPage>
     with WidgetsBindingObserver {
   static const Duration _autosaveDelay = Duration(milliseconds: 800);
 
@@ -90,10 +96,17 @@ class _NoteEditorPageState extends State<NoteEditorPage>
     _contentController.addListener(_handleTextChanged);
     _titleFocusNode.addListener(_handleEditorFocusChanged);
     _contentFocusNode.addListener(_handleEditorFocusChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _notifyStatusChanged();
+    });
   }
 
   @override
   void dispose() {
+    widget.onStatusChanged?.call(const NoteEditorStatusSnapshot.hidden());
     WidgetsBinding.instance.removeObserver(this);
     _autosaveTimer?.cancel();
     _titleController.removeListener(_handleTextChanged);
@@ -124,6 +137,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
 
     if (isSamePersistedSnapshot) {
       _persistedNote = incomingNote;
+      _notifyStatusChanged();
       return;
     }
 
@@ -300,8 +314,10 @@ class _NoteEditorPageState extends State<NoteEditorPage>
           contentFocusNode: _contentFocusNode,
           isSaving: _isSaving,
           status: _saveStatus,
+          noteSyncStatus: _persistedNote?.syncStatus,
           canRetrySave: _saveErrorMessage != null,
           embedded: widget.embedded,
+          showInlineStatus: widget.showInlineStatus,
           mobileLayout: isMobileLayout,
           mobileTextScale: widget.mobileTextScale,
           mobileFormattingToolbarVisible: _contentFocusNode.hasFocus,
@@ -415,6 +431,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
       } else {
         _saveErrorMessage = null;
       }
+      _notifyStatusChanged();
     } finally {
       _isApplyingExternalNoteUpdate = false;
     }
@@ -436,6 +453,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
       return _EditorSaveStatus(
         icon: Icons.error_outline,
         label: _saveErrorMessage!,
+        compactLabel: 'Save failed',
         color: Theme.of(context).colorScheme.error,
       );
     }
@@ -444,6 +462,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
       return _EditorSaveStatus(
         icon: Icons.sync,
         label: 'Saving locally...',
+        compactLabel: 'Saving',
         color: Theme.of(context).colorScheme.primary,
       );
     }
@@ -452,6 +471,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
       return _EditorSaveStatus(
         icon: Icons.edit_outlined,
         label: 'Unsaved changes',
+        compactLabel: 'Unsaved',
         color: Theme.of(context).colorScheme.primary,
       );
     }
@@ -460,6 +480,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
       return _EditorSaveStatus(
         icon: Icons.edit_note_outlined,
         label: 'Start typing to create this note',
+        compactLabel: 'Draft',
         color: Theme.of(context).colorScheme.onSurfaceVariant,
       );
     }
@@ -467,8 +488,30 @@ class _NoteEditorPageState extends State<NoteEditorPage>
     return _EditorSaveStatus(
       icon: Icons.check_circle_outline,
       label: 'All changes saved',
+      compactLabel: 'Saved locally',
       color: Theme.of(context).colorScheme.onSurfaceVariant,
     );
+  }
+
+  NoteEditorStatusSnapshot get _statusSnapshot {
+    final saveStatus = _saveStatus;
+    return NoteEditorStatusSnapshot(
+      saveIcon: saveStatus.icon,
+      saveLabel: saveStatus.label,
+      saveCompactLabel: saveStatus.compactLabel,
+      saveColor: saveStatus.color,
+      showSaveBadge: _shouldShowSaveBadge,
+      noteSyncStatus: _persistedNote?.syncStatus,
+      visible: widget.embedded && !widget.showInlineStatus,
+    );
+  }
+
+  bool get _shouldShowSaveBadge {
+    if (_saveErrorMessage != null || _isSaving || _hasUnsavedChanges) {
+      return true;
+    }
+
+    return _persistedNote == null;
   }
 
   Future<bool> _flushPendingChanges() async {
@@ -480,6 +523,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
           _saveErrorMessage = null;
         });
       }
+      _notifyStatusChanged();
       return true;
     }
 
@@ -540,6 +584,7 @@ class _NoteEditorPageState extends State<NoteEditorPage>
       } else {
         _isSaving = false;
       }
+      _notifyStatusChanged();
     }
 
     return completedSuccessfully;
@@ -705,6 +750,23 @@ class _NoteEditorPageState extends State<NoteEditorPage>
 
   @visibleForTesting
   Future<void> debugRequestClose() => _requestClose();
+
+  Future<bool> flushPendingChanges() => _flushPendingChanges();
+
+  void _notifyStatusChanged() {
+    final callback = widget.onStatusChanged;
+    if (!mounted || callback == null) {
+      return;
+    }
+
+    final snapshot = _statusSnapshot;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      callback(snapshot);
+    });
+  }
 
   @visibleForTesting
   void debugSetBodySelection(TextSelection selection) {
@@ -1174,8 +1236,10 @@ class _NoteEditorContent extends StatelessWidget {
     required this.contentFocusNode,
     required this.isSaving,
     required this.status,
+    required this.noteSyncStatus,
     required this.canRetrySave,
     required this.embedded,
+    required this.showInlineStatus,
     required this.mobileLayout,
     required this.mobileTextScale,
     required this.mobileFormattingToolbarVisible,
@@ -1204,8 +1268,10 @@ class _NoteEditorContent extends StatelessWidget {
   final FocusNode contentFocusNode;
   final bool isSaving;
   final _EditorSaveStatus status;
+  final SyncStatus? noteSyncStatus;
   final bool canRetrySave;
   final bool embedded;
+  final bool showInlineStatus;
   final bool mobileLayout;
   final double mobileTextScale;
   final bool mobileFormattingToolbarVisible;
@@ -1286,7 +1352,19 @@ class _NoteEditorContent extends StatelessWidget {
             ),
           ),
         ],
-        SizedBox(height: isMobile ? 8 : 16),
+        if (showInlineStatus) ...[
+          SizedBox(height: isMobile ? 10 : 12),
+          _EditorStatusStrip(
+            saveStatus: status,
+            noteSyncStatus: noteSyncStatus,
+            canRetrySave: canRetrySave,
+            isSaving: isSaving,
+            onRetrySave: onRetrySave,
+            mobileLayout: isMobile,
+          ),
+          SizedBox(height: isMobile ? 8 : 16),
+        ] else
+          const SizedBox(height: 12),
         if (!isDesktopEmbedded && !isMobile)
           Align(
             alignment: Alignment.centerLeft,
@@ -1360,10 +1438,6 @@ class _NoteEditorContent extends StatelessWidget {
             child: mobileFormattingToolbarVisible
                 ? _MobileEditorToolbar(
                     key: const ValueKey('mobile-editor-toolbar'),
-                    status: status,
-                    canRetrySave: canRetrySave,
-                    isSaving: isSaving,
-                    onRetrySave: onRetrySave,
                     undoEdit: undoEdit,
                     redoEdit: redoEdit,
                     toggleBold: toggleBold,
@@ -1378,38 +1452,7 @@ class _NoteEditorContent extends StatelessWidget {
                     key: ValueKey('mobile-editor-toolbar-hidden')),
           )
         else
-          Row(
-            children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    Icon(
-                      status.icon,
-                      size: 18,
-                      color: status.color,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        status.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: status.color,
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (canRetrySave)
-                TextButton(
-                  onPressed: isSaving ? null : onRetrySave,
-                  child: const Text('Retry'),
-                ),
-            ],
-          ),
+          const SizedBox.shrink(),
       ],
     );
   }
@@ -1418,10 +1461,6 @@ class _NoteEditorContent extends StatelessWidget {
 class _MobileEditorToolbar extends StatelessWidget {
   const _MobileEditorToolbar({
     super.key,
-    required this.status,
-    required this.canRetrySave,
-    required this.isSaving,
-    required this.onRetrySave,
     required this.undoEdit,
     required this.redoEdit,
     required this.toggleBold,
@@ -1433,10 +1472,6 @@ class _MobileEditorToolbar extends StatelessWidget {
     required this.attachImage,
   });
 
-  final _EditorSaveStatus status;
-  final bool canRetrySave;
-  final bool isSaving;
-  final Future<bool> Function() onRetrySave;
   final VoidCallback undoEdit;
   final VoidCallback redoEdit;
   final VoidCallback toggleBold;
@@ -1526,35 +1561,172 @@ class _MobileEditorToolbar extends StatelessWidget {
               ],
             ),
           ),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(14, 0, 10, 10),
-            child: Row(
-              children: [
-                Icon(
-                  status.icon,
-                  size: 16,
-                  color: status.color,
+        ],
+      ),
+    );
+  }
+}
+
+class _EditorStatusStrip extends StatelessWidget {
+  const _EditorStatusStrip({
+    required this.saveStatus,
+    required this.noteSyncStatus,
+    required this.canRetrySave,
+    required this.isSaving,
+    required this.onRetrySave,
+    required this.mobileLayout,
+  });
+
+  final _EditorSaveStatus saveStatus;
+  final SyncStatus? noteSyncStatus;
+  final bool canRetrySave;
+  final bool isSaving;
+  final Future<bool> Function() onRetrySave;
+  final bool mobileLayout;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _EditorStatusBadge(
+          icon: saveStatus.icon,
+          label: mobileLayout ? saveStatus.compactLabel : saveStatus.label,
+          foregroundColor: saveStatus.color,
+          backgroundColor: saveStatus.color.withValues(alpha: 0.12),
+          borderColor: saveStatus.color.withValues(alpha: 0.2),
+        ),
+        if (noteSyncStatus != null)
+          _NoteSyncBadge(
+            status: noteSyncStatus!,
+            compact: mobileLayout,
+          ),
+        if (canRetrySave)
+          TextButton(
+            onPressed: isSaving ? null : onRetrySave,
+            child: const Text('Retry'),
+          ),
+      ],
+    );
+  }
+}
+
+class _EditorStatusBadge extends StatelessWidget {
+  const _EditorStatusBadge({
+    required this.icon,
+    required this.label,
+    required this.foregroundColor,
+    required this.backgroundColor,
+    required this.borderColor,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color foregroundColor;
+  final Color backgroundColor;
+  final Color borderColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 16,
+            color: foregroundColor,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: foregroundColor,
+                  fontWeight: FontWeight.w700,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    status.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: status.color,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NoteSyncBadge extends StatelessWidget {
+  const _NoteSyncBadge({
+    required this.status,
+    required this.compact,
+  });
+
+  final SyncStatus status;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final (label, compactLabel, icon, foregroundColor, backgroundColor) =
+        switch (status) {
+      SyncStatus.synced => (
+          'Synced',
+          'Synced',
+          Icons.cloud_done_outlined,
+          colorScheme.onSecondaryContainer,
+          colorScheme.secondaryContainer,
+        ),
+      SyncStatus.pendingUpload => (
+          'Not synced',
+          'Not synced',
+          Icons.cloud_upload_outlined,
+          colorScheme.onPrimaryContainer,
+          colorScheme.primaryContainer,
+        ),
+      SyncStatus.pendingDelete => (
+          'Not synced',
+          'Not synced',
+          Icons.delete_outline,
+          colorScheme.onErrorContainer,
+          colorScheme.errorContainer,
+        ),
+      SyncStatus.conflicted => (
+          'Not synced',
+          'Not synced',
+          Icons.warning_amber_outlined,
+          colorScheme.onTertiaryContainer,
+          colorScheme.tertiaryContainer,
+        ),
+    };
+
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 12,
+        vertical: 8,
+      ),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 16,
+            color: foregroundColor,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            compact ? compactLabel : label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: foregroundColor,
+                  fontWeight: FontWeight.w700,
                 ),
-                if (canRetrySave)
-                  TextButton(
-                    onPressed: isSaving ? null : onRetrySave,
-                    child: const Text('Retry'),
-                  ),
-              ],
-            ),
           ),
         ],
       ),
@@ -1611,15 +1783,73 @@ class _MobileToolbarButton extends StatelessWidget {
   }
 }
 
+class NoteEditorStatusSnapshot {
+  const NoteEditorStatusSnapshot({
+    required this.saveIcon,
+    required this.saveLabel,
+    required this.saveCompactLabel,
+    required this.saveColor,
+    required this.showSaveBadge,
+    required this.noteSyncStatus,
+    required this.visible,
+  });
+
+  const NoteEditorStatusSnapshot.hidden()
+      : saveIcon = Icons.check_circle_outline,
+        saveLabel = '',
+        saveCompactLabel = '',
+        saveColor = Colors.transparent,
+        showSaveBadge = false,
+        noteSyncStatus = null,
+        visible = false;
+
+  final IconData saveIcon;
+  final String saveLabel;
+  final String saveCompactLabel;
+  final Color saveColor;
+  final bool showSaveBadge;
+  final SyncStatus? noteSyncStatus;
+  final bool visible;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+
+    return other is NoteEditorStatusSnapshot &&
+        other.saveIcon == saveIcon &&
+        other.saveLabel == saveLabel &&
+        other.saveCompactLabel == saveCompactLabel &&
+        other.saveColor == saveColor &&
+        other.showSaveBadge == showSaveBadge &&
+        other.noteSyncStatus == noteSyncStatus &&
+        other.visible == visible;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        saveIcon,
+        saveLabel,
+        saveCompactLabel,
+        saveColor,
+        showSaveBadge,
+        noteSyncStatus,
+        visible,
+      );
+}
+
 class _EditorSaveStatus {
   const _EditorSaveStatus({
     required this.icon,
     required this.label,
+    required this.compactLabel,
     required this.color,
   });
 
   final IconData icon;
   final String label;
+  final String compactLabel;
   final Color color;
 }
 
@@ -3441,8 +3671,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                           return;
                         }
                         _clearSelectedAttachmentImage();
-                        if (!widget.focusNode.hasFocus ||
-                            widget.controller.text.isEmpty) {
+                        if (widget.controller.text.isEmpty) {
                           _focusEditorAt(0);
                         }
                       },
@@ -3490,11 +3719,19 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                         opaque: false,
                         child: Listener(
                           behavior: HitTestBehavior.opaque,
-                          onPointerDown: (_) {
+                          onPointerDown: (event) {
                             _pendingAttachmentTapSelection =
                                 TextSelection.collapsed(
                               offset: overlay.focusOffset,
                             );
+                            if (event.kind == PointerDeviceKind.mouse &&
+                                event.buttons == kPrimaryMouseButton) {
+                              _suppressNextEditorTap = true;
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                _suppressNextEditorTap = false;
+                              });
+                              _selectAttachmentImage(overlay);
+                            }
                           },
                           onPointerUp: (_) {},
                           onPointerCancel: (_) {
@@ -3550,10 +3787,14 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                     if (_selectedAttachmentImage?.lineIndex ==
                         overlay.lineIndex)
                       Positioned(
-                        top: overlay.top + 8,
+                        top: overlay.top +
+                            (_UnifiedMarkdownEditorState
+                                    ._imagePreviewVerticalInset /
+                                2) +
+                            8,
                         left: math.max(
                           overlay.left,
-                          overlay.left + overlay.hitboxWidth - 44,
+                          overlay.left + overlay.previewWidth - 44,
                         ),
                         child: Material(
                           color: Theme.of(context).colorScheme.surface,

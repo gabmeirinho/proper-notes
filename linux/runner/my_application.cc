@@ -1,6 +1,7 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
+#include <glib.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
@@ -10,8 +11,10 @@
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  GtkWindow* window;
   FlView* view;
   FlMethodChannel* clipboard_image_channel;
+  FlMethodChannel* window_control_channel;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -68,6 +71,31 @@ static void clipboard_image_method_call_cb(FlMethodChannel* channel,
   }
 }
 
+static FlMethodResponse* hide_window_for_exit_response(MyApplication* self) {
+  if (self->window != nullptr) {
+    gtk_widget_hide(GTK_WIDGET(self->window));
+  }
+
+  return FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+}
+
+static void window_control_method_call_cb(FlMethodChannel* channel,
+                                          FlMethodCall* method_call,
+                                          gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  g_autoptr(FlMethodResponse) response = nullptr;
+  if (strcmp(fl_method_call_get_name(method_call), "hideWindowForExit") == 0) {
+    response = hide_window_for_exit_response(self);
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  }
+
+  g_autoptr(GError) error = nullptr;
+  if (!fl_method_call_respond(method_call, response, &error)) {
+    g_warning("Failed to send window control response: %s", error->message);
+  }
+}
+
 static void create_channels(MyApplication* self) {
   FlEngine* engine = fl_view_get_engine(self->view);
   FlBinaryMessenger* messenger = fl_engine_get_binary_messenger(engine);
@@ -78,6 +106,11 @@ static void create_channels(MyApplication* self) {
   fl_method_channel_set_method_call_handler(self->clipboard_image_channel,
                                             clipboard_image_method_call_cb,
                                             self, nullptr);
+  self->window_control_channel = fl_method_channel_new(
+      messenger, "proper_notes/window_control", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(self->window_control_channel,
+                                            window_control_method_call_cb,
+                                            self, nullptr);
 }
 
 // Called when first Flutter frame received.
@@ -85,11 +118,17 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
+static void set_window_icon(GtkWindow* window) {
+  gtk_window_set_icon_name(window, APPLICATION_ID);
+}
+
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+  self->window = window;
+  set_window_icon(window);
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -190,6 +229,7 @@ static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   g_clear_object(&self->clipboard_image_channel);
+  g_clear_object(&self->window_control_channel);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 

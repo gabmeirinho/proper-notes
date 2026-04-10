@@ -47,6 +47,7 @@ class NotesHomePage extends StatefulWidget {
     required this.noteRepository,
     required this.authController,
     required this.syncController,
+    this.onLocalChangePersisted,
     super.key,
   });
 
@@ -64,12 +65,13 @@ class NotesHomePage extends StatefulWidget {
   final NoteRepository noteRepository;
   final AuthController authController;
   final SyncController syncController;
+  final VoidCallback? onLocalChangePersisted;
 
   @override
-  State<NotesHomePage> createState() => _NotesHomePageState();
+  State<NotesHomePage> createState() => NotesHomePageState();
 }
 
-class _NotesHomePageState extends State<NotesHomePage> {
+class NotesHomePageState extends State<NotesHomePage> {
   static const double _desktopBreakpoint = 900;
   static const double _desktopSidebarWidth = 320;
   static const Duration _timedSnackBarDuration = Duration(seconds: 4);
@@ -91,8 +93,11 @@ class _NotesHomePageState extends State<NotesHomePage> {
   String? _dismissedSyncNotice;
   String? _lastSeenSyncNotice;
   final Set<String> _expandedFolderPaths = <String>{};
+  GlobalKey<NoteEditorPageState>? _activeEditorKey;
   late final ImportObsidianVault _importObsidianVault;
   double _mobileNoteTextScale = _defaultMobileTextScale;
+  NoteEditorStatusSnapshot _desktopEditorStatus =
+      const NoteEditorStatusSnapshot.hidden();
 
   @override
   void initState() {
@@ -123,10 +128,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
   }
 
   void _handleSyncControllerChanged() {
-    final summary = widget.syncController.errorMessage ??
-        (widget.syncController.isSyncing
-            ? null
-            : widget.syncController.lastMessage);
+    final summary = widget.syncController.errorMessage;
 
     if (summary == null) {
       _syncNoticeDismissTimer?.cancel();
@@ -141,17 +143,6 @@ class _NotesHomePageState extends State<NotesHomePage> {
     _lastSeenSyncNotice = summary;
     _dismissedSyncNotice = null;
     _syncNoticeDismissTimer?.cancel();
-
-    if (widget.syncController.errorMessage == null) {
-      _syncNoticeDismissTimer = Timer(_timedSnackBarDuration, () {
-        if (!mounted) {
-          return;
-        }
-        setState(() {
-          _dismissedSyncNotice = summary;
-        });
-      });
-    }
 
     if (mounted) {
       setState(() {});
@@ -202,14 +193,13 @@ class _NotesHomePageState extends State<NotesHomePage> {
                         return const SizedBox.shrink();
                       }
 
-                      final message = widget.syncController.lastMessage;
                       final error = widget.syncController.errorMessage;
-                      if (message == null && error == null) {
+                      if (error == null) {
                         return const SizedBox.shrink();
                       }
 
-                      final isError = error != null;
-                      final summary = error ?? message!;
+                      const isError = true;
+                      final summary = error;
                       if (_dismissedSyncNotice == summary) {
                         return const SizedBox.shrink();
                       }
@@ -384,11 +374,12 @@ class _NotesHomePageState extends State<NotesHomePage> {
                   tooltip: 'Search',
                   icon: const Icon(Icons.search_rounded),
                 ),
+                _buildAppSyncStatusIndicator(compact: true),
                 PopupMenuButton<_MobileAppMenuAction>(
                   tooltip: 'More app actions',
                   onSelected: (action) async {
                     switch (action) {
-                      case _MobileAppMenuAction.sync:
+                      case _MobileAppMenuAction.syncNow:
                         await _runSync();
                       case _MobileAppMenuAction.forceReuploadAllNotes:
                         await _forceReuploadAllNotes();
@@ -404,7 +395,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
                   },
                   itemBuilder: (context) => const [
                     PopupMenuItem(
-                      value: _MobileAppMenuAction.sync,
+                      value: _MobileAppMenuAction.syncNow,
                       child: Text('Sync now'),
                     ),
                     PopupMenuItem(
@@ -464,12 +455,24 @@ class _NotesHomePageState extends State<NotesHomePage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (_desktopEditorStatus.visible &&
+                    _desktopEditorStatus.showSaveBadge) ...[
+                  _TopBarEditorStatusBadge(
+                    icon: _desktopEditorStatus.saveIcon,
+                    label: _desktopEditorStatus.saveLabel,
+                    color: _desktopEditorStatus.saveColor,
+                  ),
+                ],
+                if (_desktopEditorStatus.visible &&
+                    _desktopEditorStatus.showSaveBadge)
+                  const SizedBox(width: 6),
+                _buildAppSyncStatusIndicator(compact: true),
+                const SizedBox(width: 4),
                 IconButton(
                   onPressed: _showSearch,
                   tooltip: 'Search',
                   icon: const Icon(Icons.search, size: 18),
                 ),
-                _buildSyncButton(iconSize: 18),
                 _buildAccountButton(iconSize: 18),
                 _buildTopBarActionsMenu(iconSize: 18),
               ],
@@ -508,7 +511,100 @@ class _NotesHomePageState extends State<NotesHomePage> {
     );
   }
 
-  Widget _buildSyncButton({double iconSize = 24}) {
+  Widget _buildSyncButton({
+    double iconSize = 24,
+    bool mobile = false,
+  }) {
+    final button = AnimatedBuilder(
+      animation: Listenable.merge([
+        widget.authController,
+        widget.syncController,
+      ]),
+      builder: (context, _) {
+        final isCheckingAccount =
+            !widget.authController.hasResolvedInitialSession &&
+                widget.authController.isBusy;
+        final syncReady = widget.authController.isSignedIn;
+
+        if (!mobile) {
+          return IconButton(
+            onPressed: widget.syncController.isSyncing ||
+                    isCheckingAccount ||
+                    !syncReady
+                ? null
+                : _runSync,
+            tooltip: isCheckingAccount
+                ? 'Checking account'
+                : (syncReady ? 'Sync' : 'Sign in to sync'),
+            icon: widget.syncController.isSyncing
+                ? SizedBox(
+                    width: iconSize,
+                    height: iconSize,
+                    child: const CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(Icons.sync, size: iconSize),
+          );
+        }
+
+        return StreamBuilder<List<Note>>(
+          stream: widget.noteRepository.watchActiveNotes(),
+          builder: (context, activeSnapshot) {
+            return StreamBuilder<List<Note>>(
+              stream: widget.noteRepository.watchDeletedNotes(),
+              builder: (context, deletedSnapshot) {
+                final hasUnsyncedNotes = _hasUnsyncedNotes(
+                  activeSnapshot.data ?? const <Note>[],
+                  deletedSnapshot.data ?? const <Note>[],
+                );
+                final colors = _mobileSyncButtonColors(
+                  context: context,
+                  syncReady: syncReady,
+                  isCheckingAccount: isCheckingAccount,
+                  hasUnsyncedNotes: hasUnsyncedNotes,
+                );
+
+                return IconButton(
+                  key: const ValueKey('mobile-sync-button'),
+                  onPressed: widget.syncController.isSyncing ||
+                          isCheckingAccount ||
+                          !syncReady
+                      ? null
+                      : _runSync,
+                  tooltip: isCheckingAccount
+                      ? 'Checking account'
+                      : (syncReady ? 'Sync' : 'Sign in to sync'),
+                  style: IconButton.styleFrom(
+                    backgroundColor: colors.backgroundColor,
+                    foregroundColor: colors.foregroundColor,
+                    disabledBackgroundColor: colors.backgroundColor,
+                    disabledForegroundColor: colors.foregroundColor,
+                  ),
+                  icon: widget.syncController.isSyncing
+                      ? SizedBox(
+                          width: iconSize,
+                          height: iconSize,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              colors.foregroundColor,
+                            ),
+                          ),
+                        )
+                      : Icon(Icons.sync, size: iconSize),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+
+    return button;
+  }
+
+  Widget _buildAppSyncStatusIndicator({
+    bool compact = false,
+  }) {
     return AnimatedBuilder(
       animation: Listenable.merge([
         widget.authController,
@@ -519,24 +615,111 @@ class _NotesHomePageState extends State<NotesHomePage> {
             !widget.authController.hasResolvedInitialSession &&
                 widget.authController.isBusy;
         final syncReady = widget.authController.isSignedIn;
-        return IconButton(
-          onPressed:
-              widget.syncController.isSyncing || isCheckingAccount || !syncReady
-                  ? null
-                  : _runSync,
-          tooltip: isCheckingAccount
-              ? 'Checking account'
-              : (syncReady ? 'Sync' : 'Sign in to sync'),
-          icon: widget.syncController.isSyncing
-              ? SizedBox(
-                  width: iconSize,
-                  height: iconSize,
-                  child: const CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Icon(Icons.sync, size: iconSize),
+
+        return StreamBuilder<List<Note>>(
+          stream: widget.noteRepository.watchActiveNotes(),
+          builder: (context, activeSnapshot) {
+            return StreamBuilder<List<Note>>(
+              stream: widget.noteRepository.watchDeletedNotes(),
+              builder: (context, deletedSnapshot) {
+                final hasUnsyncedNotes = _hasUnsyncedNotes(
+                  activeSnapshot.data ?? const <Note>[],
+                  deletedSnapshot.data ?? const <Note>[],
+                );
+
+                return _AppSyncStatusChip(
+                  key: ValueKey(
+                    compact
+                        ? 'compact-app-sync-status-indicator'
+                        : 'app-sync-status-indicator',
+                  ),
+                  label: _appSyncStatusLabel(
+                    syncReady: syncReady,
+                    isCheckingAccount: isCheckingAccount,
+                    hasUnsyncedNotes: hasUnsyncedNotes,
+                  ),
+                  compact: compact,
+                );
+              },
+            );
+          },
         );
       },
     );
+  }
+
+  bool _hasUnsyncedNotes(List<Note> activeNotes, List<Note> deletedNotes) {
+    return activeNotes.any(_noteRequiresSyncAttention) ||
+        deletedNotes.any(_noteRequiresSyncAttention);
+  }
+
+  bool _noteRequiresSyncAttention(Note note) {
+    return note.syncStatus != SyncStatus.synced;
+  }
+
+  _MobileSyncButtonColors _mobileSyncButtonColors({
+    required BuildContext context,
+    required bool syncReady,
+    required bool isCheckingAccount,
+    required bool hasUnsyncedNotes,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    if (widget.syncController.errorMessage != null) {
+      return _MobileSyncButtonColors(
+        foregroundColor: colorScheme.onErrorContainer,
+        backgroundColor: colorScheme.errorContainer,
+      );
+    }
+
+    if (isCheckingAccount || widget.syncController.isSyncing) {
+      return _MobileSyncButtonColors(
+        foregroundColor: colorScheme.onPrimaryContainer,
+        backgroundColor: colorScheme.primaryContainer,
+      );
+    }
+
+    if (!syncReady) {
+      return _MobileSyncButtonColors(
+        foregroundColor: colorScheme.onSurfaceVariant,
+        backgroundColor: colorScheme.surfaceContainerHighest,
+      );
+    }
+
+    if (hasUnsyncedNotes) {
+      return _MobileSyncButtonColors(
+        foregroundColor: colorScheme.onPrimaryContainer,
+        backgroundColor: colorScheme.primaryContainer,
+      );
+    }
+
+    return _MobileSyncButtonColors(
+      foregroundColor: colorScheme.onSecondaryContainer,
+      backgroundColor: colorScheme.secondaryContainer,
+    );
+  }
+
+  String _appSyncStatusLabel({
+    required bool syncReady,
+    required bool isCheckingAccount,
+    required bool hasUnsyncedNotes,
+  }) {
+    if (widget.syncController.errorMessage != null) {
+      return 'Sync failed';
+    }
+    if (isCheckingAccount) {
+      return 'Checking';
+    }
+    if (widget.syncController.isSyncing) {
+      return 'Syncing';
+    }
+    if (!syncReady) {
+      return 'Sync off';
+    }
+    if (hasUnsyncedNotes) {
+      return 'Not synced';
+    }
+    return 'Synced';
   }
 
   Widget _buildTopBarActionsMenu({double iconSize = 24}) {
@@ -545,6 +728,8 @@ class _NotesHomePageState extends State<NotesHomePage> {
       icon: Icon(Icons.more_vert, size: iconSize),
       onSelected: (action) async {
         switch (action) {
+          case _TopBarMenuAction.syncNow:
+            await _runSync();
           case _TopBarMenuAction.forceReuploadAllNotes:
             await _forceReuploadAllNotes();
           case _TopBarMenuAction.importObsidianNotes:
@@ -554,6 +739,10 @@ class _NotesHomePageState extends State<NotesHomePage> {
         }
       },
       itemBuilder: (context) => const [
+        PopupMenuItem(
+          value: _TopBarMenuAction.syncNow,
+          child: Text('Sync now'),
+        ),
         PopupMenuItem(
           value: _TopBarMenuAction.forceReuploadAllNotes,
           child: Text('Force re-upload all notes'),
@@ -574,6 +763,8 @@ class _NotesHomePageState extends State<NotesHomePage> {
     if (_workspaceSection == _WorkspaceSection.notes) {
       setState(() {
         _workspaceSection = _WorkspaceSection.notes;
+        _activeEditorKey = GlobalKey<NoteEditorPageState>();
+        _desktopEditorStatus = const NoteEditorStatusSnapshot.hidden();
         _desktopEditorSession = _DesktopEditorSession(
           sessionId: _nextDesktopEditorSessionId++,
           initialFolderPath: _selectedFolderPath,
@@ -693,6 +884,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
 
   Future<void> _keepOriginalVersion(Note conflictNote) async {
     await widget.deleteNote(conflictNote.id);
+    widget.onLocalChangePersisted?.call();
     if (!mounted) {
       return;
     }
@@ -726,6 +918,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
         );
       }
     });
+    widget.onLocalChangePersisted?.call();
 
     _showTimedSnackBar(
       originalNote == null
@@ -748,6 +941,8 @@ class _NotesHomePageState extends State<NotesHomePage> {
         _workspaceSection = _WorkspaceSection.notes;
         _selectedFolderPath = _normalizeFolderPath(note.folderPath);
         _expandFolderAncestors(note.folderPath);
+        _activeEditorKey = GlobalKey<NoteEditorPageState>();
+        _desktopEditorStatus = const NoteEditorStatusSnapshot.hidden();
         _desktopEditorSession = _DesktopEditorSession(
           sessionId: _nextDesktopEditorSessionId++,
           note: note,
@@ -792,6 +987,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
       return;
     }
 
+    widget.onLocalChangePersisted?.call();
     final summary = result.hasFailures
         ? 'Imported ${result.importedNoteCount} Obsidian notes. Skipped ${result.failedFileCount} files.'
         : 'Imported ${result.importedNoteCount} Obsidian notes.';
@@ -912,6 +1108,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
 
   Future<void> _delete(Note note) async {
     await widget.deleteNote(note.id);
+    widget.onLocalChangePersisted?.call();
     if (!mounted) {
       return;
     }
@@ -927,6 +1124,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
 
   Future<void> _restore(Note note) async {
     await widget.restoreNote(note.id);
+    widget.onLocalChangePersisted?.call();
     if (!mounted) {
       return;
     }
@@ -1087,6 +1285,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
           _selectedFolderPath = newPath;
           _replaceFolderState(folder.path, newPath);
         });
+        widget.onLocalChangePersisted?.call();
         _showTimedSnackBar(successMessage);
         return true;
       case RenameFolderResult.notFound:
@@ -1143,6 +1342,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
       }
       _expandFolderAncestors(normalizedPath);
     });
+    widget.onLocalChangePersisted?.call();
     _showTimedSnackBar(
       normalizedPath == null
           ? 'Moved note to All notes'
@@ -1221,6 +1421,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
                 _selectedFolderPath!.startsWith('${folder.path}/'))) {
           _selectFolder(folder.parentPath);
         }
+        widget.onLocalChangePersisted?.call();
         _showTimedSnackBar('Deleted folder "${folder.name}"');
       case DeleteFolderResult.notFound:
         _showTimedSnackBar('Folder no longer exists');
@@ -1688,6 +1889,7 @@ class _NotesHomePageState extends State<NotesHomePage> {
       _workspaceSection = section;
       if (section == _WorkspaceSection.trash) {
         _selectedFolderPath = null;
+        _desktopEditorStatus = const NoteEditorStatusSnapshot.hidden();
         _desktopEditorSession = null;
       }
     });
@@ -1859,21 +2061,25 @@ class _NotesHomePageState extends State<NotesHomePage> {
     required _DesktopEditorSession session,
     required Note? note,
   }) {
+    final editorKey = _activeEditorKey ??= GlobalKey<NoteEditorPageState>();
     return NoteEditorPage(
-      key: ValueKey('desktop-editor-${session.sessionId}'),
+      key: editorKey,
       createNote: widget.createNote,
       updateNote: widget.updateNote,
       noteRepository: widget.noteRepository,
       note: note,
       initialFolderPath: session.initialFolderPath,
       embedded: true,
+      showInlineStatus: false,
       mobileTextScale: _mobileNoteTextScale,
       onPersisted: _handleDesktopEditorPersisted,
+      onStatusChanged: _handleDesktopEditorStatusChanged,
       onClose: _closeDesktopEditor,
     );
   }
 
   void _handleDesktopEditorPersisted(Note note) {
+    widget.onLocalChangePersisted?.call();
     if (!mounted || _desktopEditorSession == null) {
       return;
     }
@@ -1894,8 +2100,33 @@ class _NotesHomePageState extends State<NotesHomePage> {
     }
 
     setState(() {
+      _activeEditorKey = null;
+      _desktopEditorStatus = const NoteEditorStatusSnapshot.hidden();
       _desktopEditorSession = null;
     });
+  }
+
+  void _handleDesktopEditorStatusChanged(NoteEditorStatusSnapshot status) {
+    if (!mounted) {
+      return;
+    }
+
+    if (_desktopEditorStatus == status) {
+      return;
+    }
+
+    setState(() {
+      _desktopEditorStatus = status;
+    });
+  }
+
+  Future<bool> flushPendingEdits() async {
+    final editorState = _activeEditorKey?.currentState;
+    if (editorState == null) {
+      return true;
+    }
+
+    return editorState.flushPendingChanges();
   }
 }
 
@@ -2969,9 +3200,20 @@ class _SidebarNoteSyncIndicator extends StatelessWidget {
 }
 
 enum _TopBarMenuAction {
+  syncNow,
   forceReuploadAllNotes,
   importObsidianNotes,
   showAttachmentsFolder,
+}
+
+class _MobileSyncButtonColors {
+  const _MobileSyncButtonColors({
+    required this.foregroundColor,
+    required this.backgroundColor,
+  });
+
+  final Color foregroundColor;
+  final Color backgroundColor;
 }
 
 class _NotesList extends StatelessWidget {
@@ -3076,6 +3318,15 @@ class _NotesList extends StatelessWidget {
                                             fontWeight: FontWeight.w700,
                                             letterSpacing: -0.6,
                                           ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      children: [
+                                        _SyncStatusChip(
+                                          status: note.syncStatus,
+                                          compact: true,
+                                        ),
+                                      ],
                                     ),
                                     const SizedBox(height: 10),
                                     if (isConflictCopy) ...[
@@ -3248,12 +3499,150 @@ class _MobileChromeSurface extends StatelessWidget {
 }
 
 enum _MobileAppMenuAction {
-  sync,
+  syncNow,
   forceReuploadAllNotes,
   account,
   noteTextSize,
   importObsidianNotes,
   showAttachmentsFolder,
+}
+
+class _AppSyncStatusChip extends StatelessWidget {
+  const _AppSyncStatusChip({
+    required this.label,
+    required this.compact,
+    super.key,
+  });
+
+  final String label;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final (
+      statusIcon,
+      accentColor,
+      backgroundColor,
+      foregroundColor,
+      borderColor,
+    ) = switch (label) {
+      'Sync failed' => (
+          Icons.error_outline,
+          colorScheme.error,
+          colorScheme.errorContainer.withValues(alpha: 0.92),
+          colorScheme.onErrorContainer,
+          colorScheme.error.withValues(alpha: 0.18),
+        ),
+      'Checking' => (
+          Icons.schedule,
+          colorScheme.outline,
+          colorScheme.surfaceContainerHighest,
+          colorScheme.onSurfaceVariant,
+          colorScheme.outlineVariant.withValues(alpha: 0.8),
+        ),
+      'Syncing' => (
+          Icons.sync,
+          colorScheme.primary,
+          colorScheme.primaryContainer.withValues(alpha: 0.92),
+          colorScheme.onPrimaryContainer,
+          colorScheme.primary.withValues(alpha: 0.18),
+        ),
+      'Sync off' => (
+          Icons.cloud_off_outlined,
+          colorScheme.outline,
+          colorScheme.surfaceContainerHighest,
+          colorScheme.onSurfaceVariant,
+          colorScheme.outlineVariant.withValues(alpha: 0.8),
+        ),
+      'Not synced' => (
+          Icons.sync_problem_outlined,
+          colorScheme.primary,
+          colorScheme.primaryContainer.withValues(alpha: 0.92),
+          colorScheme.onPrimaryContainer,
+          colorScheme.primary.withValues(alpha: 0.18),
+        ),
+      _ => (
+          Icons.cloud_done_outlined,
+          colorScheme.secondary,
+          colorScheme.secondaryContainer.withValues(alpha: 0.92),
+          colorScheme.onSecondaryContainer,
+          colorScheme.secondary.withValues(alpha: 0.18),
+        ),
+    };
+
+    final iconSize = compact ? 14.0 : 16.0;
+    final accentDotSize = compact ? 8.0 : 9.0;
+
+    return Tooltip(
+      message: 'App sync status: $label',
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 10 : 12,
+          vertical: compact ? 6 : 7,
+        ),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: compact ? 22 : 24,
+              height: compact ? 22 : 24,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.55),
+                shape: BoxShape.circle,
+              ),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Center(
+                    child: Icon(
+                      Icons.sync_outlined,
+                      size: iconSize,
+                      color: foregroundColor,
+                    ),
+                  ),
+                  Positioned(
+                    right: -1,
+                    top: -1,
+                    child: Container(
+                      width: accentDotSize,
+                      height: accentDotSize,
+                      decoration: BoxDecoration(
+                        color: accentColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: foregroundColor,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.1,
+                  ),
+            ),
+            if (label == 'Syncing') ...[
+              const SizedBox(width: 6),
+              Icon(
+                statusIcon,
+                size: compact ? 12 : 13,
+                color: foregroundColor.withValues(alpha: 0.9),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _FolderSidebar extends StatelessWidget {
@@ -3497,48 +3886,110 @@ class _FolderListTile extends StatelessWidget {
 class _SyncStatusChip extends StatelessWidget {
   const _SyncStatusChip({
     required this.status,
+    this.compact = false,
   });
 
   final SyncStatus status;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final (label, backgroundColor, foregroundColor) = switch (status) {
+    final (label, icon, backgroundColor, foregroundColor) = switch (status) {
       SyncStatus.synced => (
           'Synced',
+          Icons.cloud_done_outlined,
           colorScheme.secondaryContainer,
           colorScheme.onSecondaryContainer,
         ),
       SyncStatus.pendingUpload => (
-          'Local',
+          'Not synced',
+          Icons.cloud_upload_outlined,
           colorScheme.primaryContainer,
           colorScheme.onPrimaryContainer,
         ),
       SyncStatus.pendingDelete => (
-          'Deleted',
+          'Not synced',
+          Icons.delete_outline,
           colorScheme.errorContainer,
           colorScheme.onErrorContainer,
         ),
       SyncStatus.conflicted => (
-          'Conflict',
+          'Not synced',
+          Icons.warning_amber_outlined,
           colorScheme.tertiaryContainer,
           colorScheme.onTertiaryContainer,
         ),
     };
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 12,
+        vertical: compact ? 6 : 7,
+      ),
       decoration: BoxDecoration(
         color: backgroundColor,
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: foregroundColor,
-              fontWeight: FontWeight.w700,
-            ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: compact ? 14 : 15,
+            color: foregroundColor,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: foregroundColor,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TopBarEditorStatusBadge extends StatelessWidget {
+  const _TopBarEditorStatusBadge({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 15,
+            color: color,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ],
       ),
     );
   }

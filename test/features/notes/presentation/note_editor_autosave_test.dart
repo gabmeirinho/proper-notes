@@ -39,7 +39,7 @@ void main() {
         repository.createdNotes.single.documentJson,
         documentJsonFromEditableText('# Hello'),
       );
-      expect(find.text('All changes saved'), findsOneWidget);
+      expect(find.textContaining('Saved'), findsOneWidget);
 
       await tester.enterText(find.byType(TextField).at(1), '# Hello\nWorld');
       await tester.pump(const Duration(milliseconds: 800));
