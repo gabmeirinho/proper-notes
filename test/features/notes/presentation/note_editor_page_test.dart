@@ -112,17 +112,6 @@ void main() {
     expect((spans[3] as TextSpan).style?.color, Colors.transparent);
   });
 
-  test('snippet overlay bottom aligns to the middle of closing fence line', () {
-    final bottom = snippetOverlayBottomForClosingFence(
-      closingFenceBox:
-          const TextBox.fromLTRBD(0, 20, 40, 36, TextDirection.ltr),
-      contentPaddingTop: 18,
-      scrollOffset: 4,
-    );
-
-    expect(bottom, 42);
-  });
-
   test('renders inactive quote markers as quote bars', () {
     final spans = buildInactiveMarkdownLineSpans(
       '> Quoted text',
@@ -182,6 +171,18 @@ void main() {
         isNot('monospace'));
   });
 
+  test('snippet overlay bottom covers the full closing fence line', () {
+    final bottom = snippetOverlayBottomForClosingFence(
+      closingFenceBox:
+          const TextBox.fromLTRBD(0, 20, 40, 36, TextDirection.ltr),
+      contentPaddingTop: 18,
+      scrollOffset: 4,
+      bottomInset: 8,
+    );
+
+    expect(bottom, 58);
+  });
+
   test('renders inactive code snippet regions with code styling', () {
     final openingSpans = buildInactiveMarkdownLineSpans(
       '```dart',
@@ -204,14 +205,26 @@ void main() {
     );
 
     expect((openingSpans.single as TextSpan).text, '```dart');
-    expect((openingSpans.single as TextSpan).style?.color, colorScheme.primary);
+    expect(
+        (openingSpans.single as TextSpan).style?.fontFamily, 'JetBrainsMono');
+    expect((openingSpans.single as TextSpan).style?.color,
+        isNot(Colors.transparent));
 
     expect((bodySpans.single as TextSpan).text, 'final value = 42;');
-    expect(
-        (bodySpans.single as TextSpan).style?.fontFamily, isNot('monospace'));
+    expect((bodySpans.single as TextSpan).style?.fontFamily, 'JetBrainsMono');
 
     expect((closingSpans.single as TextSpan).text, '```');
-    expect((closingSpans.single as TextSpan).style?.color, colorScheme.primary);
+    expect(
+        (closingSpans.single as TextSpan).style?.fontFamily, 'JetBrainsMono');
+  });
+
+  test('editor strut style preserves a fixed line box for overlay layout', () {
+    final strutStyle = editorStrutStyleForTextStyle(baseStyle);
+
+    expect(strutStyle.forceStrutHeight, isTrue);
+    expect(strutStyle.height, baseStyle.height);
+    expect(strutStyle.leading, 0);
+    expect(strutStyle.fontSize, baseStyle.fontSize);
   });
 
   test('renders inactive checklist markdown without visible markers', () {
@@ -263,6 +276,67 @@ void main() {
       builtSpan.toPlainText(includePlaceholders: true).length,
       bodyField.controller!.text.length,
     );
+  });
+
+  testWidgets(
+      'shows always-visible copy buttons for each fenced block on desktop',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    String? clipboardText;
+
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          clipboardText = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    await tester
+        .pumpWidget(_buildEditor(repository: repository, embedded: true));
+
+    await tester.enterText(
+      _bodyField(),
+      '```dart\nprint("hi");\n```\n\n```\nprint("bye");\n```',
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Copy code'), findsNWidgets(2));
+
+    await tester.tap(find.byTooltip('Copy code').at(1));
+    await tester.pump();
+
+    expect(clipboardText, 'print("bye");');
+    expect(find.text('Code snippet copied'), findsOneWidget);
+  });
+
+  testWidgets('delete code button removes the fenced snippet',
+      (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester
+        .pumpWidget(_buildEditor(repository: repository, embedded: true));
+
+    await tester.enterText(
+      _bodyField(),
+      'Intro\n\n```dart\nprint("hi");\n```\n\nAfter',
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Delete code').first);
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<TextField>(_bodyField()).controller?.text,
+      'Intro\n\nAfter',
+    );
+    expect(find.text('Code snippet deleted'), findsOneWidget);
   });
 
   testWidgets('inactive attachment image span preserves raw markdown length',
@@ -1714,6 +1788,19 @@ void main() {
     );
   });
 
+  testWidgets('new note focuses the title field', (tester) async {
+    final repository = _StubNoteRepository();
+
+    await tester.pumpWidget(_buildEditor(repository: repository));
+    await tester.pumpAndSettle();
+
+    final titleField = tester.widget<TextField>(find.byType(TextField).first);
+    final bodyField = tester.widget<TextField>(_bodyField());
+
+    expect(titleField.focusNode?.hasFocus, isTrue);
+    expect(bodyField.focusNode?.hasFocus, isFalse);
+  });
+
   testWidgets('arrow up keeps focus inside the body editor', (tester) async {
     final repository = _StubNoteRepository();
 
@@ -1887,6 +1974,56 @@ void main() {
     expect(bodyField.focusNode?.hasFocus, isTrue);
   });
 
+  testWidgets('deleting an empty code block keeps the editor scroll position',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    final content = List<String>.generate(
+      20,
+      (index) => 'Paragraph ${index + 1}\nLine ${index + 1}',
+    ).join('\n\n');
+    final note = Note(
+      id: 'note-delete-code-preserve-scroll',
+      title: 'Scroll note',
+      content: '$content\n\n```\n\n```',
+      documentJson: documentJsonFromEditableText('$content\n\n```\n\n```'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final editorFinder = find.byKey(const ValueKey('document-block-editor'));
+    await tester.drag(editorFinder, const Offset(0, -1200));
+    await tester.pumpAndSettle();
+
+    final scrollableFinder = find.descendant(
+      of: editorFinder,
+      matching: find.byType(Scrollable),
+    );
+    final scrollable = tester.state<ScrollableState>(scrollableFinder);
+    final scrollOffsetBeforeDelete = scrollable.position.pixels;
+
+    final codeField = find.byType(TextField).last;
+    await tester.tap(codeField);
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.pumpAndSettle();
+
+    final scrollOffsetAfterDelete =
+        tester.state<ScrollableState>(scrollableFinder).position.pixels;
+
+    expect(scrollOffsetBeforeDelete, greaterThan(0));
+    expect(
+      (scrollOffsetAfterDelete - scrollOffsetBeforeDelete).abs(),
+      lessThan(1),
+    );
+  });
+
   testWidgets('tapping empty editor space restores a caret at the start',
       (tester) async {
     final repository = _StubNoteRepository();
@@ -1974,43 +2111,6 @@ void main() {
       tester.widget<TextField>(_bodyField()).controller?.text,
       '- [x] Done task\nNext line',
     );
-  });
-
-  testWidgets('shows always-visible copy buttons for each fenced block',
-      (tester) async {
-    final repository = _StubNoteRepository();
-    String? clipboardText;
-
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      SystemChannels.platform,
-      (call) async {
-        if (call.method == 'Clipboard.setData') {
-          clipboardText = (call.arguments as Map)['text'] as String?;
-        }
-        return null;
-      },
-    );
-    addTearDown(() {
-      tester.binding.defaultBinaryMessenger
-          .setMockMethodCallHandler(SystemChannels.platform, null);
-    });
-
-    await tester
-        .pumpWidget(_buildEditor(repository: repository, embedded: true));
-
-    await tester.enterText(
-      _bodyField(),
-      '```dart\nprint("hi");\n```\n\n```\nprint("bye");\n```',
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byTooltip('Copy code'), findsNWidgets(2));
-
-    await tester.tap(find.byTooltip('Copy code').at(1));
-    await tester.pump();
-
-    expect(clipboardText, 'print("bye");');
-    expect(find.text('Code snippet copied'), findsOneWidget);
   });
 }
 

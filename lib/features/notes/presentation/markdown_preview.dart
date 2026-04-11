@@ -4,6 +4,12 @@ import '../../../core/utils/attachments.dart';
 import '../../../core/utils/note_document.dart';
 import 'attachment_image_preview.dart';
 
+const Color _codeSnippetPreviewBackground = Color(0xFF1E222B);
+const Color _codeSnippetPreviewHeader = Color(0xFF232833);
+const Color _codeSnippetPreviewBorder = Color(0xFF343B48);
+const Color _codeSnippetPreviewForeground = Color(0xFFE6EDF3);
+const Color _codeSnippetPreviewMuted = Color(0xFF98A2B3);
+
 class MarkdownPreview extends StatelessWidget {
   const MarkdownPreview({
     this.content,
@@ -249,39 +255,57 @@ class _MarkdownBlockView extends StatelessWidget {
         ),
       _CodeSnippetBlock(:final language, :final code) => Container(
           width: double.infinity,
-          padding: EdgeInsets.all(compact ? 10 : 14),
           decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(14),
+            color: _codeSnippetPreviewBackground,
+            borderRadius: BorderRadius.circular(compact ? 12 : 14),
+            border: Border.all(color: _codeSnippetPreviewBorder),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (language.isNotEmpty) ...[
-                Text(
-                  language.toUpperCase(),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: colorScheme.primary,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.8,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(compact ? 12 : 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  height: compact ? 32 : 36,
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: const BoxDecoration(
+                    color: _codeSnippetPreviewHeader,
+                    border: Border(
+                      bottom: BorderSide(color: _codeSnippetPreviewBorder),
+                    ),
+                  ),
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    language.trim().isEmpty ? 'TEXT' : language.toUpperCase(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: _codeSnippetPreviewMuted,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                    ),
                   ),
                 ),
-                SizedBox(height: compact ? 6 : 8),
+                Padding(
+                  padding: EdgeInsets.all(compact ? 10 : 14),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Text(
+                      code,
+                      maxLines: compact ? 5 : null,
+                      overflow: compact ? TextOverflow.ellipsis : null,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontFamily: 'JetBrainsMono',
+                        fontSize: compact ? 13 : 13.5,
+                        height: compact ? 1.45 : 1.55,
+                        color: _codeSnippetPreviewForeground,
+                      ),
+                    ),
+                  ),
+                ),
               ],
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Text(
-                  code,
-                  maxLines: compact ? 5 : null,
-                  overflow: compact ? TextOverflow.ellipsis : null,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontFamily: 'monospace',
-                    height: compact ? 1.35 : 1.5,
-                    color: colorScheme.onSurface,
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       _ImageBlock(:final altText, :final attachmentUri) =>

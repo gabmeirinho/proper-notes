@@ -72,6 +72,7 @@ class NoteEditorPageState extends State<NoteEditorPage>
   String? _saveErrorMessage;
   TextSelection _lastKnownContentSelection =
       const TextSelection.collapsed(offset: 0);
+  bool _didAutofocusNewNoteTitle = false;
 
   @override
   void initState() {
@@ -100,6 +101,7 @@ class NoteEditorPageState extends State<NoteEditorPage>
       if (!mounted) {
         return;
       }
+      _scheduleInitialTitleFocusIfNeeded();
       _notifyStatusChanged();
     });
   }
@@ -194,6 +196,21 @@ class NoteEditorPageState extends State<NoteEditorPage>
 
   void _handleContentTap() {
     return;
+  }
+
+  void _scheduleInitialTitleFocusIfNeeded() {
+    if (_didAutofocusNewNoteTitle || widget.note != null) {
+      return;
+    }
+    if (_titleController.text.isNotEmpty || _contentController.text.isNotEmpty) {
+      return;
+    }
+
+    _didAutofocusNewNoteTitle = true;
+    _titleFocusNode.requestFocus();
+    _titleController.selection = TextSelection.collapsed(
+      offset: _titleController.text.length,
+    );
   }
 
   @override
@@ -2139,6 +2156,17 @@ class _MarkdownEditingController extends TextEditingController {
     required int lineStartOffset,
   }) {
     if (isActiveLine) {
+      if (isInsideCodeSnippet ||
+          isCodeSnippetOpeningTag ||
+          isCodeSnippetClosingTag) {
+        return TextSpan(
+          text: line,
+          style: _codeSnippetTextStyle(
+            baseStyle,
+            colorScheme: Theme.of(context).colorScheme,
+          ),
+        );
+      }
       final activeHeadingSpan = _buildActiveHeadingLineSpan(
         line,
         baseStyle: baseStyle,
@@ -2189,6 +2217,17 @@ class _MarkdownEditingController extends TextEditingController {
     required int lineStartOffset,
   }) {
     if (isActiveLine) {
+      if (isInsideCodeSnippet ||
+          isCodeSnippetOpeningTag ||
+          isCodeSnippetClosingTag) {
+        return TextSpan(
+          text: line,
+          style: _codeSnippetTextStyle(
+            baseStyle,
+            colorScheme: Theme.of(context).colorScheme,
+          ),
+        );
+      }
       final activeHeadingSpan = _buildActiveHeadingLineSpan(
         line,
         baseStyle: baseStyle,
@@ -2525,34 +2564,128 @@ List<InlineSpan> _buildInactiveCodeSnippetLineSpans(
 }) {
   final trimmedLeft = line.trimLeft();
   final indent = line.substring(0, line.length - trimmedLeft.length);
-  final chipStyle = baseStyle.copyWith(
-    color: colorScheme.primary,
-    fontWeight: FontWeight.w700,
-    letterSpacing: 0.5,
+  final codeStyle = _codeSnippetTextStyle(
+    baseStyle,
+    colorScheme: colorScheme,
   );
-  final codeStyle = baseStyle.copyWith(color: colorScheme.onSurface);
+  final fenceStyle = codeStyle.copyWith(
+    color: _codeSnippetMutedColor(),
+    fontWeight: FontWeight.w600,
+  );
 
   if (isCodeSnippetOpeningTag) {
     return [
-      if (indent.isNotEmpty) TextSpan(text: indent, style: baseStyle),
+      if (indent.isNotEmpty) TextSpan(text: indent, style: codeStyle),
       TextSpan(
         text: codeSnippetLanguage.isEmpty ? '```' : '```$codeSnippetLanguage',
-        style: chipStyle,
+        style: fenceStyle,
       ),
     ];
   }
 
   if (isCodeSnippetClosingTag) {
     return [
-      if (indent.isNotEmpty) TextSpan(text: indent, style: baseStyle),
-      TextSpan(text: '```', style: chipStyle),
+      if (indent.isNotEmpty) TextSpan(text: indent, style: codeStyle),
+      TextSpan(text: '```', style: fenceStyle),
     ];
   }
 
   return [
-    if (indent.isNotEmpty) TextSpan(text: indent, style: baseStyle),
+    if (indent.isNotEmpty) TextSpan(text: indent, style: codeStyle),
     TextSpan(text: trimmedLeft, style: codeStyle),
   ];
+}
+
+TextStyle _codeSnippetTextStyle(
+  TextStyle baseStyle, {
+  required ColorScheme colorScheme,
+}) {
+  return baseStyle.copyWith(
+    fontFamily: 'JetBrainsMono',
+    height: 1.55,
+    color: _codeSnippetForegroundColor(colorScheme),
+  );
+}
+
+@visibleForTesting
+StrutStyle editorStrutStyleForTextStyle(TextStyle style) {
+  return StrutStyle.fromTextStyle(
+    style,
+    forceStrutHeight: true,
+    height: style.height,
+    leading: 0,
+  );
+}
+
+Color _codeSnippetBackgroundColor() {
+  return const Color(0xFF1E222B);
+}
+
+Color _codeSnippetHeaderColor() {
+  return const Color(0xFF232833);
+}
+
+Color _codeSnippetBorderColor() {
+  return const Color(0xFF343B48);
+}
+
+Color _codeSnippetForegroundColor(ColorScheme colorScheme) {
+  return const Color(0xFFE6EDF3);
+}
+
+Color _codeSnippetMutedColor() {
+  return const Color(0xFF98A2B3);
+}
+
+Color _codeSnippetHoverColor() {
+  return const Color(0xFF2B3340);
+}
+
+TextSelectionThemeData _codeSnippetSelectionTheme() {
+  return const TextSelectionThemeData(
+    cursorColor: Color(0xFF7C9BFF),
+    selectionColor: Color(0x667C9BFF),
+    selectionHandleColor: Color(0xFF9CB3FF),
+  );
+}
+
+enum _CodeSnippetLineKind {
+  none,
+  opening,
+  body,
+  closing,
+}
+
+class _CodeSnippetLineState {
+  const _CodeSnippetLineState({
+    required this.kind,
+    this.language = '',
+  });
+
+  final _CodeSnippetLineKind kind;
+  final String language;
+}
+
+_CodeSnippetLineState _classifyCodeSnippetLine(
+  String line, {
+  required bool isInsideCodeSnippet,
+}) {
+  if (isInsideCodeSnippet) {
+    if (_isFencedCodeSnippetDelimiter(line)) {
+      return const _CodeSnippetLineState(kind: _CodeSnippetLineKind.closing);
+    }
+    return const _CodeSnippetLineState(kind: _CodeSnippetLineKind.body);
+  }
+
+  final language = _codeSnippetLanguage(line);
+  if (language != null) {
+    return _CodeSnippetLineState(
+      kind: _CodeSnippetLineKind.opening,
+      language: language,
+    );
+  }
+
+  return const _CodeSnippetLineState(kind: _CodeSnippetLineKind.none);
 }
 
 List<InlineSpan> _buildInactiveInlineMarkdownSpans(
@@ -2696,45 +2829,6 @@ class _FencedCodeSnippet {
   bool containsOffset(int offset) {
     return offset >= startOffset && offset <= endOffset;
   }
-}
-
-enum _CodeSnippetLineKind {
-  none,
-  opening,
-  body,
-  closing,
-}
-
-class _CodeSnippetLineState {
-  const _CodeSnippetLineState({
-    required this.kind,
-    this.language = '',
-  });
-
-  final _CodeSnippetLineKind kind;
-  final String language;
-}
-
-_CodeSnippetLineState _classifyCodeSnippetLine(
-  String line, {
-  required bool isInsideCodeSnippet,
-}) {
-  if (isInsideCodeSnippet) {
-    if (_isFencedCodeSnippetDelimiter(line)) {
-      return const _CodeSnippetLineState(kind: _CodeSnippetLineKind.closing);
-    }
-    return const _CodeSnippetLineState(kind: _CodeSnippetLineKind.body);
-  }
-
-  final language = _codeSnippetLanguage(line);
-  if (language != null) {
-    return _CodeSnippetLineState(
-      kind: _CodeSnippetLineKind.opening,
-      language: language,
-    );
-  }
-
-  return const _CodeSnippetLineState(kind: _CodeSnippetLineKind.none);
 }
 
 bool _isCodeSnippetClosingTag(String line) {
@@ -2891,7 +2985,8 @@ class _UnifiedMarkdownEditor extends StatefulWidget {
 class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   static const EdgeInsets _editorContentPadding = EdgeInsets.all(18);
   static const double _snippetHorizontalInset = 6;
-  static const double _snippetTopInset = 4;
+  static const double _snippetTopInset = 8;
+  static const double _snippetBottomInset = 8;
   static const double _imagePreviewFallbackWidth = 320;
   static const double _imagePreviewFallbackHeight = 180;
   static const double _imagePreviewVerticalInset = 8;
@@ -2956,6 +3051,49 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     if (mounted) {
       setState(() {});
     }
+  }
+
+  void _handleEditorTextChanged(String _) {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _deleteSnippet(_FencedCodeSnippet snippet) async {
+    final text = widget.controller.text;
+    final deletionRange = snippetDeletionRange(text, snippet);
+    final updatedText = text.replaceRange(deletionRange.start, deletionRange.end, '');
+    final nextOffset = deletionRange.start.clamp(0, updatedText.length);
+    final preservedScrollOffset = _editorScrollController.hasClients
+        ? _editorScrollController.offset
+        : 0.0;
+
+    widget.controller.value = TextEditingValue(
+      text: updatedText,
+      selection: TextSelection.collapsed(offset: nextOffset),
+    );
+    widget.focusNode.requestFocus();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_editorScrollController.hasClients) {
+        return;
+      }
+      final position = _editorScrollController.position;
+      final clampedOffset = preservedScrollOffset.clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      if ((position.pixels - clampedOffset).abs() > 0.5) {
+        _editorScrollController.jumpTo(clampedOffset);
+      }
+    });
+
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Code snippet deleted')),
+    );
   }
 
   void _handleControllerChanged() {
@@ -3575,29 +3713,34 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                   widget.focusNode.hasFocus && _selectedAttachmentImage == null;
               widget.controller.selectedAttachmentLineIndex =
                   _selectedAttachmentImage?.lineIndex;
+              final effectiveStyle = style;
               final overlayTextSpan = style == null
                   ? null
                   : widget.controller.buildLayoutTextSpan(
                       context: context,
                       style: style,
                     );
-              final snippetOverlays = style == null || overlayTextSpan == null
+              final snippetOverlays =
+                  effectiveStyle == null || overlayTextSpan == null
                   ? const <_SnippetOverlayGeometry>[]
                   : _buildSnippetOverlayGeometry(
                       context,
                       text: widget.controller.text,
                       textSpan: overlayTextSpan,
+                      strutStyle: editorStrutStyleForTextStyle(effectiveStyle),
                       maxWidth: constraints.maxWidth,
                       scrollOffset: _editorScrollController.hasClients
                           ? _editorScrollController.offset
                           : 0,
                     );
-              final imageOverlays = style == null || overlayTextSpan == null
+              final imageOverlays =
+                  effectiveStyle == null || overlayTextSpan == null
                   ? const <_AttachmentImageOverlayGeometry>[]
                   : _buildAttachmentImageOverlayGeometry(
                       context,
                       text: widget.controller.text,
                       textSpan: overlayTextSpan,
+                      strutStyle: editorStrutStyleForTextStyle(effectiveStyle),
                       maxWidth: constraints.maxWidth,
                       maxHeight: constraints.maxHeight,
                       activeLineIndex: widget.focusNode.hasFocus &&
@@ -3622,35 +3765,15 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                       child: IgnorePointer(
                         child: DecoratedBox(
                           decoration: BoxDecoration(
-                            color: widget.mobileLayout
-                                ? Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerHigh
-                                    .withValues(alpha: 0.76)
-                                : Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerHigh,
+                            color: _codeSnippetBackgroundColor(),
                             borderRadius: BorderRadius.circular(
-                              widget.mobileLayout ? 20 : 14,
+                              widget.mobileLayout ? 12 : 10,
                             ),
                             border: Border.all(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .outlineVariant
-                                  .withValues(
-                                    alpha: widget.mobileLayout ? 0.38 : 0.7,
-                                  ),
+                              color: _codeSnippetBorderColor().withValues(
+                                alpha: 0.9,
+                              ),
                             ),
-                            boxShadow: widget.mobileLayout
-                                ? [
-                                    BoxShadow(
-                                      color:
-                                          Colors.black.withValues(alpha: 0.03),
-                                      blurRadius: 14,
-                                      offset: const Offset(0, 8),
-                                    ),
-                                  ]
-                                : null,
                           ),
                         ),
                       ),
@@ -3679,28 +3802,39 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                         canRequestFocus: false,
                         skipTraversal: true,
                         onKeyEvent: (_, event) => _handleKeyEvent(event),
-                        child: TextField(
-                          controller: widget.controller,
-                          focusNode: widget.focusNode,
-                          scrollController: _editorScrollController,
-                          onTap: _handleEditorTap,
-                          inputFormatters: const [
-                            _MarkdownListEditingFormatter(),
-                          ],
-                          decoration: const InputDecoration(
-                            hintText:
-                                '# Untitled note\n\nStart writing in Markdown...',
-                            border: InputBorder.none,
-                            isDense: true,
-                            contentPadding: _editorContentPadding,
+                        child: Theme(
+                          data: Theme.of(context).copyWith(
+                            textSelectionTheme: _codeSnippetSelectionTheme(),
                           ),
-                          style: style,
-                          keyboardType: TextInputType.multiline,
-                          textInputAction: TextInputAction.newline,
-                          textAlignVertical: TextAlignVertical.top,
-                          minLines: null,
-                          maxLines: null,
-                          expands: true,
+                          child: TextField(
+                            controller: widget.controller,
+                            focusNode: widget.focusNode,
+                            scrollController: _editorScrollController,
+                            onTap: _handleEditorTap,
+                            inputFormatters: const [
+                              _MarkdownListEditingFormatter(),
+                            ],
+                            decoration: const InputDecoration(
+                              hintText:
+                                  '# Untitled note\n\nStart writing in Markdown...',
+                              border: InputBorder.none,
+                              isDense: true,
+                              contentPadding: _editorContentPadding,
+                            ),
+                            style: style,
+                            strutStyle: effectiveStyle == null
+                                ? null
+                                : editorStrutStyleForTextStyle(effectiveStyle),
+                            cursorColor: const Color(0xFF7C9BFF),
+                            selectionControls: materialTextSelectionControls,
+                            onChanged: _handleEditorTextChanged,
+                            keyboardType: TextInputType.multiline,
+                            textInputAction: TextInputAction.newline,
+                            textAlignVertical: TextAlignVertical.top,
+                            minLines: null,
+                            maxLines: null,
+                            expands: true,
+                          ),
                         ),
                       ),
                     ),
@@ -3834,37 +3968,71 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                     Positioned(
                       top: overlay.top + 6,
                       right: overlay.right + 6,
-                      child: IconButton(
-                        tooltip: 'Copy code',
-                        style: widget.mobileLayout
-                            ? IconButton.styleFrom(
-                                backgroundColor: Theme.of(context)
-                                    .colorScheme
-                                    .surface
-                                    .withValues(alpha: 0.92),
-                              )
-                            : null,
-                        onPressed: () async {
-                          await Clipboard.setData(
-                            ClipboardData(text: overlay.snippet.code),
-                          );
-                          if (!context.mounted) {
-                            return;
-                          }
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                overlay.snippet.language.isEmpty
-                                    ? 'Code snippet copied'
-                                    : '${overlay.snippet.language.toUpperCase()} snippet copied',
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: 'Delete code',
+                            constraints: const BoxConstraints.tightFor(
+                              width: 28,
+                              height: 28,
+                            ),
+                            padding: EdgeInsets.zero,
+                            style: IconButton.styleFrom(
+                              backgroundColor: _codeSnippetHeaderColor(),
+                              foregroundColor: const Color(0xFFFFB4AB),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6),
                               ),
                             ),
-                          );
-                        },
-                        icon: const Icon(
-                          Icons.content_copy_outlined,
-                          size: 18,
-                        ),
+                            onPressed: () {
+                              unawaited(_deleteSnippet(overlay.snippet));
+                            },
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              size: 16,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          IconButton(
+                            tooltip: 'Copy code',
+                            constraints: const BoxConstraints.tightFor(
+                              width: 28,
+                              height: 28,
+                            ),
+                            padding: EdgeInsets.zero,
+                            style: IconButton.styleFrom(
+                              backgroundColor: _codeSnippetHeaderColor(),
+                              foregroundColor: _codeSnippetForegroundColor(
+                                Theme.of(context).colorScheme,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                            onPressed: () async {
+                              await Clipboard.setData(
+                                ClipboardData(text: overlay.snippet.code),
+                              );
+                              if (!context.mounted) {
+                                return;
+                              }
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    overlay.snippet.language.isEmpty
+                                        ? 'Code snippet copied'
+                                        : '${overlay.snippet.language.toUpperCase()} snippet copied',
+                                  ),
+                                ),
+                              );
+                            },
+                            icon: const Icon(
+                              Icons.content_copy_outlined,
+                              size: 16,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                 ],
@@ -3920,6 +4088,7 @@ List<_AttachmentImageOverlayGeometry> _buildAttachmentImageOverlayGeometry(
   BuildContext context, {
   required String text,
   required InlineSpan textSpan,
+  required StrutStyle strutStyle,
   required double maxWidth,
   required double maxHeight,
   required int activeLineIndex,
@@ -3946,6 +4115,7 @@ List<_AttachmentImageOverlayGeometry> _buildAttachmentImageOverlayGeometry(
     text: textSpan,
     textDirection: Directionality.of(context),
     textScaler: MediaQuery.textScalerOf(context),
+    strutStyle: strutStyle,
   )..layout(maxWidth: contentWidth);
 
   final overlays = <_AttachmentImageOverlayGeometry>[];
@@ -4021,6 +4191,7 @@ List<_SnippetOverlayGeometry> _buildSnippetOverlayGeometry(
   BuildContext context, {
   required String text,
   required InlineSpan textSpan,
+  required StrutStyle strutStyle,
   required double maxWidth,
   required double scrollOffset,
 }) {
@@ -4043,6 +4214,7 @@ List<_SnippetOverlayGeometry> _buildSnippetOverlayGeometry(
     text: textSpan,
     textDirection: Directionality.of(context),
     textScaler: MediaQuery.textScalerOf(context),
+    strutStyle: strutStyle,
   )..layout(maxWidth: contentWidth);
 
   final overlays = <_SnippetOverlayGeometry>[];
@@ -4068,6 +4240,7 @@ List<_SnippetOverlayGeometry> _buildSnippetOverlayGeometry(
       closingFenceBox: bottomBox,
       contentPaddingTop: _UnifiedMarkdownEditorState._editorContentPadding.top,
       scrollOffset: scrollOffset,
+      bottomInset: _UnifiedMarkdownEditorState._snippetBottomInset,
     );
 
     overlays.add(
@@ -4089,10 +4262,33 @@ double snippetOverlayBottomForClosingFence({
   required TextBox closingFenceBox,
   required double contentPaddingTop,
   required double scrollOffset,
+  double bottomInset = 0,
 }) {
-  return ((closingFenceBox.top + closingFenceBox.bottom) / 2) +
+  return closingFenceBox.bottom +
       contentPaddingTop -
-      scrollOffset;
+      scrollOffset +
+      bottomInset;
+}
+
+@visibleForTesting
+TextRange snippetDeletionRange(String text, _FencedCodeSnippet snippet) {
+  var start = snippet.startOffset.clamp(0, text.length);
+  var end = snippet.endOffset.clamp(start, text.length);
+
+  final hasLeadingSeparator =
+      start >= 2 && text.substring(start - 2, start) == '\n\n';
+  final hasTrailingSeparator =
+      end + 2 <= text.length && text.substring(end, end + 2) == '\n\n';
+
+  if (hasLeadingSeparator) {
+    start -= 2;
+  } else if (hasTrailingSeparator) {
+    end += 2;
+  } else if (end < text.length && text[end] == '\n') {
+    end += 1;
+  }
+
+  return TextRange(start: start, end: end);
 }
 
 class _SnippetOverlayGeometry {
@@ -4255,6 +4451,7 @@ class _DocumentBlocksEditor extends StatefulWidget {
 
 class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
   final List<_DocumentEditorBlock> _blocks = <_DocumentEditorBlock>[];
+  late final ScrollController _scrollController;
   bool _syncingFromMaster = false;
   bool _syncingToMaster = false;
   bool _rebuildScheduled = false;
@@ -4264,6 +4461,7 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
   @override
   void initState() {
     super.initState();
+    _scrollController = ScrollController();
     _rebuildBlocksFromMasterText();
     HardwareKeyboard.instance.addHandler(_handleHardwareKeyEvent);
     widget.controller.addListener(_handleMasterChanged);
@@ -4277,6 +4475,7 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
     widget.controller.removeListener(_handleMasterChanged);
     widget.focusNode.removeListener(_handleExternalFocusRequest);
     widget.focusNode.removeListener(_syncMasterFromBlocks);
+    _scrollController.dispose();
     for (final block in _blocks) {
       block.dispose();
     }
@@ -4949,6 +5148,9 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
 
     final targetIndex = index > 0 ? index - 1 : 0;
     final placeAtEnd = index > 0;
+    final preservedScrollOffset = _scrollController.hasClients
+        ? _scrollController.offset
+        : 0.0;
     removeBlock(index);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -4957,6 +5159,19 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
       }
       _focusBlock(targetIndex.clamp(0, _blocks.length - 1),
           placeAtEnd: placeAtEnd);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) {
+          return;
+        }
+        final position = _scrollController.position;
+        final clampedOffset = preservedScrollOffset.clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        );
+        if ((position.pixels - clampedOffset).abs() > 0.5) {
+          _scrollController.jumpTo(clampedOffset);
+        }
+      });
     });
   }
 
@@ -5523,6 +5738,7 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
         focusNode: widget.focusNode,
         child: ListView.separated(
           key: const ValueKey('document-block-editor'),
+          controller: _scrollController,
           padding: padding,
           itemCount: _blocks.length,
           separatorBuilder: (context, _) => const SizedBox(height: 18),
@@ -5843,119 +6059,133 @@ class _CodeEditorBlockCard extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isMobile = MediaQuery.sizeOf(context).width < 900;
+    final codeForeground = _codeSnippetForegroundColor(colorScheme);
+    final languageLabel = block.languageController.text.trim().isEmpty
+        ? 'TEXT'
+        : block.languageController.text.trim().toUpperCase();
 
     return Container(
       decoration: BoxDecoration(
-        color: highlightSelection
-            ? colorScheme.primary.withValues(alpha: isMobile ? 0.12 : 0.14)
-            : (isMobile
-                ? colorScheme.surfaceContainerLow
-                : colorScheme.onSurface.withValues(alpha: 0.96)),
-        borderRadius: BorderRadius.circular(isMobile ? 20 : 14),
+        color: _codeSnippetBackgroundColor(),
+        borderRadius: BorderRadius.circular(isMobile ? 14 : 12),
         border: Border.all(
           color: highlightSelection
-              ? colorScheme.primary.withValues(alpha: 0.42)
-              : (isMobile
-                  ? colorScheme.outlineVariant.withValues(alpha: 0.35)
-                  : colorScheme.onSurface.withValues(alpha: 0.12)),
+              ? const Color(0xFF7C9BFF)
+              : _codeSnippetBorderColor(),
         ),
         boxShadow: isMobile
             ? [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.03),
-                  blurRadius: 14,
+                  color: Colors.black.withValues(alpha: 0.06),
+                  blurRadius: 18,
                   offset: const Offset(0, 8),
                 ),
               ]
             : null,
       ),
-      padding: EdgeInsets.all(isMobile ? 16 : 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              if (block.languageController.text.trim().isNotEmpty)
-                Text(
-                  block.languageController.text.trim().toUpperCase(),
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: isMobile
-                        ? colorScheme.onSurfaceVariant
-                        : colorScheme.primary,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.6,
-                  ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(isMobile ? 14 : 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              height: 36,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: _codeSnippetHeaderColor(),
+                border: Border(
+                  bottom: BorderSide(color: _codeSnippetBorderColor()),
                 ),
-              const Spacer(),
-              IconButton(
-                tooltip: 'Copy code',
-                style: isMobile
-                    ? IconButton.styleFrom(
-                        backgroundColor:
-                            colorScheme.surface.withValues(alpha: 0.92),
-                      )
-                    : null,
-                onPressed: () async {
-                  await Clipboard.setData(
-                    ClipboardData(text: block.controller.text),
-                  );
-                  if (!context.mounted) {
-                    return;
-                  }
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        block.languageController.text.trim().isEmpty
-                            ? 'Code snippet copied'
-                            : '${block.languageController.text.trim().toUpperCase()} snippet copied',
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      languageLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: _codeSnippetMutedColor(),
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
                       ),
                     ),
-                  );
-                },
-                icon: Icon(
-                  Icons.content_copy_outlined,
-                  size: 18,
-                  color: isMobile
-                      ? colorScheme.onSurfaceVariant
-                      : colorScheme.onInverseSurface,
+                  ),
+                  IconButton(
+                    tooltip: 'Copy code',
+                    constraints: const BoxConstraints.tightFor(
+                      width: 28,
+                      height: 28,
+                    ),
+                    padding: EdgeInsets.zero,
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      hoverColor: _codeSnippetHoverColor(),
+                      foregroundColor: codeForeground,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                    onPressed: () async {
+                      await Clipboard.setData(
+                        ClipboardData(text: block.controller.text),
+                      );
+                      if (!context.mounted) {
+                        return;
+                      }
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            block.languageController.text.trim().isEmpty
+                                ? 'Code snippet copied'
+                                : '${block.languageController.text.trim().toUpperCase()} snippet copied',
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.content_copy_outlined,
+                      size: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: EdgeInsets.all(isMobile ? 12 : 14),
+              child: Theme(
+                data: theme.copyWith(
+                  textSelectionTheme: _codeSnippetSelectionTheme(),
+                ),
+                child: Focus(
+                  onKeyEvent: (_, event) => onKeyEvent(event),
+                  child: TextField(
+                    controller: block.controller,
+                    focusNode: focusNode,
+                    onTap: onTap,
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontFamily: 'JetBrainsMono',
+                      fontSize: isMobile ? 13.0 : 13.5,
+                      color: codeForeground,
+                      height: 1.55,
+                    ),
+                    cursorColor: const Color(0xFF7C9BFF),
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    textAlignVertical: TextAlignVertical.top,
+                    minLines: 1,
+                    maxLines: null,
+                  ),
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (isMobile)
-            Divider(
-              height: 1,
-              color: colorScheme.outlineVariant.withValues(alpha: 0.45),
             ),
-          if (isMobile) const SizedBox(height: 10),
-          Focus(
-            onKeyEvent: (_, event) => onKeyEvent(event),
-            child: TextField(
-              controller: block.controller,
-              focusNode: focusNode,
-              onTap: onTap,
-              decoration: const InputDecoration(
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: EdgeInsets.zero,
-              ),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontFamily: 'monospace',
-                fontSize: isMobile ? 13.5 : null,
-                color: isMobile
-                    ? colorScheme.onSurface
-                    : colorScheme.onInverseSurface,
-                height: isMobile ? 1.4 : 1.5,
-              ),
-              keyboardType: TextInputType.multiline,
-              textInputAction: TextInputAction.newline,
-              textAlignVertical: TextAlignVertical.top,
-              minLines: 1,
-              maxLines: null,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
