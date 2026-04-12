@@ -326,7 +326,8 @@ void main() {
         await file.readAsBytes(), Uint8List.fromList(const <int>[9, 8, 7, 6]));
   });
 
-  test('fetchAllNotes preserves UTF-8 note text from Drive downloads', () async {
+  test('fetchAllNotes preserves UTF-8 note text from Drive downloads',
+      () async {
     final tokenHttpClient = MockClient((request) async {
       return http.Response(
         json.encode(<String, dynamic>{

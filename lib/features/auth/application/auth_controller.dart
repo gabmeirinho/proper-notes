@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../domain/auth_service.dart';
 import '../domain/auth_session.dart';
+import '../domain/sync_account_credentials.dart';
 
 class AuthController extends ChangeNotifier {
   AuthController({
@@ -32,16 +33,23 @@ class AuthController extends ChangeNotifier {
     }
   }
 
-  Future<void> signIn() async {
+  Future<void> testConnection(SyncAccountCredentials credentials) async {
     await _run(() async {
-      _session = await _authService.signIn();
+      await _authService.testConnection(credentials);
       _hasResolvedInitialSession = true;
     });
   }
 
-  Future<void> signOut() async {
+  Future<void> saveConnection(SyncAccountCredentials credentials) async {
     await _run(() async {
-      await _authService.signOut();
+      _session = await _authService.saveConnection(credentials);
+      _hasResolvedInitialSession = true;
+    });
+  }
+
+  Future<void> clearConnection() async {
+    await _run(() async {
+      await _authService.clearConnection();
       _session = null;
       _hasResolvedInitialSession = true;
     });
@@ -69,14 +77,17 @@ class AuthController extends ChangeNotifier {
         : normalized;
     final message = withoutExceptionPrefix.toLowerCase();
 
-    if (message.contains('client id') || message.contains('client secret')) {
-      return 'Google sign-in is not configured correctly for this build.';
+    if (message.contains('unauthorized') ||
+        message.contains('authentication')) {
+      return 'Authentication failed. Check the WebDAV username and app password.';
     }
-    if (message.contains('cancelled') || message.contains('canceled')) {
-      return 'Google sign-in was cancelled.';
+    if (message.contains('propfind') || message.contains('webdav')) {
+      return 'WebDAV connection failed. Check the server URL and try again.';
     }
-    if (message.contains('network')) {
-      return 'Network error during sign-in. Check your connection and try again.';
+    if (message.contains('network') ||
+        message.contains('socketexception') ||
+        message.contains('timed out')) {
+      return 'Network error while checking the sync account. Try again.';
     }
 
     return withoutExceptionPrefix;

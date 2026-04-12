@@ -174,7 +174,8 @@ void main() {
       expect(preparedCount, 1);
       expect(repository.updatedNotes, hasLength(1));
       expect(repository.updatedNotes.single.id, 'note-sync-all');
-      expect(repository.updatedNotes.single.syncStatus, SyncStatus.pendingUpload);
+      expect(
+          repository.updatedNotes.single.syncStatus, SyncStatus.pendingUpload);
     });
   });
 }
@@ -204,6 +205,9 @@ class _FakeNoteRepository implements NoteRepository {
   }
 
   @override
+  Future<List<Note>> getByIds(Iterable<String> ids) async => const [];
+
+  @override
   Future<Note?> getById(String id) async => null;
 
   @override
@@ -211,6 +215,12 @@ class _FakeNoteRepository implements NoteRepository {
 
   @override
   Future<List<Note>> getDeletedNotesForSync() async => const [];
+
+  @override
+  Future<List<Note>> getPendingNotesForSync() async => const [];
+
+  @override
+  Future<Map<String, String?>> getRemoteEtagsByPath() async => const {};
 
   @override
   Future<void> applyRemoteDeletion(RemoteNote remoteNote) async {}
@@ -224,6 +234,7 @@ class _FakeNoteRepository implements NoteRepository {
     required DateTime syncedAt,
     required String baseContentHash,
     String? remoteFileId,
+    String? remoteEtag,
   }) async {}
 
   @override

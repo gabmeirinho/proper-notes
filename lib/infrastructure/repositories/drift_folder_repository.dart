@@ -40,7 +40,8 @@ class DriftFolderRepository implements FolderRepository {
   }
 
   @override
-  Future<RenameFolderResult> renameFolder(String oldPath, String newPath) async {
+  Future<RenameFolderResult> renameFolder(
+      String oldPath, String newPath) async {
     final normalizedOldPath = _normalizePath(oldPath);
     final normalizedNewPath = _normalizePath(newPath);
     if (normalizedOldPath.isEmpty || normalizedNewPath.isEmpty) {
@@ -62,14 +63,13 @@ class DriftFolderRepository implements FolderRepository {
       return RenameFolderResult.notFound;
     }
 
-    final destinationConflict =
-        await (_database.select(_database.foldersTable)
-              ..where(
-                (tbl) =>
-                    tbl.path.equals(normalizedNewPath) |
-                    tbl.path.like('$normalizedNewPath/%'),
-              ))
-            .getSingleOrNull();
+    final destinationConflict = await (_database.select(_database.foldersTable)
+          ..where(
+            (tbl) =>
+                tbl.path.equals(normalizedNewPath) |
+                tbl.path.like('$normalizedNewPath/%'),
+          ))
+        .getSingleOrNull();
     if (destinationConflict != null) {
       return RenameFolderResult.destinationExists;
     }

@@ -97,6 +97,12 @@ class $NotesTableTable extends NotesTable
   late final GeneratedColumn<String> remoteFileId = GeneratedColumn<String>(
       'remote_file_id', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _remoteEtagMeta =
+      const VerificationMeta('remoteEtag');
+  @override
+  late final GeneratedColumn<String> remoteEtag = GeneratedColumn<String>(
+      'remote_etag', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -112,7 +118,8 @@ class $NotesTableTable extends NotesTable
         baseContentHash,
         deviceId,
         folderPath,
-        remoteFileId
+        remoteFileId,
+        remoteEtag
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -205,6 +212,12 @@ class $NotesTableTable extends NotesTable
           remoteFileId.isAcceptableOrUnknown(
               data['remote_file_id']!, _remoteFileIdMeta));
     }
+    if (data.containsKey('remote_etag')) {
+      context.handle(
+          _remoteEtagMeta,
+          remoteEtag.isAcceptableOrUnknown(
+              data['remote_etag']!, _remoteEtagMeta));
+    }
     return context;
   }
 
@@ -242,6 +255,8 @@ class $NotesTableTable extends NotesTable
           .read(DriftSqlType.string, data['${effectivePrefix}folder_path']),
       remoteFileId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}remote_file_id']),
+      remoteEtag: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}remote_etag']),
     );
   }
 
@@ -266,6 +281,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
   final String deviceId;
   final String? folderPath;
   final String? remoteFileId;
+  final String? remoteEtag;
   const NotesTableData(
       {required this.id,
       required this.title,
@@ -280,7 +296,8 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       this.baseContentHash,
       required this.deviceId,
       this.folderPath,
-      this.remoteFileId});
+      this.remoteFileId,
+      this.remoteEtag});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -307,6 +324,9 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
     }
     if (!nullToAbsent || remoteFileId != null) {
       map['remote_file_id'] = Variable<String>(remoteFileId);
+    }
+    if (!nullToAbsent || remoteEtag != null) {
+      map['remote_etag'] = Variable<String>(remoteEtag);
     }
     return map;
   }
@@ -337,6 +357,9 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       remoteFileId: remoteFileId == null && nullToAbsent
           ? const Value.absent()
           : Value(remoteFileId),
+      remoteEtag: remoteEtag == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteEtag),
     );
   }
 
@@ -358,6 +381,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       deviceId: serializer.fromJson<String>(json['deviceId']),
       folderPath: serializer.fromJson<String?>(json['folderPath']),
       remoteFileId: serializer.fromJson<String?>(json['remoteFileId']),
+      remoteEtag: serializer.fromJson<String?>(json['remoteEtag']),
     );
   }
   @override
@@ -378,6 +402,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       'deviceId': serializer.toJson<String>(deviceId),
       'folderPath': serializer.toJson<String?>(folderPath),
       'remoteFileId': serializer.toJson<String?>(remoteFileId),
+      'remoteEtag': serializer.toJson<String?>(remoteEtag),
     };
   }
 
@@ -395,7 +420,8 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
           Value<String?> baseContentHash = const Value.absent(),
           String? deviceId,
           Value<String?> folderPath = const Value.absent(),
-          Value<String?> remoteFileId = const Value.absent()}) =>
+          Value<String?> remoteFileId = const Value.absent(),
+          Value<String?> remoteEtag = const Value.absent()}) =>
       NotesTableData(
         id: id ?? this.id,
         title: title ?? this.title,
@@ -415,6 +441,7 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
         folderPath: folderPath.present ? folderPath.value : this.folderPath,
         remoteFileId:
             remoteFileId.present ? remoteFileId.value : this.remoteFileId,
+        remoteEtag: remoteEtag.present ? remoteEtag.value : this.remoteEtag,
       );
   NotesTableData copyWithCompanion(NotesTableCompanion data) {
     return NotesTableData(
@@ -443,6 +470,8 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       remoteFileId: data.remoteFileId.present
           ? data.remoteFileId.value
           : this.remoteFileId,
+      remoteEtag:
+          data.remoteEtag.present ? data.remoteEtag.value : this.remoteEtag,
     );
   }
 
@@ -462,7 +491,8 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
           ..write('baseContentHash: $baseContentHash, ')
           ..write('deviceId: $deviceId, ')
           ..write('folderPath: $folderPath, ')
-          ..write('remoteFileId: $remoteFileId')
+          ..write('remoteFileId: $remoteFileId, ')
+          ..write('remoteEtag: $remoteEtag')
           ..write(')'))
         .toString();
   }
@@ -482,7 +512,8 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
       baseContentHash,
       deviceId,
       folderPath,
-      remoteFileId);
+      remoteFileId,
+      remoteEtag);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -500,7 +531,8 @@ class NotesTableData extends DataClass implements Insertable<NotesTableData> {
           other.baseContentHash == this.baseContentHash &&
           other.deviceId == this.deviceId &&
           other.folderPath == this.folderPath &&
-          other.remoteFileId == this.remoteFileId);
+          other.remoteFileId == this.remoteFileId &&
+          other.remoteEtag == this.remoteEtag);
 }
 
 class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
@@ -518,6 +550,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
   final Value<String> deviceId;
   final Value<String?> folderPath;
   final Value<String?> remoteFileId;
+  final Value<String?> remoteEtag;
   final Value<int> rowid;
   const NotesTableCompanion({
     this.id = const Value.absent(),
@@ -534,6 +567,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
     this.deviceId = const Value.absent(),
     this.folderPath = const Value.absent(),
     this.remoteFileId = const Value.absent(),
+    this.remoteEtag = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   NotesTableCompanion.insert({
@@ -551,6 +585,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
     required String deviceId,
     this.folderPath = const Value.absent(),
     this.remoteFileId = const Value.absent(),
+    this.remoteEtag = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         createdAt = Value(createdAt),
@@ -573,6 +608,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
     Expression<String>? deviceId,
     Expression<String>? folderPath,
     Expression<String>? remoteFileId,
+    Expression<String>? remoteEtag,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -590,6 +626,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
       if (deviceId != null) 'device_id': deviceId,
       if (folderPath != null) 'folder_path': folderPath,
       if (remoteFileId != null) 'remote_file_id': remoteFileId,
+      if (remoteEtag != null) 'remote_etag': remoteEtag,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -609,6 +646,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
       Value<String>? deviceId,
       Value<String?>? folderPath,
       Value<String?>? remoteFileId,
+      Value<String?>? remoteEtag,
       Value<int>? rowid}) {
     return NotesTableCompanion(
       id: id ?? this.id,
@@ -625,6 +663,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
       deviceId: deviceId ?? this.deviceId,
       folderPath: folderPath ?? this.folderPath,
       remoteFileId: remoteFileId ?? this.remoteFileId,
+      remoteEtag: remoteEtag ?? this.remoteEtag,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -674,6 +713,9 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
     if (remoteFileId.present) {
       map['remote_file_id'] = Variable<String>(remoteFileId.value);
     }
+    if (remoteEtag.present) {
+      map['remote_etag'] = Variable<String>(remoteEtag.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -697,6 +739,7 @@ class NotesTableCompanion extends UpdateCompanion<NotesTableData> {
           ..write('deviceId: $deviceId, ')
           ..write('folderPath: $folderPath, ')
           ..write('remoteFileId: $remoteFileId, ')
+          ..write('remoteEtag: $remoteEtag, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -970,6 +1013,42 @@ class $AppMetadataTableTable extends AppMetadataTable
   late final GeneratedColumn<String> driveSyncToken = GeneratedColumn<String>(
       'drive_sync_token', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _accountLabelMeta =
+      const VerificationMeta('accountLabel');
+  @override
+  late final GeneratedColumn<String> accountLabel = GeneratedColumn<String>(
+      'account_label', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _remoteBaseUrlMeta =
+      const VerificationMeta('remoteBaseUrl');
+  @override
+  late final GeneratedColumn<String> remoteBaseUrl = GeneratedColumn<String>(
+      'remote_base_url', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _remoteUsernameMeta =
+      const VerificationMeta('remoteUsername');
+  @override
+  late final GeneratedColumn<String> remoteUsername = GeneratedColumn<String>(
+      'remote_username', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _remoteSyncCursorMeta =
+      const VerificationMeta('remoteSyncCursor');
+  @override
+  late final GeneratedColumn<String> remoteSyncCursor = GeneratedColumn<String>(
+      'remote_sync_cursor', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _remoteCollectionTagMeta =
+      const VerificationMeta('remoteCollectionTag');
+  @override
+  late final GeneratedColumn<String> remoteCollectionTag =
+      GeneratedColumn<String>('remote_collection_tag', aliasedName, true,
+          type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _remoteFormatVersionMeta =
+      const VerificationMeta('remoteFormatVersion');
+  @override
+  late final GeneratedColumn<int> remoteFormatVersion = GeneratedColumn<int>(
+      'remote_format_version', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
   static const VerificationMeta _lastFullSyncAtMeta =
       const VerificationMeta('lastFullSyncAt');
   @override
@@ -988,6 +1067,12 @@ class $AppMetadataTableTable extends AppMetadataTable
         deviceId,
         accountEmail,
         driveSyncToken,
+        accountLabel,
+        remoteBaseUrl,
+        remoteUsername,
+        remoteSyncCursor,
+        remoteCollectionTag,
+        remoteFormatVersion,
         lastFullSyncAt,
         lastSuccessfulSyncAt
       ];
@@ -1024,6 +1109,42 @@ class $AppMetadataTableTable extends AppMetadataTable
           driveSyncToken.isAcceptableOrUnknown(
               data['drive_sync_token']!, _driveSyncTokenMeta));
     }
+    if (data.containsKey('account_label')) {
+      context.handle(
+          _accountLabelMeta,
+          accountLabel.isAcceptableOrUnknown(
+              data['account_label']!, _accountLabelMeta));
+    }
+    if (data.containsKey('remote_base_url')) {
+      context.handle(
+          _remoteBaseUrlMeta,
+          remoteBaseUrl.isAcceptableOrUnknown(
+              data['remote_base_url']!, _remoteBaseUrlMeta));
+    }
+    if (data.containsKey('remote_username')) {
+      context.handle(
+          _remoteUsernameMeta,
+          remoteUsername.isAcceptableOrUnknown(
+              data['remote_username']!, _remoteUsernameMeta));
+    }
+    if (data.containsKey('remote_sync_cursor')) {
+      context.handle(
+          _remoteSyncCursorMeta,
+          remoteSyncCursor.isAcceptableOrUnknown(
+              data['remote_sync_cursor']!, _remoteSyncCursorMeta));
+    }
+    if (data.containsKey('remote_collection_tag')) {
+      context.handle(
+          _remoteCollectionTagMeta,
+          remoteCollectionTag.isAcceptableOrUnknown(
+              data['remote_collection_tag']!, _remoteCollectionTagMeta));
+    }
+    if (data.containsKey('remote_format_version')) {
+      context.handle(
+          _remoteFormatVersionMeta,
+          remoteFormatVersion.isAcceptableOrUnknown(
+              data['remote_format_version']!, _remoteFormatVersionMeta));
+    }
     if (data.containsKey('last_full_sync_at')) {
       context.handle(
           _lastFullSyncAtMeta,
@@ -1053,6 +1174,18 @@ class $AppMetadataTableTable extends AppMetadataTable
           .read(DriftSqlType.string, data['${effectivePrefix}account_email']),
       driveSyncToken: attachedDatabase.typeMapping.read(
           DriftSqlType.string, data['${effectivePrefix}drive_sync_token']),
+      accountLabel: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}account_label']),
+      remoteBaseUrl: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}remote_base_url']),
+      remoteUsername: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}remote_username']),
+      remoteSyncCursor: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}remote_sync_cursor']),
+      remoteCollectionTag: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}remote_collection_tag']),
+      remoteFormatVersion: attachedDatabase.typeMapping.read(
+          DriftSqlType.int, data['${effectivePrefix}remote_format_version']),
       lastFullSyncAt: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}last_full_sync_at']),
       lastSuccessfulSyncAt: attachedDatabase.typeMapping.read(
@@ -1072,6 +1205,12 @@ class AppMetadataTableData extends DataClass
   final String deviceId;
   final String? accountEmail;
   final String? driveSyncToken;
+  final String? accountLabel;
+  final String? remoteBaseUrl;
+  final String? remoteUsername;
+  final String? remoteSyncCursor;
+  final String? remoteCollectionTag;
+  final int? remoteFormatVersion;
   final int? lastFullSyncAt;
   final int? lastSuccessfulSyncAt;
   const AppMetadataTableData(
@@ -1079,6 +1218,12 @@ class AppMetadataTableData extends DataClass
       required this.deviceId,
       this.accountEmail,
       this.driveSyncToken,
+      this.accountLabel,
+      this.remoteBaseUrl,
+      this.remoteUsername,
+      this.remoteSyncCursor,
+      this.remoteCollectionTag,
+      this.remoteFormatVersion,
       this.lastFullSyncAt,
       this.lastSuccessfulSyncAt});
   @override
@@ -1091,6 +1236,24 @@ class AppMetadataTableData extends DataClass
     }
     if (!nullToAbsent || driveSyncToken != null) {
       map['drive_sync_token'] = Variable<String>(driveSyncToken);
+    }
+    if (!nullToAbsent || accountLabel != null) {
+      map['account_label'] = Variable<String>(accountLabel);
+    }
+    if (!nullToAbsent || remoteBaseUrl != null) {
+      map['remote_base_url'] = Variable<String>(remoteBaseUrl);
+    }
+    if (!nullToAbsent || remoteUsername != null) {
+      map['remote_username'] = Variable<String>(remoteUsername);
+    }
+    if (!nullToAbsent || remoteSyncCursor != null) {
+      map['remote_sync_cursor'] = Variable<String>(remoteSyncCursor);
+    }
+    if (!nullToAbsent || remoteCollectionTag != null) {
+      map['remote_collection_tag'] = Variable<String>(remoteCollectionTag);
+    }
+    if (!nullToAbsent || remoteFormatVersion != null) {
+      map['remote_format_version'] = Variable<int>(remoteFormatVersion);
     }
     if (!nullToAbsent || lastFullSyncAt != null) {
       map['last_full_sync_at'] = Variable<int>(lastFullSyncAt);
@@ -1111,6 +1274,24 @@ class AppMetadataTableData extends DataClass
       driveSyncToken: driveSyncToken == null && nullToAbsent
           ? const Value.absent()
           : Value(driveSyncToken),
+      accountLabel: accountLabel == null && nullToAbsent
+          ? const Value.absent()
+          : Value(accountLabel),
+      remoteBaseUrl: remoteBaseUrl == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteBaseUrl),
+      remoteUsername: remoteUsername == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteUsername),
+      remoteSyncCursor: remoteSyncCursor == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteSyncCursor),
+      remoteCollectionTag: remoteCollectionTag == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteCollectionTag),
+      remoteFormatVersion: remoteFormatVersion == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteFormatVersion),
       lastFullSyncAt: lastFullSyncAt == null && nullToAbsent
           ? const Value.absent()
           : Value(lastFullSyncAt),
@@ -1128,6 +1309,14 @@ class AppMetadataTableData extends DataClass
       deviceId: serializer.fromJson<String>(json['deviceId']),
       accountEmail: serializer.fromJson<String?>(json['accountEmail']),
       driveSyncToken: serializer.fromJson<String?>(json['driveSyncToken']),
+      accountLabel: serializer.fromJson<String?>(json['accountLabel']),
+      remoteBaseUrl: serializer.fromJson<String?>(json['remoteBaseUrl']),
+      remoteUsername: serializer.fromJson<String?>(json['remoteUsername']),
+      remoteSyncCursor: serializer.fromJson<String?>(json['remoteSyncCursor']),
+      remoteCollectionTag:
+          serializer.fromJson<String?>(json['remoteCollectionTag']),
+      remoteFormatVersion:
+          serializer.fromJson<int?>(json['remoteFormatVersion']),
       lastFullSyncAt: serializer.fromJson<int?>(json['lastFullSyncAt']),
       lastSuccessfulSyncAt:
           serializer.fromJson<int?>(json['lastSuccessfulSyncAt']),
@@ -1141,6 +1330,12 @@ class AppMetadataTableData extends DataClass
       'deviceId': serializer.toJson<String>(deviceId),
       'accountEmail': serializer.toJson<String?>(accountEmail),
       'driveSyncToken': serializer.toJson<String?>(driveSyncToken),
+      'accountLabel': serializer.toJson<String?>(accountLabel),
+      'remoteBaseUrl': serializer.toJson<String?>(remoteBaseUrl),
+      'remoteUsername': serializer.toJson<String?>(remoteUsername),
+      'remoteSyncCursor': serializer.toJson<String?>(remoteSyncCursor),
+      'remoteCollectionTag': serializer.toJson<String?>(remoteCollectionTag),
+      'remoteFormatVersion': serializer.toJson<int?>(remoteFormatVersion),
       'lastFullSyncAt': serializer.toJson<int?>(lastFullSyncAt),
       'lastSuccessfulSyncAt': serializer.toJson<int?>(lastSuccessfulSyncAt),
     };
@@ -1151,6 +1346,12 @@ class AppMetadataTableData extends DataClass
           String? deviceId,
           Value<String?> accountEmail = const Value.absent(),
           Value<String?> driveSyncToken = const Value.absent(),
+          Value<String?> accountLabel = const Value.absent(),
+          Value<String?> remoteBaseUrl = const Value.absent(),
+          Value<String?> remoteUsername = const Value.absent(),
+          Value<String?> remoteSyncCursor = const Value.absent(),
+          Value<String?> remoteCollectionTag = const Value.absent(),
+          Value<int?> remoteFormatVersion = const Value.absent(),
           Value<int?> lastFullSyncAt = const Value.absent(),
           Value<int?> lastSuccessfulSyncAt = const Value.absent()}) =>
       AppMetadataTableData(
@@ -1160,6 +1361,21 @@ class AppMetadataTableData extends DataClass
             accountEmail.present ? accountEmail.value : this.accountEmail,
         driveSyncToken:
             driveSyncToken.present ? driveSyncToken.value : this.driveSyncToken,
+        accountLabel:
+            accountLabel.present ? accountLabel.value : this.accountLabel,
+        remoteBaseUrl:
+            remoteBaseUrl.present ? remoteBaseUrl.value : this.remoteBaseUrl,
+        remoteUsername:
+            remoteUsername.present ? remoteUsername.value : this.remoteUsername,
+        remoteSyncCursor: remoteSyncCursor.present
+            ? remoteSyncCursor.value
+            : this.remoteSyncCursor,
+        remoteCollectionTag: remoteCollectionTag.present
+            ? remoteCollectionTag.value
+            : this.remoteCollectionTag,
+        remoteFormatVersion: remoteFormatVersion.present
+            ? remoteFormatVersion.value
+            : this.remoteFormatVersion,
         lastFullSyncAt:
             lastFullSyncAt.present ? lastFullSyncAt.value : this.lastFullSyncAt,
         lastSuccessfulSyncAt: lastSuccessfulSyncAt.present
@@ -1176,6 +1392,24 @@ class AppMetadataTableData extends DataClass
       driveSyncToken: data.driveSyncToken.present
           ? data.driveSyncToken.value
           : this.driveSyncToken,
+      accountLabel: data.accountLabel.present
+          ? data.accountLabel.value
+          : this.accountLabel,
+      remoteBaseUrl: data.remoteBaseUrl.present
+          ? data.remoteBaseUrl.value
+          : this.remoteBaseUrl,
+      remoteUsername: data.remoteUsername.present
+          ? data.remoteUsername.value
+          : this.remoteUsername,
+      remoteSyncCursor: data.remoteSyncCursor.present
+          ? data.remoteSyncCursor.value
+          : this.remoteSyncCursor,
+      remoteCollectionTag: data.remoteCollectionTag.present
+          ? data.remoteCollectionTag.value
+          : this.remoteCollectionTag,
+      remoteFormatVersion: data.remoteFormatVersion.present
+          ? data.remoteFormatVersion.value
+          : this.remoteFormatVersion,
       lastFullSyncAt: data.lastFullSyncAt.present
           ? data.lastFullSyncAt.value
           : this.lastFullSyncAt,
@@ -1192,6 +1426,12 @@ class AppMetadataTableData extends DataClass
           ..write('deviceId: $deviceId, ')
           ..write('accountEmail: $accountEmail, ')
           ..write('driveSyncToken: $driveSyncToken, ')
+          ..write('accountLabel: $accountLabel, ')
+          ..write('remoteBaseUrl: $remoteBaseUrl, ')
+          ..write('remoteUsername: $remoteUsername, ')
+          ..write('remoteSyncCursor: $remoteSyncCursor, ')
+          ..write('remoteCollectionTag: $remoteCollectionTag, ')
+          ..write('remoteFormatVersion: $remoteFormatVersion, ')
           ..write('lastFullSyncAt: $lastFullSyncAt, ')
           ..write('lastSuccessfulSyncAt: $lastSuccessfulSyncAt')
           ..write(')'))
@@ -1199,8 +1439,19 @@ class AppMetadataTableData extends DataClass
   }
 
   @override
-  int get hashCode => Object.hash(keyId, deviceId, accountEmail, driveSyncToken,
-      lastFullSyncAt, lastSuccessfulSyncAt);
+  int get hashCode => Object.hash(
+      keyId,
+      deviceId,
+      accountEmail,
+      driveSyncToken,
+      accountLabel,
+      remoteBaseUrl,
+      remoteUsername,
+      remoteSyncCursor,
+      remoteCollectionTag,
+      remoteFormatVersion,
+      lastFullSyncAt,
+      lastSuccessfulSyncAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1209,6 +1460,12 @@ class AppMetadataTableData extends DataClass
           other.deviceId == this.deviceId &&
           other.accountEmail == this.accountEmail &&
           other.driveSyncToken == this.driveSyncToken &&
+          other.accountLabel == this.accountLabel &&
+          other.remoteBaseUrl == this.remoteBaseUrl &&
+          other.remoteUsername == this.remoteUsername &&
+          other.remoteSyncCursor == this.remoteSyncCursor &&
+          other.remoteCollectionTag == this.remoteCollectionTag &&
+          other.remoteFormatVersion == this.remoteFormatVersion &&
           other.lastFullSyncAt == this.lastFullSyncAt &&
           other.lastSuccessfulSyncAt == this.lastSuccessfulSyncAt);
 }
@@ -1218,6 +1475,12 @@ class AppMetadataTableCompanion extends UpdateCompanion<AppMetadataTableData> {
   final Value<String> deviceId;
   final Value<String?> accountEmail;
   final Value<String?> driveSyncToken;
+  final Value<String?> accountLabel;
+  final Value<String?> remoteBaseUrl;
+  final Value<String?> remoteUsername;
+  final Value<String?> remoteSyncCursor;
+  final Value<String?> remoteCollectionTag;
+  final Value<int?> remoteFormatVersion;
   final Value<int?> lastFullSyncAt;
   final Value<int?> lastSuccessfulSyncAt;
   const AppMetadataTableCompanion({
@@ -1225,6 +1488,12 @@ class AppMetadataTableCompanion extends UpdateCompanion<AppMetadataTableData> {
     this.deviceId = const Value.absent(),
     this.accountEmail = const Value.absent(),
     this.driveSyncToken = const Value.absent(),
+    this.accountLabel = const Value.absent(),
+    this.remoteBaseUrl = const Value.absent(),
+    this.remoteUsername = const Value.absent(),
+    this.remoteSyncCursor = const Value.absent(),
+    this.remoteCollectionTag = const Value.absent(),
+    this.remoteFormatVersion = const Value.absent(),
     this.lastFullSyncAt = const Value.absent(),
     this.lastSuccessfulSyncAt = const Value.absent(),
   });
@@ -1233,6 +1502,12 @@ class AppMetadataTableCompanion extends UpdateCompanion<AppMetadataTableData> {
     required String deviceId,
     this.accountEmail = const Value.absent(),
     this.driveSyncToken = const Value.absent(),
+    this.accountLabel = const Value.absent(),
+    this.remoteBaseUrl = const Value.absent(),
+    this.remoteUsername = const Value.absent(),
+    this.remoteSyncCursor = const Value.absent(),
+    this.remoteCollectionTag = const Value.absent(),
+    this.remoteFormatVersion = const Value.absent(),
     this.lastFullSyncAt = const Value.absent(),
     this.lastSuccessfulSyncAt = const Value.absent(),
   }) : deviceId = Value(deviceId);
@@ -1241,6 +1516,12 @@ class AppMetadataTableCompanion extends UpdateCompanion<AppMetadataTableData> {
     Expression<String>? deviceId,
     Expression<String>? accountEmail,
     Expression<String>? driveSyncToken,
+    Expression<String>? accountLabel,
+    Expression<String>? remoteBaseUrl,
+    Expression<String>? remoteUsername,
+    Expression<String>? remoteSyncCursor,
+    Expression<String>? remoteCollectionTag,
+    Expression<int>? remoteFormatVersion,
     Expression<int>? lastFullSyncAt,
     Expression<int>? lastSuccessfulSyncAt,
   }) {
@@ -1249,6 +1530,14 @@ class AppMetadataTableCompanion extends UpdateCompanion<AppMetadataTableData> {
       if (deviceId != null) 'device_id': deviceId,
       if (accountEmail != null) 'account_email': accountEmail,
       if (driveSyncToken != null) 'drive_sync_token': driveSyncToken,
+      if (accountLabel != null) 'account_label': accountLabel,
+      if (remoteBaseUrl != null) 'remote_base_url': remoteBaseUrl,
+      if (remoteUsername != null) 'remote_username': remoteUsername,
+      if (remoteSyncCursor != null) 'remote_sync_cursor': remoteSyncCursor,
+      if (remoteCollectionTag != null)
+        'remote_collection_tag': remoteCollectionTag,
+      if (remoteFormatVersion != null)
+        'remote_format_version': remoteFormatVersion,
       if (lastFullSyncAt != null) 'last_full_sync_at': lastFullSyncAt,
       if (lastSuccessfulSyncAt != null)
         'last_successful_sync_at': lastSuccessfulSyncAt,
@@ -1260,6 +1549,12 @@ class AppMetadataTableCompanion extends UpdateCompanion<AppMetadataTableData> {
       Value<String>? deviceId,
       Value<String?>? accountEmail,
       Value<String?>? driveSyncToken,
+      Value<String?>? accountLabel,
+      Value<String?>? remoteBaseUrl,
+      Value<String?>? remoteUsername,
+      Value<String?>? remoteSyncCursor,
+      Value<String?>? remoteCollectionTag,
+      Value<int?>? remoteFormatVersion,
       Value<int?>? lastFullSyncAt,
       Value<int?>? lastSuccessfulSyncAt}) {
     return AppMetadataTableCompanion(
@@ -1267,6 +1562,12 @@ class AppMetadataTableCompanion extends UpdateCompanion<AppMetadataTableData> {
       deviceId: deviceId ?? this.deviceId,
       accountEmail: accountEmail ?? this.accountEmail,
       driveSyncToken: driveSyncToken ?? this.driveSyncToken,
+      accountLabel: accountLabel ?? this.accountLabel,
+      remoteBaseUrl: remoteBaseUrl ?? this.remoteBaseUrl,
+      remoteUsername: remoteUsername ?? this.remoteUsername,
+      remoteSyncCursor: remoteSyncCursor ?? this.remoteSyncCursor,
+      remoteCollectionTag: remoteCollectionTag ?? this.remoteCollectionTag,
+      remoteFormatVersion: remoteFormatVersion ?? this.remoteFormatVersion,
       lastFullSyncAt: lastFullSyncAt ?? this.lastFullSyncAt,
       lastSuccessfulSyncAt: lastSuccessfulSyncAt ?? this.lastSuccessfulSyncAt,
     );
@@ -1287,6 +1588,25 @@ class AppMetadataTableCompanion extends UpdateCompanion<AppMetadataTableData> {
     if (driveSyncToken.present) {
       map['drive_sync_token'] = Variable<String>(driveSyncToken.value);
     }
+    if (accountLabel.present) {
+      map['account_label'] = Variable<String>(accountLabel.value);
+    }
+    if (remoteBaseUrl.present) {
+      map['remote_base_url'] = Variable<String>(remoteBaseUrl.value);
+    }
+    if (remoteUsername.present) {
+      map['remote_username'] = Variable<String>(remoteUsername.value);
+    }
+    if (remoteSyncCursor.present) {
+      map['remote_sync_cursor'] = Variable<String>(remoteSyncCursor.value);
+    }
+    if (remoteCollectionTag.present) {
+      map['remote_collection_tag'] =
+          Variable<String>(remoteCollectionTag.value);
+    }
+    if (remoteFormatVersion.present) {
+      map['remote_format_version'] = Variable<int>(remoteFormatVersion.value);
+    }
     if (lastFullSyncAt.present) {
       map['last_full_sync_at'] = Variable<int>(lastFullSyncAt.value);
     }
@@ -1304,6 +1624,12 @@ class AppMetadataTableCompanion extends UpdateCompanion<AppMetadataTableData> {
           ..write('deviceId: $deviceId, ')
           ..write('accountEmail: $accountEmail, ')
           ..write('driveSyncToken: $driveSyncToken, ')
+          ..write('accountLabel: $accountLabel, ')
+          ..write('remoteBaseUrl: $remoteBaseUrl, ')
+          ..write('remoteUsername: $remoteUsername, ')
+          ..write('remoteSyncCursor: $remoteSyncCursor, ')
+          ..write('remoteCollectionTag: $remoteCollectionTag, ')
+          ..write('remoteFormatVersion: $remoteFormatVersion, ')
           ..write('lastFullSyncAt: $lastFullSyncAt, ')
           ..write('lastSuccessfulSyncAt: $lastSuccessfulSyncAt')
           ..write(')'))
@@ -1341,6 +1667,7 @@ typedef $$NotesTableTableCreateCompanionBuilder = NotesTableCompanion Function({
   required String deviceId,
   Value<String?> folderPath,
   Value<String?> remoteFileId,
+  Value<String?> remoteEtag,
   Value<int> rowid,
 });
 typedef $$NotesTableTableUpdateCompanionBuilder = NotesTableCompanion Function({
@@ -1358,6 +1685,7 @@ typedef $$NotesTableTableUpdateCompanionBuilder = NotesTableCompanion Function({
   Value<String> deviceId,
   Value<String?> folderPath,
   Value<String?> remoteFileId,
+  Value<String?> remoteEtag,
   Value<int> rowid,
 });
 
@@ -1412,6 +1740,9 @@ class $$NotesTableTableFilterComposer
 
   ColumnFilters<String> get remoteFileId => $composableBuilder(
       column: $table.remoteFileId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get remoteEtag => $composableBuilder(
+      column: $table.remoteEtag, builder: (column) => ColumnFilters(column));
 }
 
 class $$NotesTableTableOrderingComposer
@@ -1468,6 +1799,9 @@ class $$NotesTableTableOrderingComposer
   ColumnOrderings<String> get remoteFileId => $composableBuilder(
       column: $table.remoteFileId,
       builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get remoteEtag => $composableBuilder(
+      column: $table.remoteEtag, builder: (column) => ColumnOrderings(column));
 }
 
 class $$NotesTableTableAnnotationComposer
@@ -1520,6 +1854,9 @@ class $$NotesTableTableAnnotationComposer
 
   GeneratedColumn<String> get remoteFileId => $composableBuilder(
       column: $table.remoteFileId, builder: (column) => column);
+
+  GeneratedColumn<String> get remoteEtag => $composableBuilder(
+      column: $table.remoteEtag, builder: (column) => column);
 }
 
 class $$NotesTableTableTableManager extends RootTableManager<
@@ -1562,6 +1899,7 @@ class $$NotesTableTableTableManager extends RootTableManager<
             Value<String> deviceId = const Value.absent(),
             Value<String?> folderPath = const Value.absent(),
             Value<String?> remoteFileId = const Value.absent(),
+            Value<String?> remoteEtag = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               NotesTableCompanion(
@@ -1579,6 +1917,7 @@ class $$NotesTableTableTableManager extends RootTableManager<
             deviceId: deviceId,
             folderPath: folderPath,
             remoteFileId: remoteFileId,
+            remoteEtag: remoteEtag,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -1596,6 +1935,7 @@ class $$NotesTableTableTableManager extends RootTableManager<
             required String deviceId,
             Value<String?> folderPath = const Value.absent(),
             Value<String?> remoteFileId = const Value.absent(),
+            Value<String?> remoteEtag = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               NotesTableCompanion.insert(
@@ -1613,6 +1953,7 @@ class $$NotesTableTableTableManager extends RootTableManager<
             deviceId: deviceId,
             folderPath: folderPath,
             remoteFileId: remoteFileId,
+            remoteEtag: remoteEtag,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0
@@ -1786,6 +2127,12 @@ typedef $$AppMetadataTableTableCreateCompanionBuilder
   required String deviceId,
   Value<String?> accountEmail,
   Value<String?> driveSyncToken,
+  Value<String?> accountLabel,
+  Value<String?> remoteBaseUrl,
+  Value<String?> remoteUsername,
+  Value<String?> remoteSyncCursor,
+  Value<String?> remoteCollectionTag,
+  Value<int?> remoteFormatVersion,
   Value<int?> lastFullSyncAt,
   Value<int?> lastSuccessfulSyncAt,
 });
@@ -1795,6 +2142,12 @@ typedef $$AppMetadataTableTableUpdateCompanionBuilder
   Value<String> deviceId,
   Value<String?> accountEmail,
   Value<String?> driveSyncToken,
+  Value<String?> accountLabel,
+  Value<String?> remoteBaseUrl,
+  Value<String?> remoteUsername,
+  Value<String?> remoteSyncCursor,
+  Value<String?> remoteCollectionTag,
+  Value<int?> remoteFormatVersion,
   Value<int?> lastFullSyncAt,
   Value<int?> lastSuccessfulSyncAt,
 });
@@ -1819,6 +2172,28 @@ class $$AppMetadataTableTableFilterComposer
 
   ColumnFilters<String> get driveSyncToken => $composableBuilder(
       column: $table.driveSyncToken,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get accountLabel => $composableBuilder(
+      column: $table.accountLabel, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get remoteBaseUrl => $composableBuilder(
+      column: $table.remoteBaseUrl, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get remoteUsername => $composableBuilder(
+      column: $table.remoteUsername,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get remoteSyncCursor => $composableBuilder(
+      column: $table.remoteSyncCursor,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get remoteCollectionTag => $composableBuilder(
+      column: $table.remoteCollectionTag,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get remoteFormatVersion => $composableBuilder(
+      column: $table.remoteFormatVersion,
       builder: (column) => ColumnFilters(column));
 
   ColumnFilters<int> get lastFullSyncAt => $composableBuilder(
@@ -1853,6 +2228,30 @@ class $$AppMetadataTableTableOrderingComposer
       column: $table.driveSyncToken,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get accountLabel => $composableBuilder(
+      column: $table.accountLabel,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get remoteBaseUrl => $composableBuilder(
+      column: $table.remoteBaseUrl,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get remoteUsername => $composableBuilder(
+      column: $table.remoteUsername,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get remoteSyncCursor => $composableBuilder(
+      column: $table.remoteSyncCursor,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get remoteCollectionTag => $composableBuilder(
+      column: $table.remoteCollectionTag,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get remoteFormatVersion => $composableBuilder(
+      column: $table.remoteFormatVersion,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<int> get lastFullSyncAt => $composableBuilder(
       column: $table.lastFullSyncAt,
       builder: (column) => ColumnOrderings(column));
@@ -1882,6 +2281,24 @@ class $$AppMetadataTableTableAnnotationComposer
 
   GeneratedColumn<String> get driveSyncToken => $composableBuilder(
       column: $table.driveSyncToken, builder: (column) => column);
+
+  GeneratedColumn<String> get accountLabel => $composableBuilder(
+      column: $table.accountLabel, builder: (column) => column);
+
+  GeneratedColumn<String> get remoteBaseUrl => $composableBuilder(
+      column: $table.remoteBaseUrl, builder: (column) => column);
+
+  GeneratedColumn<String> get remoteUsername => $composableBuilder(
+      column: $table.remoteUsername, builder: (column) => column);
+
+  GeneratedColumn<String> get remoteSyncCursor => $composableBuilder(
+      column: $table.remoteSyncCursor, builder: (column) => column);
+
+  GeneratedColumn<String> get remoteCollectionTag => $composableBuilder(
+      column: $table.remoteCollectionTag, builder: (column) => column);
+
+  GeneratedColumn<int> get remoteFormatVersion => $composableBuilder(
+      column: $table.remoteFormatVersion, builder: (column) => column);
 
   GeneratedColumn<int> get lastFullSyncAt => $composableBuilder(
       column: $table.lastFullSyncAt, builder: (column) => column);
@@ -1922,6 +2339,12 @@ class $$AppMetadataTableTableTableManager extends RootTableManager<
             Value<String> deviceId = const Value.absent(),
             Value<String?> accountEmail = const Value.absent(),
             Value<String?> driveSyncToken = const Value.absent(),
+            Value<String?> accountLabel = const Value.absent(),
+            Value<String?> remoteBaseUrl = const Value.absent(),
+            Value<String?> remoteUsername = const Value.absent(),
+            Value<String?> remoteSyncCursor = const Value.absent(),
+            Value<String?> remoteCollectionTag = const Value.absent(),
+            Value<int?> remoteFormatVersion = const Value.absent(),
             Value<int?> lastFullSyncAt = const Value.absent(),
             Value<int?> lastSuccessfulSyncAt = const Value.absent(),
           }) =>
@@ -1930,6 +2353,12 @@ class $$AppMetadataTableTableTableManager extends RootTableManager<
             deviceId: deviceId,
             accountEmail: accountEmail,
             driveSyncToken: driveSyncToken,
+            accountLabel: accountLabel,
+            remoteBaseUrl: remoteBaseUrl,
+            remoteUsername: remoteUsername,
+            remoteSyncCursor: remoteSyncCursor,
+            remoteCollectionTag: remoteCollectionTag,
+            remoteFormatVersion: remoteFormatVersion,
             lastFullSyncAt: lastFullSyncAt,
             lastSuccessfulSyncAt: lastSuccessfulSyncAt,
           ),
@@ -1938,6 +2367,12 @@ class $$AppMetadataTableTableTableManager extends RootTableManager<
             required String deviceId,
             Value<String?> accountEmail = const Value.absent(),
             Value<String?> driveSyncToken = const Value.absent(),
+            Value<String?> accountLabel = const Value.absent(),
+            Value<String?> remoteBaseUrl = const Value.absent(),
+            Value<String?> remoteUsername = const Value.absent(),
+            Value<String?> remoteSyncCursor = const Value.absent(),
+            Value<String?> remoteCollectionTag = const Value.absent(),
+            Value<int?> remoteFormatVersion = const Value.absent(),
             Value<int?> lastFullSyncAt = const Value.absent(),
             Value<int?> lastSuccessfulSyncAt = const Value.absent(),
           }) =>
@@ -1946,6 +2381,12 @@ class $$AppMetadataTableTableTableManager extends RootTableManager<
             deviceId: deviceId,
             accountEmail: accountEmail,
             driveSyncToken: driveSyncToken,
+            accountLabel: accountLabel,
+            remoteBaseUrl: remoteBaseUrl,
+            remoteUsername: remoteUsername,
+            remoteSyncCursor: remoteSyncCursor,
+            remoteCollectionTag: remoteCollectionTag,
+            remoteFormatVersion: remoteFormatVersion,
             lastFullSyncAt: lastFullSyncAt,
             lastSuccessfulSyncAt: lastSuccessfulSyncAt,
           ),

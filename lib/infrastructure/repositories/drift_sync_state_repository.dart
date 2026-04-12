@@ -45,14 +45,14 @@ class DriftSyncStateRepository implements SyncStateRepository {
   }
 
   @override
-  Future<String?> getDriveSyncToken() async {
+  Future<String?> getRemoteSyncCursor() async {
     final row = await _getMetadataRow();
 
-    return row?.driveSyncToken;
+    return row?.remoteSyncCursor ?? row?.driveSyncToken;
   }
 
   @override
-  Future<void> setDriveSyncToken(String token) async {
+  Future<void> setRemoteSyncCursor(String token) async {
     final row = await _getMetadataRow();
     final deviceId = row == null || row.deviceId.trim().isEmpty
         ? await getOrCreateDeviceId()
@@ -63,7 +63,7 @@ class DriftSyncStateRepository implements SyncStateRepository {
             AppMetadataTableCompanion.insert(
               keyId: Value(_singletonKey),
               deviceId: deviceId,
-              driveSyncToken: Value(token),
+              remoteSyncCursor: Value(token),
             ),
           );
       return;
@@ -74,7 +74,7 @@ class DriftSyncStateRepository implements SyncStateRepository {
         .write(
       AppMetadataTableCompanion(
         deviceId: Value(deviceId),
-        driveSyncToken: Value(token),
+        remoteSyncCursor: Value(token),
       ),
     );
   }

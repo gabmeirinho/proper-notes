@@ -1,5 +1,5 @@
 abstract interface class SyncStateRepository {
   Future<String> getOrCreateDeviceId();
-  Future<String?> getDriveSyncToken();
-  Future<void> setDriveSyncToken(String token);
+  Future<String?> getRemoteSyncCursor();
+  Future<void> setRemoteSyncCursor(String token);
 }

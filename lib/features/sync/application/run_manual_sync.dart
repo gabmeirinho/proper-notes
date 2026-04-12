@@ -1,3 +1,5 @@
+import 'package:uuid/uuid.dart';
+
 import '../../../core/utils/content_hash.dart';
 import '../../notes/domain/note.dart';
 import '../../notes/domain/note_repository.dart';
@@ -6,7 +8,6 @@ import '../domain/remote_note.dart';
 import '../domain/sync_gateway.dart';
 import '../domain/sync_state_repository.dart';
 import 'manual_sync_result.dart';
-import 'package:uuid/uuid.dart';
 
 class RunManualSync {
   RunManualSync({
@@ -27,30 +28,45 @@ class RunManualSync {
   Future<ManualSyncResult> call() async {
     final stopwatch = Stopwatch()..start();
     final localLoadStopwatch = Stopwatch()..start();
-    final localNotes = [
-      ...await _noteRepository.getActiveNotesForSync(),
-      ...await _noteRepository.getDeletedNotesForSync(),
-    ];
+    final currentToken = await _syncStateRepository.getRemoteSyncCursor();
+    final pendingLocalNotes = await _noteRepository.getPendingNotesForSync();
+    var localNotes = <Note>[...pendingLocalNotes];
+
+    if (currentToken == null) {
+      localNotes = [
+        ...await _noteRepository.getActiveNotesForSync(),
+        ...await _noteRepository.getDeletedNotesForSync(),
+      ];
+    }
     localLoadStopwatch.stop();
 
-    for (final localNote in localNotes) {
+    for (final localNote in pendingLocalNotes) {
       if (localNote.deletedAt != null) {
         continue;
       }
       if (localNote.syncStatus != SyncStatus.pendingUpload) {
         continue;
       }
-
       await _syncGateway.syncNoteAttachments(localNote);
     }
 
     final remoteFetchStopwatch = Stopwatch()..start();
-    final currentToken = await _syncStateRepository.getDriveSyncToken();
     final remoteBatch = currentToken == null
         ? await _syncGateway.bootstrap()
-        : await _syncGateway.fetchChangesSince(currentToken);
+        : await _syncGateway.fetchChangesSince(
+            currentToken,
+            knownRemoteEtags: await _noteRepository.getRemoteEtagsByPath(),
+          );
     await _syncGateway.ensureRemoteAttachmentsAvailable(remoteBatch.notes);
     remoteFetchStopwatch.stop();
+
+    if (currentToken != null) {
+      final impactedIds = <String>{
+        for (final note in pendingLocalNotes) note.id,
+        for (final note in remoteBatch.notes) note.id,
+      };
+      localNotes = await _noteRepository.getByIds(impactedIds);
+    }
 
     final reconciliationStopwatch = Stopwatch()..start();
     final remoteNotes = remoteBatch.notes;
@@ -73,12 +89,7 @@ class RunManualSync {
         if (!remoteBatch.isFullSnapshot) {
           if (_shouldUploadLocalPendingNote(localNote)) {
             final uploaded = await _syncGateway.upsertNote(localNote);
-            await _noteRepository.markSynced(
-              id: localNote.id,
-              syncedAt: DateTime.now().toUtc(),
-              baseContentHash: localNote.contentHash,
-              remoteFileId: uploaded.remoteFileId,
-            );
+            await _markSynced(localNote: localNote, remoteNote: uploaded);
             uploadedCount += 1;
           } else {
             unchangedCount += 1;
@@ -87,12 +98,7 @@ class RunManualSync {
         }
 
         final uploaded = await _syncGateway.upsertNote(localNote);
-        await _noteRepository.markSynced(
-          id: localNote.id,
-          syncedAt: DateTime.now().toUtc(),
-          baseContentHash: localNote.contentHash,
-          remoteFileId: uploaded.remoteFileId,
-        );
+        await _markSynced(localNote: localNote, remoteNote: uploaded);
         uploadedCount += 1;
         continue;
       }
@@ -106,14 +112,9 @@ class RunManualSync {
       if (localNote.deletedAt != null && remoteNote.deletedAt != null) {
         if (_shouldRefreshSyncedState(
           localNote: localNote,
-          remoteFileId: remoteNote.remoteFileId,
+          remoteNote: remoteNote,
         )) {
-          await _noteRepository.markSynced(
-            id: localNote.id,
-            syncedAt: DateTime.now().toUtc(),
-            baseContentHash: localNote.contentHash,
-            remoteFileId: remoteNote.remoteFileId,
-          );
+          await _markSynced(localNote: localNote, remoteNote: remoteNote);
         }
         unchangedCount += 1;
         continue;
@@ -130,8 +131,7 @@ class RunManualSync {
           localNote: localNote,
           remoteNote: remoteNote,
         );
-        if (localNote.syncStatus == SyncStatus.pendingDelete &&
-            remoteChangedSinceBase) {
+        if (remoteChangedSinceBase) {
           await _createAndSyncConflictCopy(
             title: _conflictTitleFor(remoteNote.title, localNote.title),
             content: remoteNote.content,
@@ -140,24 +140,14 @@ class RunManualSync {
             deviceId: remoteNote.deviceId,
           );
           final uploaded = await _syncGateway.upsertNote(localNote);
-          await _noteRepository.markSynced(
-            id: localNote.id,
-            syncedAt: DateTime.now().toUtc(),
-            baseContentHash: localNote.contentHash,
-            remoteFileId: uploaded.remoteFileId,
-          );
+          await _markSynced(localNote: localNote, remoteNote: uploaded);
           uploadedCount += 1;
           conflictCount += 1;
           continue;
         }
 
         final uploaded = await _syncGateway.upsertNote(localNote);
-        await _noteRepository.markSynced(
-          id: localNote.id,
-          syncedAt: DateTime.now().toUtc(),
-          baseContentHash: localNote.contentHash,
-          remoteFileId: uploaded.remoteFileId,
-        );
+        await _markSynced(localNote: localNote, remoteNote: uploaded);
         uploadedCount += 1;
         continue;
       }
@@ -168,12 +158,7 @@ class RunManualSync {
               localNote.baseContentHash == localNote.contentHash;
           if (isLocalRestore) {
             final uploaded = await _syncGateway.upsertNote(localNote);
-            await _noteRepository.markSynced(
-              id: localNote.id,
-              syncedAt: DateTime.now().toUtc(),
-              baseContentHash: localNote.contentHash,
-              remoteFileId: uploaded.remoteFileId,
-            );
+            await _markSynced(localNote: localNote, remoteNote: uploaded);
             uploadedCount += 1;
           } else {
             await _createAndSyncConflictCopy(
@@ -214,14 +199,9 @@ class RunManualSync {
       if (_isNoteEquivalent(localNote, remoteNote)) {
         if (_shouldRefreshSyncedState(
           localNote: localNote,
-          remoteFileId: remoteNote.remoteFileId,
+          remoteNote: remoteNote,
         )) {
-          await _noteRepository.markSynced(
-            id: localNote.id,
-            syncedAt: DateTime.now().toUtc(),
-            baseContentHash: localNote.contentHash,
-            remoteFileId: remoteNote.remoteFileId,
-          );
+          await _markSynced(localNote: localNote, remoteNote: remoteNote);
         }
         unchangedCount += 1;
         continue;
@@ -230,12 +210,7 @@ class RunManualSync {
       if (localNote.contentHash == remoteNote.contentHash) {
         if (localNote.syncStatus == SyncStatus.pendingUpload) {
           final uploaded = await _syncGateway.upsertNote(localNote);
-          await _noteRepository.markSynced(
-            id: localNote.id,
-            syncedAt: DateTime.now().toUtc(),
-            baseContentHash: localNote.contentHash,
-            remoteFileId: uploaded.remoteFileId,
-          );
+          await _markSynced(localNote: localNote, remoteNote: uploaded);
           uploadedCount += 1;
         } else {
           await _noteRepository.upsertRemoteNote(remoteNote);
@@ -252,12 +227,7 @@ class RunManualSync {
 
       if (localChanged && !remoteChanged) {
         final uploaded = await _syncGateway.upsertNote(localNote);
-        await _noteRepository.markSynced(
-          id: localNote.id,
-          syncedAt: DateTime.now().toUtc(),
-          baseContentHash: localNote.contentHash,
-          remoteFileId: uploaded.remoteFileId,
-        );
+        await _markSynced(localNote: localNote, remoteNote: uploaded);
         uploadedCount += 1;
         continue;
       }
@@ -276,12 +246,7 @@ class RunManualSync {
         deviceId: remoteNote.deviceId,
       );
       final uploaded = await _syncGateway.upsertNote(localNote);
-      await _noteRepository.markSynced(
-        id: localNote.id,
-        syncedAt: DateTime.now().toUtc(),
-        baseContentHash: localNote.contentHash,
-        remoteFileId: uploaded.remoteFileId,
-      );
+      await _markSynced(localNote: localNote, remoteNote: uploaded);
       conflictCount += 1;
     }
 
@@ -298,7 +263,7 @@ class RunManualSync {
       downloadedCount += 1;
     }
 
-    await _syncStateRepository.setDriveSyncToken(remoteBatch.nextToken);
+    await _syncStateRepository.setRemoteSyncCursor(remoteBatch.nextToken);
     reconciliationStopwatch.stop();
 
     return ManualSyncResult(
@@ -316,11 +281,12 @@ class RunManualSync {
 
   bool _shouldRefreshSyncedState({
     required Note localNote,
-    required String? remoteFileId,
+    required RemoteNote remoteNote,
   }) {
     return localNote.syncStatus != SyncStatus.synced ||
         localNote.baseContentHash != localNote.contentHash ||
-        localNote.remoteFileId != remoteFileId;
+        localNote.remoteFileId != remoteNote.remoteFileId ||
+        localNote.remoteEtag != remoteNote.remoteEtag;
   }
 
   bool _shouldUploadLocalPendingNote(Note localNote) {
@@ -345,6 +311,19 @@ class RunManualSync {
         localNote.title == remoteNote.title &&
         localNote.folderPath == remoteNote.folderPath &&
         localNote.deletedAt == remoteNote.deletedAt;
+  }
+
+  Future<void> _markSynced({
+    required Note localNote,
+    required RemoteNote remoteNote,
+  }) {
+    return _noteRepository.markSynced(
+      id: localNote.id,
+      syncedAt: DateTime.now().toUtc(),
+      baseContentHash: localNote.contentHash,
+      remoteFileId: remoteNote.remoteFileId,
+      remoteEtag: remoteNote.remoteEtag,
+    );
   }
 
   Future<void> _createAndSyncConflictCopy({
@@ -376,6 +355,7 @@ class RunManualSync {
         lastSyncedAt: now,
         baseContentHash: conflictCopy.contentHash,
         remoteFileId: uploaded.remoteFileId,
+        remoteEtag: uploaded.remoteEtag,
         syncStatus: SyncStatus.conflicted,
       ),
     );

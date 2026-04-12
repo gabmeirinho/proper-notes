@@ -1,7 +1,7 @@
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../features/auth/domain/auth_session.dart';
+import 'secret_store.dart';
 
 class StoredOAuthSession {
   const StoredOAuthSession({
@@ -26,41 +26,6 @@ abstract interface class OAuthSessionStore {
     DateTime? accessTokenExpiresAt,
   });
   Future<void> clear();
-}
-
-abstract interface class SecretStore {
-  Future<String?> read(String key);
-  Future<void> write({
-    required String key,
-    required String value,
-  });
-  Future<void> delete(String key);
-}
-
-class FlutterSecureSecretStore implements SecretStore {
-  FlutterSecureSecretStore({
-    FlutterSecureStorage? secureStorage,
-  }) : _secureStorage = secureStorage ?? const FlutterSecureStorage();
-
-  final FlutterSecureStorage _secureStorage;
-
-  @override
-  Future<String?> read(String key) {
-    return _secureStorage.read(key: key);
-  }
-
-  @override
-  Future<void> write({
-    required String key,
-    required String value,
-  }) {
-    return _secureStorage.write(key: key, value: value);
-  }
-
-  @override
-  Future<void> delete(String key) {
-    return _secureStorage.delete(key: key);
-  }
 }
 
 class SharedPreferencesOAuthSessionStore implements OAuthSessionStore {

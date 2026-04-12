@@ -1,98 +1,226 @@
-# Technical Plan: Proper Notes Block Document Architecture
+# Technical Plan: Shift Proper Notes From Google OAuth/Drive To WebDAV/Nextcloud
 
-This file replaces the previous short-term code snippet plan.
+This file replaces the previous editor-focused plan.
 
-It defines the target architecture for Proper Notes if the product direction includes:
-- first-class code blocks with permanent controls such as copy buttons
-- pasted images that render inline in notes
-- slash commands similar to Obsidian
-- a more modern block-oriented editing experience
-- future AI features without weakening local-first reliability or sync safety
+It defines the target architecture and delivery plan for moving Proper Notes from:
+- Google OAuth for account linking
+- Google Drive `appDataFolder` as the sync transport
+
+to:
+- direct WebDAV credentials
+- Nextcloud as the initial supported WebDAV server
+- a sync design that remains local-first and conflict-safe without Google-specific APIs
 
 ## 1. Executive Summary
 
-Proper Notes should keep its current local-first storage and sync foundations, but evolve the note body from a single raw text field into a versioned block document model.
+Proper Notes should keep its current local-first foundations and current note model, but replace the remote backend and authentication model.
 
 What should stay:
 - Flutter app
+- Dart 3.x
 - Drift over SQLite
 - local database as the source of truth
-- note identity owned by the app
-- sync behind interfaces
+- manual sync as the baseline
+- app-owned UUID note identity
 - conservative conflict preservation
+- tombstone-first deletion handling
 
 What should change:
-- the note body/editor architecture
-- the way note content is stored and rendered
-- the way attachments and rich blocks are represented
+- remove Google OAuth from the product surface
+- remove Google Drive as the sync backend
+- replace token/session logic with WebDAV credential storage
+- replace Drive delta-token sync with WebDAV listing and ETag-based reconciliation
+- introduce a remote folder layout that is independent of provider-specific ids
 
-Recommended target:
-- a hybrid block editor
-- each note contains an ordered list of blocks
-- text-like blocks remain simple
-- code and image blocks become first-class widgets
-- AI features operate on structured local content but remain derived, not canonical, unless explicitly accepted by the user
+Recommended v1 target:
+- support one configured WebDAV account at a time
+- explicitly target Nextcloud first
+- use a plain WebDAV endpoint, username, and app password
+- keep the backend abstraction clean enough that generic WebDAV servers remain possible later
 
 ## 2. Product Goals
 
-The new architecture should support:
-- code blocks with always-visible copy buttons
-- inline images that appear immediately after paste/import
-- slash commands such as `/code`, `/image`, `/quote`, `/heading`
-- richer visual design and more modern note composition
-- future AI features such as summarize, rewrite, extract tasks, and semantic indexing
+The backend shift should deliver:
+- offline-first editing with no network dependency for core note work
+- manual sync to a Nextcloud server through WebDAV
+- a setup flow that works on Linux and Android without browser-based OAuth
+- safe remote note create, update, delete, and restore behavior
+- attachment sync that keeps pasted image behavior working
+- a migration path for users coming from existing Google-backed builds
 
-The new architecture must not break:
-- offline-first editing
+The backend shift must not weaken:
 - local DB authority
-- conservative sync behavior
-- conflict preservation
 - debuggability
+- conflict preservation
+- stale-device recovery
+- deletion safety
 
-## 3. Non-Negotiable Constraints
+## 3. Explicit Non-Goals For This Shift
 
-These constraints remain mandatory:
-- the local database is the source of truth
-- sync must never silently destroy user-authored content
-- note identity must continue to use app-owned UUIDs
-- remote ids remain cache metadata, never canonical identity
-- wall-clock timestamps must not be the main correctness model for sync
-- AI-generated content must not silently replace user content
-- missing remote files remain ambiguous and must be handled conservatively
+This migration should not turn into a larger product rewrite.
 
-## 4. Architectural Direction
+Out of scope unless explicitly requested:
+- reintroducing browser-based auth for Nextcloud OAuth2
+- supporting multiple sync backends in the product UI
+- building a server-side companion service
+- changing note identity to remote paths or hrefs
+- redesigning the editor into a block editor
+- end-to-end encryption
+- always-on background sync as a prerequisite for launch
 
-The app should move from:
-- one note body string
-- one main `TextField`
-- lightweight markdown-like styling
+## 4. Current Starting Point In The Codebase
 
-to:
-- one note containing a versioned structured document
-- one ordered list of blocks
-- one widget per block
-- local serialization of the document
-- derived projections for search, preview, and export
+The current app already has useful boundaries that should be preserved:
+- `lib/features/auth/domain/auth_service.dart`
+- `lib/features/sync/domain/sync_gateway.dart`
+- `lib/features/sync/domain/sync_state_repository.dart`
+- `lib/infrastructure/auth/*`
+- `lib/infrastructure/sync/google_drive_sync_gateway.dart`
+- `lib/infrastructure/repositories/drift_sync_state_repository.dart`
+- `lib/infrastructure/database/app_database.dart`
 
-This is not a full Notion-like collaborative editor target.
+Important current facts:
+- the app is already local-first
+- sync is already behind `SyncGateway`
+- account/session behavior is already behind `AuthService`
+- app metadata currently stores `driveSyncToken`
+- remote note identity is already app-owned `id`, while `remoteFileId` is only cache metadata
 
-It is a local-first hybrid block editor optimized for:
-- reliability
-- boring persistence
-- attachments
-- code blocks
-- inline images
-- future AI augmentation
+This means the migration can be done as a backend replacement rather than an architectural reset.
 
-## 5. Core Data Model
+## 5. Target Product Direction
 
-### 5.1 Notes Table
+### 5.1 User-Facing Account Model
 
-The `notes` table should remain the main record for note identity and sync metadata.
+The Google account model should be replaced with a sync account model based on:
+- server base URL
+- WebDAV root path
+- username
+- app password
+- optional display label derived from server host plus username
 
-It should continue to own fields such as:
+Recommended UX:
+- one `Sync account` sheet instead of a Google sign-in sheet
+- fields for server URL, username, password, and optional folder override
+- a `Test connection` action before saving
+- an explicit `Disconnect` action that clears secrets but does not delete local notes
+
+For Nextcloud specifically:
+- recommend app passwords rather than the main account password
+- default the remote root to a dedicated folder under the user WebDAV space
+- make the default path deterministic and human-readable
+
+### 5.2 Recommended Remote Root
+
+Recommended default root for Nextcloud:
+- `.../remote.php/dav/files/<username>/ProperNotes/`
+
+The app should also allow an explicitly supplied WebDAV collection URL so advanced users can point at:
+- a subfolder in Nextcloud
+- another compatible WebDAV server
+
+The UI should describe Nextcloud as the supported primary target, but the core sync layer should remain WebDAV-oriented rather than hard-coded to a vendor SDK.
+
+## 6. Remote Storage Design
+
+### 6.1 Why Drive-Like Sync No Longer Applies
+
+Google Drive `appDataFolder` gave the app:
+- provider-owned hidden storage
+- file ids
+- change tokens
+- OAuth-backed account identity
+
+WebDAV does not guarantee those features.
+
+The new design must assume:
+- no provider change token
+- no app-private hidden space
+- no canonical remote file id
+- no guaranteed stable timestamp semantics across servers
+- no first-class account identity beyond supplied credentials
+
+### 6.2 Remote Folder Layout
+
+Use a deterministic, app-owned folder structure:
+
+```text
+ProperNotes/
+  meta/
+    schema.json
+  notes/
+    <note-id>.json
+  tombstones/
+    <note-id>.json
+  attachments/
+    <attachment-name-or-hash>
+```
+
+Recommended responsibilities:
+- `meta/schema.json`: remote format version and basic installation metadata
+- `notes/<id>.json`: full note snapshot for active or restorable notes
+- `tombstones/<id>.json`: deletion record written before any purge
+- `attachments/*`: binary attachments referenced by note content
+
+### 6.3 Remote Note Shape
+
+The remote note payload should stay close to the local note model so debugging remains simple.
+
+Suggested shape:
+
+```json
+{
+  "id": "uuid",
+  "title": "Example",
+  "content": "note body",
+  "document_json": "{...}",
+  "created_at": 1710000000000,
+  "updated_at": 1710001000000,
+  "deleted_at": null,
+  "content_hash": "sha256:...",
+  "base_content_hash": "sha256:...",
+  "device_id": "device-1",
+  "folder_path": "Work/Inbox",
+  "schema_version": 1
+}
+```
+
+Notes:
+- `document_json` should be included because the local schema already has it
+- `content` remains for compatibility and debugging while the text-note model remains primary
+- `updated_at` is useful UX metadata, not correctness authority
+- `content_hash` and `base_content_hash` remain central to reconciliation
+
+### 6.4 Tombstone Shape
+
+Suggested tombstone payload:
+
+```json
+{
+  "id": "uuid",
+  "deleted_at": 1710002000000,
+  "last_content_hash": "sha256:...",
+  "device_id": "device-1",
+  "schema_version": 1
+}
+```
+
+Rules:
+- write a tombstone before treating a note as remotely deleted
+- do not treat absence of `notes/<id>.json` as sufficient evidence of deletion
+- a missing note file with no tombstone is ambiguous and must not immediately delete local content
+
+## 7. Local Data And Schema Changes
+
+### 7.1 Notes Table
+
+The existing `notes` table can largely survive this migration.
+
+Important fields that should remain:
 - `id`
 - `title`
+- `content`
+- `document_json`
 - `created_at`
 - `updated_at`
 - `deleted_at`
@@ -104,512 +232,359 @@ It should continue to own fields such as:
 - `folder_path`
 - `remote_file_id`
 
-The note body storage should evolve.
+`remote_file_id` should not be treated as a Drive-only concept anymore.
+
+Recommended interpretation after the shift:
+- store the remote note path or href cache there temporarily if useful
+- or replace it with a more generic field in a reviewed migration
+
+Do not let the name force the design. It remains cache metadata only.
+
+### 7.2 App Metadata Table
+
+The current metadata table includes:
+- `device_id`
+- `account_email`
+- `drive_sync_token`
+- `last_full_sync_at`
+- `last_successful_sync_at`
+
+This needs a reviewed migration.
+
+Recommended replacement direction:
+- `device_id`
+- `account_label`
+- `remote_base_url`
+- `remote_username`
+- `remote_collection_tag` or nullable generic sync marker
+- `last_full_sync_at`
+- `last_successful_sync_at`
+- optional `remote_format_version`
+
+Important rule:
+- do not store raw passwords in SQLite
+- store secrets in secure storage only
+
+### 7.3 Credential Storage
+
+Replace the OAuth session store with a credential store.
+
+Recommended stored secrets:
+- password or app password
+- possibly cached auth header material if needed
+
+Recommended non-secret preferences:
+- server URL
+- username
+- display label
+- optional custom root path
+
+The storage split should stay explicit so secrets do not leak into logs, backups, or plain preferences by accident.
+
+## 8. Code Architecture Changes
+
+### 8.1 Authentication Layer
+
+The existing `AuthService` boundary should be reviewed.
 
 Recommended direction:
-- replace the current single `content` source-of-truth with a document field such as `document_json`
-- optionally keep a derived `plain_text_cache` for search and preview generation
+- either keep `AuthService` but reinterpret it as sync-account connection management
+- or rename it to something like `SyncAccountService` or `RemoteCredentialService`
 
-Transitional option:
-- keep `content` during migration
-- add `document_json`
-- gradually move reads and writes to `document_json`
-- remove or deprecate `content` only after migration is stable
+Either way, the old semantics of:
+- `restoreSession()`
+- `signIn()`
+- `signOut()`
 
-### 5.2 Document Structure
+should evolve into something like:
+- restore saved account config
+- save/test credentials
+- clear credentials
 
-Each note body should be stored as a JSON document.
+The important goal is not naming purity. The goal is that UI code still does not own network auth details.
 
-Suggested shape:
+### 8.2 Sync Gateway
 
-```json
-{
-  "version": 1,
-  "blocks": [
-    {
-      "id": "blk_1",
-      "type": "heading",
-      "level": 1,
-      "text": "Title"
-    },
-    {
-      "id": "blk_2",
-      "type": "paragraph",
-      "text": "Hello world"
-    },
-    {
-      "id": "blk_3",
-      "type": "code",
-      "language": "dart",
-      "code": "final a = 1;"
-    },
-    {
-      "id": "blk_4",
-      "type": "image",
-      "attachment_id": "att_1",
-      "caption": ""
-    }
-  ]
-}
-```
+`SyncGateway` should remain the main remote boundary, but the implementation changes materially.
 
-### 5.3 Block Identity
+The new gateway should:
+- create required remote folders if missing
+- fetch remote listings via `PROPFIND`
+- retrieve changed note files with `GET`
+- upload note payloads with `PUT`
+- upload attachments with `PUT`
+- create tombstones with `PUT`
+- use `DELETE` sparingly and only when a reviewed purge policy exists
 
-Each block must have a stable block id.
+The current Google implementation should be replaced by a new WebDAV implementation rather than mixed together behind flags.
 
-Why:
-- reliable local editing state
-- future block-level UI operations
-- block-targeted AI suggestions
-- more understandable diffing and reconciliation later
+Recommended file direction:
+- add `lib/infrastructure/sync/webdav_sync_gateway.dart`
+- later remove `google_drive_sync_gateway.dart`
 
-Rules:
-- block ids must be app-owned UUID-like ids
-- block order is explicit in the document
-- block ids must survive edits that change content but not identity
+### 8.3 Sync State Repository
 
-### 5.4 Block Types
+The current repository is Drive-specific because it exposes:
+- `getDriveSyncToken()`
+- `setDriveSyncToken()`
 
-Minimum v1 block types for the new editor:
-- `paragraph`
-- `heading`
-- `bullet_list_item`
-- `quote`
-- `code`
-- `image`
+This should be generalized.
 
-Likely near-term additions:
-- `checklist_item`
-- `divider`
-- `callout`
+Recommended replacement:
+- `getRemoteSyncCursor()`
+- `setRemoteSyncCursor()`
+- or `getRemoteCollectionTag()` if the stored value is explicitly a collection fingerprint
 
-Do not introduce too many types initially.
+Important rule:
+- any stored cursor is an optimization hint, not the sole correctness mechanism
 
-Start with the types required for:
-- plain writing
-- code
-- images
-- slash commands
+### 8.4 App Bootstrap
 
-## 6. Attachments Model
+`lib/app/proper_notes_app.dart` currently wires Google config, Google auth services, and the Drive sync gateway.
 
-### 6.1 Attachments Table
+The bootstrap rewrite should:
+- remove Google-specific environment handling
+- inject the new credential/config store
+- inject the WebDAV sync gateway
+- keep `SyncController`, `RunManualSync`, and note repositories intact where possible
 
-Images should not be stored inline in the note JSON as binary data.
+This is one of the main files where the backend cutover will become visible.
 
-Add an `attachments` table with fields such as:
-- `id`
-- `note_id` or nullable owner reference
-- `mime_type`
-- `local_path`
-- `file_size`
-- `width`
-- `height`
-- `sha256`
-- `created_at`
-- `updated_at`
-- `deleted_at`
-- `sync_status`
-- `remote_file_id`
+## 9. Sync Algorithm For WebDAV
 
-### 6.2 Local File Storage
+### 9.1 Baseline Strategy
 
-Attachment binaries should live in app-managed local storage, not inside SQLite blobs unless there is a strong reason otherwise.
+Because generic WebDAV does not provide a Drive-like delta stream, the correctness baseline should be:
+- list remote directories
+- compare local metadata against remote file existence plus ETag
+- fetch changed payloads
+- reconcile locally using hashes and deletion state
 
-Recommended approach:
-- store files under an app attachments directory
-- keep SQLite for metadata only
+This is less elegant than Drive change tokens, but it is portable and understandable.
 
-Why:
-- easier debugging
-- easier file replacement and cleanup
-- avoids bloating the database file
+### 9.2 Listing Strategy
 
-### 6.3 Image Blocks
+For each sync run:
+- `PROPFIND` the `notes/` directory with `Depth: 1`
+- `PROPFIND` the `tombstones/` directory with `Depth: 1`
+- collect `href`, `getetag`, `getcontentlength`, and `getlastmodified` if available
 
-Image blocks should reference attachments by id:
+If Nextcloud exposes collection tags or other server metadata:
+- use them as a short-circuit optimization
+- never use them as the only correctness path
 
-```json
-{
-  "id": "blk_4",
-  "type": "image",
-  "attachment_id": "att_1",
-  "caption": "diagram"
-}
-```
+Recommended posture:
+- if the server fingerprint is unchanged, optionally skip downloading unchanged files
+- if server metadata is missing or suspicious, fall back to explicit listing and content fetch
 
-This keeps note content structured and attachment lifecycle separate.
+### 9.3 Fetch Strategy
 
-## 7. Editor Architecture
+Use `GET` for note or tombstone payloads when:
+- the file is newly discovered
+- the ETag changed
+- local cache metadata is missing
+- a previous sync ended mid-run
+- server metadata looks inconsistent
 
-### 7.1 Editor Model
+Avoid making correctness depend on `Last-Modified`.
 
-The editor should become a block editor, but still optimized for local simplicity.
+### 9.4 Upload Strategy
 
-Recommended structure:
-- parse `document_json` into a local in-memory `NoteDocument`
-- render one widget per block
-- each editable block owns its own controller/focus state
-- serialize the whole document back to JSON for autosave
+For note writes:
+- serialize the full note snapshot
+- `PUT` to `notes/<id>.json`
+- optionally use conditional headers when supported, but do not rely on them universally
 
-Suggested in-memory model:
+For deletions:
+- write `tombstones/<id>.json`
+- keep local deletion as a tombstone state
+- do not immediately hard-delete remote note files unless the purge flow is explicit and reviewed
 
-```text
-NoteDocument
-  version
-  blocks[]
+For restores:
+- restore the note payload
+- clear or supersede the tombstone in a controlled way
 
-Block
-  id
-  type
-  payload
-```
+### 9.5 Attachments
 
-### 7.2 Widget Strategy
+The current app already has attachment utilities and attachment-aware sync behavior.
 
-Each block becomes a real widget:
-- paragraph block widget
-- heading block widget
-- code block widget
-- image block widget
+Recommended remote strategy:
+- name attachment files by a stable derived name, ideally hash-based
+- upload only when the remote file is missing or the content hash differs
+- do not infer note deletion from attachment absence alone
+- keep attachment sync separate from note payload sync so retries remain idempotent
 
-This unlocks:
-- permanent copy buttons on code blocks
-- real inline image rendering
-- per-block menus
-- drag handles later if desired
-- richer styling without pretending styled text is still one field
+## 10. Conflict And Deletion Rules Under WebDAV
 
-### 7.3 Editing Behavior
+### 10.1 Conflict Detection
 
-The editor must define:
-- how Enter splits a block
-- how Backspace merges blocks
-- how slash commands insert or transform blocks
-- how paste behaves in paragraph vs code vs image contexts
+The minimum conflict model stays the same:
+- detect local-only changes
+- detect remote-only changes
+- detect concurrent changes
+- preserve both versions when safe auto-resolution is not available
 
-These behaviors should be explicit and tested.
+Correctness inputs should continue to be:
+- `content_hash`
+- `base_content_hash`
+- explicit deletion state
+- known sync lineage
 
-Do not rely on ad hoc UI behavior.
+Not primary correctness inputs:
+- remote timestamps
+- client clock ordering
+- server clock ordering
 
-### 7.4 Code Blocks
+### 10.2 Ambiguous Missing Remote Files
 
-Code blocks should be first-class widgets with:
-- monospace rendering
-- optional language label
-- always-visible copy button
-- raw code persistence without markdown interpretation
+With WebDAV, absence is even more ambiguous than in Drive.
 
-Optional later:
-- syntax highlighting
-- collapse/expand
+Possible reasons a note file is missing:
+- another client deleted it intentionally
+- the folder is partially synced
+- credentials point at the wrong root
+- the server had a transient listing failure
+- the note never uploaded successfully
 
-### 7.5 Images
+Required behavior:
+- never hard-delete local content because a remote file is missing by itself
+- require a tombstone or other strong evidence before applying remote deletion
+- surface sync issues when the remote collection looks incomplete
 
-When the user pastes an image:
-1. save it as an attachment
-2. create an image block at the insertion point
-3. render the image immediately in the editor
+### 10.3 Stale Devices
 
-This should be a real block, not a text token pretending to be an image.
-
-### 7.6 Slash Commands
-
-Slash commands become natural in a block editor.
-
-Examples:
-- `/code`
-- `/image`
-- `/quote`
-- `/heading`
-- `/divider`
-
-Behavior:
-- user types `/`
-- show command picker near the caret
-- choosing a command converts or inserts a block
-
-## 8. Serialization and Derived Projections
-
-The canonical body should be `document_json`.
-
-Derived projections should be stored or computable for:
-- search text
-- note title derivation
-- compact previews
-- exports such as markdown/plain text later
-
-Recommended derived fields:
-- `plain_text_cache`
-- `preview_text_cache`
+The design must continue to support devices returning after long offline periods.
 
 Rules:
-- derived fields are disposable and rebuildable
-- canonical user-authored content remains the document JSON plus attachments
+- stale devices must re-list the remote state rather than trust an old cursor blindly
+- stale uploads must still reconcile against current tombstones and content hashes
+- if a stale device conflicts with newer remote changes, preserve both versions
 
-## 9. Search
+## 11. Migration Plan From Existing Google Builds
 
-Search should not depend on rendering widgets.
+### 11.1 Product-Level Migration
 
-Recommended approach:
-- flatten text-bearing blocks into searchable text
-- store that in a derived searchable cache
-- include code text in search
-- optionally include image captions and alt text
+Users upgrading from a Google-backed build should experience:
+- local notes remain untouched
+- existing local sync metadata remains readable during transition
+- Google credentials are eventually cleared after the new backend is stable
+- the app asks the user to configure WebDAV before sync resumes
 
-Do not search binary attachments directly in the first version.
+There should be no attempt to perform an in-app Google-to-WebDAV remote copy unless explicitly designed and tested. That would add risk and a large amount of product surface.
 
-## 10. Sync Model
+Recommended posture:
+- migrate local app state
+- require a fresh remote bootstrap to WebDAV
+- upload local authoritative notes to the new WebDAV target after explicit user action
 
-### 10.1 Sync Unit
+### 11.2 Code-Level Migration Phases
 
-The note should remain the primary sync unit initially.
+#### Phase 1: Documentation And Interface Preparation
 
-Do not start with block-level sync merge logic.
+- rewrite `PLAN.MD`
+- rewrite `AGENTS.md`
+- rename Drive-specific concepts in interfaces where low-risk
+- update tests that encode Drive-only vocabulary
 
-Recommended sync payload:
-- note metadata
-- `document_json`
-- attachment references
-- attachment metadata
+#### Phase 2: Storage Migration
 
-Attachment files sync separately from note metadata payloads.
+- add a reviewed Drift migration for new metadata fields
+- deprecate or rename `drive_sync_token`
+- add a new credential/config store
+- preserve `device_id`
 
-### 10.2 Conflict Strategy
+#### Phase 3: Credential UX
 
-The current conflict strategy should remain conservative:
-- if both sides changed and safe reconciliation is unclear, preserve both versions
-- duplicate note over silent content loss
+- replace Google sign-in UI with WebDAV connection UI
+- add connection validation
+- add disconnect flow
+- show a human-readable connected account label
 
-Initially, conflict handling should remain note-level, not block-level.
+#### Phase 4: WebDAV Gateway Implementation
 
-Why:
-- simpler
-- safer
-- consistent with current project values
+- implement remote folder bootstrap
+- implement listing, fetch, upload, tombstone write, and attachment sync
+- support authenticated requests on Linux and Android
 
-Later, block-aware diffing may be explored, but only after the editor is stable.
+#### Phase 5: Reconciliation Integration
 
-### 10.3 Hashing
+- plug the new gateway into `RunManualSync` and `SyncController`
+- replace Drive-token logic with generic remote sync state
+- verify delete, restore, and conflict-copy preservation behavior
 
-`content_hash` should evolve to reflect:
-- canonical `document_json`
-- and potentially attachment references in a stable normalized form
+#### Phase 6: Cutover
 
-Do not hash transient UI state.
+- remove Google-specific bootstrap wiring
+- remove unused OAuth code
+- remove unused Google dependencies
+- update user-facing docs and build instructions
 
-## 11. Remote Representation
+#### Phase 7: Release Hardening
 
-Remote note payload should evolve from plain text content to structured document payload.
+- run full test suite
+- add migration coverage
+- verify real-device Nextcloud interoperability
+- verify upgrade from a Google-era local database
 
-Suggested remote note JSON:
+## 12. Testing Plan
 
-```json
-{
-  "id": "note_uuid",
-  "title": "Example",
-  "document": {
-    "version": 1,
-    "blocks": []
-  },
-  "attachments": [
-    {
-      "id": "att_1",
-      "mime_type": "image/png",
-      "sha256": "..."
-    }
-  ],
-  "created_at": 1710000000,
-  "updated_at": 1710001234,
-  "deleted_at": null,
-  "device_id": "device_uuid",
-  "content_hash": "sha256..."
-}
-```
+This shift needs more than happy-path unit tests.
 
-Attachment binaries should remain separate remote files.
+Required coverage areas:
+- metadata migration tests
+- credential store tests
+- WebDAV XML parsing tests
+- WebDAV gateway request/response tests
+- sync reconciliation tests with WebDAV-specific failure modes
+- attachment sync tests
+- stale-device tests
+- delete-resurrection tests
+- conflict-copy preservation tests
 
-## 12. AI Architecture
+Important WebDAV-specific cases:
+- invalid credentials
+- 401 and 403 handling
+- 404 on missing remote folders during bootstrap
+- malformed `PROPFIND` XML
+- missing ETag values
+- ETag changes without content change
+- partial network failure mid-sync
+- ambiguous note-file absence without tombstone
+- duplicate remote files or unexpected extra files
 
-### 12.1 Core Rule
+Integration expectation:
+- mock-based tests are required
+- at least one repeatable manual verification checklist against a real Nextcloud server is also required
 
-AI output must be derived unless the user explicitly accepts it.
+## 13. Dependency And Package Guidance
 
-AI must not silently rewrite canonical note content.
+Do not add large vendor-specific SDKs unless the payoff is clear.
 
-### 12.2 AI Use Cases
+Preferred direction:
+- keep using `http`
+- add a small XML parser only if needed for `PROPFIND`
+- use secure storage for secrets
+- avoid locking the app to a Nextcloud-only client library if plain WebDAV is sufficient
 
-Reasonable future features:
-- summarize note
-- rewrite selected block
-- extract tasks
-- generate titles
-- answer questions over notes
-- semantic search
+Nextcloud-specific headers or behaviors may be used as optimizations, but they should not become the only supported protocol path unless the product deliberately gives up on broader WebDAV compatibility.
 
-### 12.3 AI Storage
+## 14. Release Gates
 
-Add separate tables for AI artifacts rather than embedding AI output into canonical note content by default.
+The backend shift should not be considered complete until:
+- Google OAuth is gone from the normal product flow
+- Google Drive is no longer required to build or run the app
+- a new local install can connect to Nextcloud and sync notes safely
+- an upgraded install preserves existing local notes and device identity
+- conflict and deletion safety tests pass
+- attachment sync works on both Linux and Android
 
-Possible tables:
-- `ai_artifacts`
-- `ai_suggestions`
-- `ai_embeddings`
+## 15. Final Direction
 
-Suggested `ai_artifacts` fields:
-- `id`
-- `note_id`
-- `block_id` nullable
-- `artifact_type`
-- `model`
-- `content_json`
-- `created_at`
-- `updated_at`
+Proper Notes should move to WebDAV/Nextcloud in a way that is intentionally boring:
+- local data stays authoritative
+- remote storage stays inspectable
+- sync remains conservative
+- credentials stay explicit
+- conflict preservation stays more important than clever merge behavior
 
-Suggested `ai_suggestions` fields:
-- `id`
-- `note_id`
-- `target_block_id`
-- `suggestion_type`
-- `original_snapshot`
-- `proposed_snapshot`
-- `status`
-
-### 12.4 AI Safety Rules
-
-Rules:
-- AI features are opt-in
-- AI writes should go through explicit user acceptance
-- AI artifacts should be recoverable or removable
-- AI should not weaken sync correctness
-- embeddings and derived indexes should be rebuildable
-
-## 13. Migrations
-
-### 13.1 Migration Strategy
-
-This architecture requires deliberate migration.
-
-Recommended migration sequence:
-
-1. Add `document_json` to notes.
-2. Add derived cache columns if needed.
-3. Add attachments table.
-4. Add migration code that converts existing text notes into a block document.
-
-### 13.2 Legacy Text Conversion
-
-Existing notes can be migrated into a simple document:
-- one text note becomes one or more blocks derived from existing markdown/plain text
-
-Safe initial migration:
-- store the legacy body as a single `paragraph` or simple parsed blocks
-- preserve exact user content where parsing is uncertain
-
-Do not attempt over-aggressive markdown interpretation during migration.
-
-### 13.3 Rollback Safety
-
-Migration must be testable and reviewable.
-
-Required:
-- migration tests
-- golden examples for plain text, markdown, and old snippet/fence content
-- no destructive transform without recoverability
-
-## 14. Implementation Phases
-
-### Phase 1: Data Foundation
-
-- add `document_json`
-- add derived text cache fields if needed
-- add attachments table
-- add serialization model and tests
-- migrate existing notes to a minimal block document
-
-### Phase 2: Hybrid Block Editor
-
-- implement paragraph and heading blocks
-- render block list editor
-- keep autosave local-first
-- support basic split/merge behavior
-
-### Phase 3: Code Blocks
-
-- implement code block widget
-- add always-visible copy button
-- add slash command for `/code`
-- add language label support
-
-### Phase 4: Images
-
-- implement attachment import/paste pipeline
-- add image block widget
-- add inline rendering in the editor
-- add slash command for `/image`
-
-### Phase 5: Search and Preview Rebuild
-
-- rebuild preview generation from block documents
-- rebuild title derivation from block documents
-- rebuild search cache generation
-
-### Phase 6: AI Foundation
-
-- add AI artifact tables
-- add selected-block or note-level suggestion flows
-- keep AI derived and opt-in
-
-## 15. Testing Requirements
-
-Priority automated coverage:
-- document serialization/deserialization
-- migration tests from old text notes to document JSON
-- block editor split/merge behavior
-- code block copy behavior
-- image attachment lifecycle
-- preview generation from block documents
-- title derivation from block documents
-- sync round-trip with attachments
-- conflict preservation with structured notes
-- AI suggestion acceptance/rejection flows later
-
-Manual QA priority:
-- desktop and Android text input behavior
-- paste image behavior
-- code block copy UX
-- slash command UX
-- autosave under rapid edits
-- crash/restart recovery with attachments
-
-## 16. Risks
-
-Main risks:
-- text editing UX regressions
-- platform-specific IME issues
-- migration mistakes
-- attachment sync complexity
-- overcomplicating the first version of the block editor
-
-Mitigations:
-- phase rollout
-- keep sync note-level first
-- keep block types small at first
-- add migration harness coverage early
-- prefer safe fallback parsing over clever conversions
-
-## 17. Recommended Decision
-
-If Proper Notes is expected to support:
-- modern code blocks
-- pasted images visible inline
-- slash commands
-- AI features
-
-then the correct direction is:
-- keep the current local-first/sync architecture
-- redesign the note body around a structured block document model
-- treat attachments and AI as adjacent first-class systems
-- keep all derived or assistive features downstream of canonical local data
-
-This is a meaningful editor architecture change, but it is the right foundation for the product direction.
+This migration is successful if the app becomes easier to self-host and easier to trust without weakening the data-safety rules that matter more than backend convenience.

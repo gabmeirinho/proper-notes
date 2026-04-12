@@ -3,7 +3,10 @@ import 'remote_note.dart';
 
 abstract interface class SyncGateway {
   Future<RemoteSyncBatch> bootstrap();
-  Future<RemoteSyncBatch> fetchChangesSince(String token);
+  Future<RemoteSyncBatch> fetchChangesSince(
+    String token, {
+    Map<String, String?> knownRemoteEtags = const <String, String?>{},
+  });
   Future<List<RemoteNote>> fetchAllNotes();
   Future<RemoteNote> upsertNote(Note note);
   Future<void> syncNoteAttachments(Note note);

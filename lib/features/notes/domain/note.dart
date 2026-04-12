@@ -17,6 +17,7 @@ class Note {
     this.lastSyncedAt,
     this.baseContentHash,
     this.remoteFileId,
+    this.remoteEtag,
   });
 
   final String id;
@@ -33,6 +34,7 @@ class Note {
   final String deviceId;
   final String? folderPath;
   final String? remoteFileId;
+  final String? remoteEtag;
 
   bool get isDeleted => deletedAt != null;
 
@@ -62,6 +64,8 @@ class Note {
     bool clearFolderPath = false,
     String? remoteFileId,
     bool clearRemoteFileId = false,
+    String? remoteEtag,
+    bool clearRemoteEtag = false,
   }) {
     return Note(
       id: id ?? this.id,
@@ -82,6 +86,7 @@ class Note {
       folderPath: clearFolderPath ? null : (folderPath ?? this.folderPath),
       remoteFileId:
           clearRemoteFileId ? null : (remoteFileId ?? this.remoteFileId),
+      remoteEtag: clearRemoteEtag ? null : (remoteEtag ?? this.remoteEtag),
     );
   }
 }

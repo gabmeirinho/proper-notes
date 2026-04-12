@@ -30,11 +30,11 @@ void main() {
     expect(second, 'device-123');
   });
 
-  test('setDriveSyncToken preserves the stored device id', () async {
+  test('setRemoteSyncCursor preserves the stored device id', () async {
     final deviceId = await repository.getOrCreateDeviceId();
 
-    await repository.setDriveSyncToken('token-1');
-    final token = await repository.getDriveSyncToken();
+    await repository.setRemoteSyncCursor('token-1');
+    final token = await repository.getRemoteSyncCursor();
     final persistedDeviceId = await repository.getOrCreateDeviceId();
 
     expect(deviceId, 'device-123');

@@ -104,7 +104,7 @@ void main() {
     final result = await useCase();
 
     expect(result.uploadedCount, 0);
-    expect(result.unchangedCount, 1);
+    expect(result.unchangedCount, 0);
     expect(gateway.uploadedNoteIds, isEmpty);
     expect(gateway.syncedAttachmentNoteIds, isEmpty);
   });
@@ -136,7 +136,7 @@ void main() {
     final result = await useCase();
 
     expect(result.uploadedCount, 0);
-    expect(result.unchangedCount, 1);
+    expect(result.unchangedCount, 0);
     expect(gateway.syncedAttachmentNoteIds, isEmpty);
   });
 
@@ -606,10 +606,36 @@ class _FakeNoteRepository implements NoteRepository {
   }
 
   @override
+  Future<List<Note>> getByIds(Iterable<String> ids) async {
+    final idSet = ids.toSet();
+    return [
+      ..._localNotes.where((note) => idSet.contains(note.id)),
+      ..._deletedNotes.where((note) => idSet.contains(note.id)),
+    ];
+  }
+
+  @override
   Future<List<Note>> getActiveNotesForSync() async => _localNotes;
 
   @override
   Future<List<Note>> getDeletedNotesForSync() async => _deletedNotes;
+
+  @override
+  Future<List<Note>> getPendingNotesForSync() async {
+    return [
+      ..._localNotes,
+      ..._deletedNotes,
+    ].where((note) {
+      return note.syncStatus == SyncStatus.pendingUpload ||
+          note.syncStatus == SyncStatus.pendingDelete;
+    }).toList(growable: false);
+  }
+
+  @override
+  Future<Map<String, String?>> getRemoteEtagsByPath() async => {
+        for (final note in [..._localNotes, ..._deletedNotes])
+          if (note.remoteFileId != null) note.remoteFileId!: note.remoteEtag,
+      };
 
   @override
   Future<Note?> getById(String id) async => null;
@@ -630,6 +656,7 @@ class _FakeNoteRepository implements NoteRepository {
     required DateTime syncedAt,
     required String baseContentHash,
     String? remoteFileId,
+    String? remoteEtag,
   }) async {
     syncedIds.add(id);
   }
@@ -699,7 +726,10 @@ class _FakeSyncGateway implements SyncGateway {
   }
 
   @override
-  Future<RemoteSyncBatch> fetchChangesSince(String token) async {
+  Future<RemoteSyncBatch> fetchChangesSince(
+    String token, {
+    Map<String, String?> knownRemoteEtags = const <String, String?>{},
+  }) async {
     changeTokens.add(token);
     return RemoteSyncBatch(
       notes: _remoteNotes,
@@ -744,10 +774,10 @@ class _FakeSyncStateRepository implements SyncStateRepository {
   Future<String> getOrCreateDeviceId() async => 'test-device';
 
   @override
-  Future<String?> getDriveSyncToken() async => initialToken;
+  Future<String?> getRemoteSyncCursor() async => initialToken;
 
   @override
-  Future<void> setDriveSyncToken(String token) async {
+  Future<void> setRemoteSyncCursor(String token) async {
     savedToken = token;
   }
 }

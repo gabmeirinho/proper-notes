@@ -51,6 +51,7 @@ class SyncController extends ChangeNotifier {
     try {
       final result = await _runManualSync();
       _lastMessage = result.summary();
+      debugPrint('[Sync] ${result.summary()}');
       _lastCompletedAt = result.completedAt;
       return result;
     } catch (error) {
@@ -66,22 +67,17 @@ class SyncController extends ChangeNotifier {
   String _summarizeError(String rawError) {
     final message = rawError.toLowerCase();
 
-    if (message.contains('sign in is required before sync can run')) {
-      return 'Sign in again before running sync.';
+    if (message.contains('sync account must be configured')) {
+      return 'Configure a WebDAV sync account before running sync.';
     }
-    if (message.contains('access_token_scope_insufficient') ||
-        message.contains('insufficient authentication scopes')) {
-      return 'Google account access is missing Drive permission. Sign in again and approve Drive access.';
+    if (message.contains('webdav authentication failed')) {
+      return 'WebDAV authentication failed. Check the username and app password.';
     }
-    if (message.contains('google drive access was not granted')) {
-      return 'Drive access was not granted. Try sync again and approve the permission request.';
-    }
-    if (message.contains('failed to list drive app data files') ||
-        message.contains('failed to list drive changes') ||
-        message.contains('failed to get drive start page token') ||
-        message.contains('failed to download drive note') ||
-        message.contains('failed to upload drive note')) {
-      return 'Google Drive sync failed. Check your connection and try again.';
+    if (message.contains('webdav propfind failed') ||
+        message.contains('webdav get failed') ||
+        message.contains('webdav put failed') ||
+        message.contains('webdav attachment')) {
+      return 'WebDAV sync failed. Check the server URL and connection.';
     }
     if (message.contains('socketexception') ||
         message.contains('connection closed') ||

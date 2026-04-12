@@ -61,6 +61,68 @@ class DriftNoteRepository implements NoteRepository {
   }
 
   @override
+  Future<List<Note>> getPendingNotesForSync() async {
+    final rows = await (_database.select(_database.notesTable)
+          ..where(
+            (tbl) =>
+                tbl.syncStatus.equals(SyncStatus.pendingUpload.name) |
+                tbl.syncStatus.equals(SyncStatus.pendingDelete.name),
+          ))
+        .get();
+
+    return rows.map(_fromRow).toList(growable: false);
+  }
+
+  @override
+  Future<List<Note>> getByIds(Iterable<String> ids) async {
+    final uniqueIds = ids.toSet();
+    if (uniqueIds.isEmpty) {
+      return const <Note>[];
+    }
+
+    final rows = await (_database.select(_database.notesTable)
+          ..where((tbl) => tbl.id.isIn(uniqueIds)))
+        .get();
+
+    return rows.map(_fromRow).toList(growable: false);
+  }
+
+  @override
+  Future<Map<String, String?>> getRemoteEtagsByPath() async {
+    final rows = await (_database.select(_database.notesTable)
+          ..where((tbl) => tbl.remoteFileId.isNotNull()))
+        .get();
+
+    final remoteEtags = <String, String?>{};
+
+    for (final row in rows) {
+      final remoteFileId = row.remoteFileId;
+      if (remoteFileId == null) {
+        continue;
+      }
+
+      final repairedRemoteFileId =
+          _legacyDeletedRemoteFileId(row) ?? remoteFileId;
+      if (repairedRemoteFileId != remoteFileId) {
+        await (_database.update(_database.notesTable)
+              ..where((tbl) => tbl.id.equals(row.id)))
+            .write(
+          NotesTableCompanion(
+            remoteFileId: Value(repairedRemoteFileId),
+            // Force one refresh so the correct tombstone etag can be stored.
+            remoteEtag: const Value(null),
+          ),
+        );
+      }
+
+      remoteEtags[repairedRemoteFileId] =
+          repairedRemoteFileId == remoteFileId ? row.remoteEtag : null;
+    }
+
+    return remoteEtags;
+  }
+
+  @override
   Future<void> applyRemoteDeletion(RemoteNote remoteNote) async {
     final existing = await getById(remoteNote.id);
     final deletedAt = remoteNote.deletedAt ?? DateTime.now().toUtc();
@@ -69,36 +131,42 @@ class DriftNoteRepository implements NoteRepository {
     if (existing == null) {
       final tombstone = Note(
         id: remoteNote.id,
-        title: remoteNote.title,
+        title: remoteNote.title.isEmpty ? 'Untitled note' : remoteNote.title,
         content: remoteNote.content,
-        documentJson: legacyDocumentFromContent(remoteNote.content),
+        documentJson: remoteNote.documentJson,
         createdAt: remoteNote.createdAt,
         updatedAt: remoteNote.updatedAt,
         deletedAt: deletedAt,
         lastSyncedAt: syncedAt,
         syncStatus: SyncStatus.synced,
         contentHash: remoteNote.contentHash,
-        baseContentHash: remoteNote.contentHash,
+        baseContentHash: remoteNote.baseContentHash ?? remoteNote.contentHash,
         deviceId: remoteNote.deviceId,
         folderPath: remoteNote.folderPath,
         remoteFileId: remoteNote.remoteFileId,
+        remoteEtag: remoteNote.remoteEtag,
       );
       await create(tombstone);
       return;
     }
 
     final updated = existing.copyWith(
-      title: remoteNote.title,
-      content: remoteNote.content,
+      title: remoteNote.title.isEmpty ? existing.title : remoteNote.title,
+      content:
+          remoteNote.content.isEmpty ? existing.content : remoteNote.content,
+      documentJson: remoteNote.content.isEmpty
+          ? existing.documentJson
+          : remoteNote.documentJson,
       updatedAt: remoteNote.updatedAt,
       deletedAt: deletedAt,
       lastSyncedAt: syncedAt,
       syncStatus: SyncStatus.synced,
       contentHash: remoteNote.contentHash,
-      baseContentHash: remoteNote.contentHash,
+      baseContentHash: remoteNote.baseContentHash ?? remoteNote.contentHash,
       deviceId: remoteNote.deviceId,
       folderPath: remoteNote.folderPath,
       remoteFileId: remoteNote.remoteFileId,
+      remoteEtag: remoteNote.remoteEtag,
     );
     await update(updated);
   }
@@ -120,6 +188,7 @@ class DriftNoteRepository implements NoteRepository {
     required DateTime syncedAt,
     required String baseContentHash,
     String? remoteFileId,
+    String? remoteEtag,
   }) async {
     await (_database.update(_database.notesTable)
           ..where((tbl) => tbl.id.equals(id)))
@@ -128,6 +197,7 @@ class DriftNoteRepository implements NoteRepository {
         lastSyncedAt: Value(syncedAt.millisecondsSinceEpoch),
         baseContentHash: Value(baseContentHash),
         remoteFileId: Value(remoteFileId),
+        remoteEtag: Value(remoteEtag),
         syncStatus: Value(SyncStatus.synced.name),
       ),
     );
@@ -189,17 +259,18 @@ class DriftNoteRepository implements NoteRepository {
       id: remoteNote.id,
       title: remoteNote.title,
       content: remoteNote.content,
-      documentJson: legacyDocumentFromContent(remoteNote.content),
+      documentJson: remoteNote.documentJson,
       createdAt: remoteNote.createdAt,
       updatedAt: remoteNote.updatedAt,
       deletedAt: remoteNote.deletedAt,
       lastSyncedAt: syncedAt,
       syncStatus: SyncStatus.synced,
       contentHash: remoteNote.contentHash,
-      baseContentHash: remoteNote.contentHash,
+      baseContentHash: remoteNote.baseContentHash ?? remoteNote.contentHash,
       deviceId: remoteNote.deviceId,
       folderPath: remoteNote.folderPath,
       remoteFileId: remoteNote.remoteFileId,
+      remoteEtag: remoteNote.remoteEtag,
     );
 
     final existing = await getById(remoteNote.id);
@@ -258,6 +329,7 @@ class DriftNoteRepository implements NoteRepository {
       deviceId: row.deviceId,
       folderPath: row.folderPath,
       remoteFileId: row.remoteFileId,
+      remoteEtag: row.remoteEtag,
     );
   }
 
@@ -281,7 +353,21 @@ class DriftNoteRepository implements NoteRepository {
       deviceId: Value(note.deviceId),
       folderPath: Value(note.folderPath),
       remoteFileId: Value(note.remoteFileId),
+      remoteEtag: Value(note.remoteEtag),
     );
+  }
+
+  String? _legacyDeletedRemoteFileId(NotesTableData row) {
+    if (row.deletedAt == null) {
+      return null;
+    }
+
+    final expectedLegacyPath = 'notes/${row.id}.json';
+    if (row.remoteFileId != expectedLegacyPath) {
+      return null;
+    }
+
+    return 'tombstones/${row.id}.json';
   }
 
   Expression<bool> _folderFilter($NotesTableTable tbl, String? folderPath) {

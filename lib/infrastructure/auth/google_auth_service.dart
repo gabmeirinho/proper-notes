@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../features/auth/domain/auth_service.dart';
 import '../../features/auth/domain/auth_session.dart';
+import '../../features/auth/domain/sync_account_credentials.dart';
 import 'google_auth_config.dart';
 import 'google_oauth_token_client.dart';
 import 'oauth_session_store.dart';
@@ -55,7 +56,6 @@ class GoogleAuthService implements AuthService {
     throw UnsupportedError('Google auth is not implemented for this platform.');
   }
 
-  @override
   Future<AuthSession> signIn() async {
     if (kIsWeb) {
       throw UnsupportedError('Web is not part of this app target.');
@@ -72,7 +72,6 @@ class GoogleAuthService implements AuthService {
     throw UnsupportedError('Google auth is not implemented for this platform.');
   }
 
-  @override
   Future<void> signOut() async {
     if (!kIsWeb && Platform.isAndroid) {
       try {
@@ -83,6 +82,25 @@ class GoogleAuthService implements AuthService {
     }
 
     await _sessionStore.clear();
+  }
+
+  @override
+  Future<void> testConnection(SyncAccountCredentials credentials) async {
+    throw UnsupportedError(
+      'Google OAuth is no longer the active sync backend for Proper Notes.',
+    );
+  }
+
+  @override
+  Future<AuthSession> saveConnection(SyncAccountCredentials credentials) async {
+    throw UnsupportedError(
+      'Google OAuth is no longer the active sync backend for Proper Notes.',
+    );
+  }
+
+  @override
+  Future<void> clearConnection() {
+    return signOut();
   }
 
   Future<AuthSession?> _restoreDesktopSession() async {

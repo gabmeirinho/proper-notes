@@ -80,6 +80,9 @@ class _FakeNoteRepository implements NoteRepository {
   Future<void> create(Note note) async {}
 
   @override
+  Future<List<Note>> getByIds(Iterable<String> ids) async => const <Note>[];
+
+  @override
   Future<Note?> getById(String id) async => null;
 
   @override
@@ -87,6 +90,13 @@ class _FakeNoteRepository implements NoteRepository {
 
   @override
   Future<List<Note>> getDeletedNotesForSync() async => const <Note>[];
+
+  @override
+  Future<List<Note>> getPendingNotesForSync() async => const <Note>[];
+
+  @override
+  Future<Map<String, String?>> getRemoteEtagsByPath() async =>
+      const <String, String?>{};
 
   @override
   Future<void> markConflict(String id) async {}
@@ -97,6 +107,7 @@ class _FakeNoteRepository implements NoteRepository {
     required DateTime syncedAt,
     required String baseContentHash,
     String? remoteFileId,
+    String? remoteEtag,
   }) async {}
 
   @override
@@ -136,7 +147,10 @@ class _FakeSyncGateway implements SyncGateway {
   Future<List<RemoteNote>> fetchAllNotes() async => const <RemoteNote>[];
 
   @override
-  Future<RemoteSyncBatch> fetchChangesSince(String token) async =>
+  Future<RemoteSyncBatch> fetchChangesSince(
+    String token, {
+    Map<String, String?> knownRemoteEtags = const <String, String?>{},
+  }) async =>
       const RemoteSyncBatch(
           notes: <RemoteNote>[], nextToken: 'token', isFullSnapshot: false);
 
@@ -157,11 +171,11 @@ class _FakeSyncGateway implements SyncGateway {
 
 class _FakeSyncStateRepository implements SyncStateRepository {
   @override
-  Future<String?> getDriveSyncToken() async => null;
+  Future<String?> getRemoteSyncCursor() async => null;
 
   @override
   Future<String> getOrCreateDeviceId() async => 'device-1';
 
   @override
-  Future<void> setDriveSyncToken(String token) async {}
+  Future<void> setRemoteSyncCursor(String token) async {}
 }

@@ -202,7 +202,8 @@ class NoteEditorPageState extends State<NoteEditorPage>
     if (_didAutofocusNewNoteTitle || widget.note != null) {
       return;
     }
-    if (_titleController.text.isNotEmpty || _contentController.text.isNotEmpty) {
+    if (_titleController.text.isNotEmpty ||
+        _contentController.text.isNotEmpty) {
       return;
     }
 
@@ -3062,7 +3063,8 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   Future<void> _deleteSnippet(_FencedCodeSnippet snippet) async {
     final text = widget.controller.text;
     final deletionRange = snippetDeletionRange(text, snippet);
-    final updatedText = text.replaceRange(deletionRange.start, deletionRange.end, '');
+    final updatedText =
+        text.replaceRange(deletionRange.start, deletionRange.end, '');
     final nextOffset = deletionRange.start.clamp(0, updatedText.length);
     final preservedScrollOffset = _editorScrollController.hasClients
         ? _editorScrollController.offset
@@ -3720,8 +3722,8 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                       context: context,
                       style: style,
                     );
-              final snippetOverlays =
-                  effectiveStyle == null || overlayTextSpan == null
+              final snippetOverlays = effectiveStyle == null ||
+                      overlayTextSpan == null
                   ? const <_SnippetOverlayGeometry>[]
                   : _buildSnippetOverlayGeometry(
                       context,
@@ -3733,8 +3735,8 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                           ? _editorScrollController.offset
                           : 0,
                     );
-              final imageOverlays =
-                  effectiveStyle == null || overlayTextSpan == null
+              final imageOverlays = effectiveStyle == null ||
+                      overlayTextSpan == null
                   ? const <_AttachmentImageOverlayGeometry>[]
                   : _buildAttachmentImageOverlayGeometry(
                       context,
@@ -5148,9 +5150,8 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
 
     final targetIndex = index > 0 ? index - 1 : 0;
     final placeAtEnd = index > 0;
-    final preservedScrollOffset = _scrollController.hasClients
-        ? _scrollController.offset
-        : 0.0;
+    final preservedScrollOffset =
+        _scrollController.hasClients ? _scrollController.offset : 0.0;
     removeBlock(index);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {

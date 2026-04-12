@@ -8,7 +8,7 @@ import 'package:proper_notes/infrastructure/database/app_database.dart';
 import 'package:sqlite3/sqlite3.dart' show Database, sqlite3;
 
 void main() {
-  test('migrates a version 1 database file to schema version 3', () async {
+  test('migrates a version 1 database file to schema version 5', () async {
     final tempDirectory = await Directory.systemTemp.createTemp(
       'proper_notes_migration_test_',
     );
@@ -35,7 +35,7 @@ void main() {
       );
       expect(storedNote.deviceId, 'device-1');
       expect(storedNote.folderPath, isNull);
-      expect(appDatabase.schemaVersion, 3);
+      expect(appDatabase.schemaVersion, 5);
 
       final folders = await appDatabase.select(appDatabase.foldersTable).get();
       expect(folders, isEmpty);
@@ -50,7 +50,7 @@ void main() {
     }
   });
 
-  test('migrates a version 2 database file to schema version 3', () async {
+  test('migrates a version 2 database file to schema version 5', () async {
     final tempDirectory = await Directory.systemTemp.createTemp(
       'proper_notes_migration_test_',
     );
@@ -74,7 +74,7 @@ void main() {
         storedNote.documentJson,
         legacyDocumentFromContent('Version 2 content'),
       );
-      expect(appDatabase.schemaVersion, 3);
+      expect(appDatabase.schemaVersion, 5);
     } finally {
       await appDatabase?.close();
       if (databaseFile.existsSync()) {

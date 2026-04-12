@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proper_notes/features/auth/domain/auth_session.dart';
 import 'package:proper_notes/infrastructure/auth/oauth_session_store.dart';
+import 'package:proper_notes/infrastructure/auth/secret_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {

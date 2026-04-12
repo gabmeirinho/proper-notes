@@ -124,7 +124,8 @@ void main() {
     await repository.createFolder('Archive');
     await repository.createFolder('Projects/Proper Notes');
 
-    final result = await repository.renameFolder('Projects', 'Archive/Projects');
+    final result =
+        await repository.renameFolder('Projects', 'Archive/Projects');
     final folders = await repository.watchFolders().first;
     final movedFolder = folders.singleWhere(
       (folder) => folder.path == 'Archive/Projects',

@@ -243,11 +243,21 @@ class _RecordingNoteRepository implements NoteRepository {
   }
 
   @override
+  Future<List<Note>> getByIds(Iterable<String> ids) async =>
+      _activeNotes.where((note) => ids.contains(note.id)).toList();
+
+  @override
   Future<List<Note>> getActiveNotesForSync() async =>
       List<Note>.unmodifiable(_activeNotes);
 
   @override
   Future<List<Note>> getDeletedNotesForSync() async => const <Note>[];
+
+  @override
+  Future<List<Note>> getPendingNotesForSync() async => const <Note>[];
+
+  @override
+  Future<Map<String, String?>> getRemoteEtagsByPath() async => const {};
 
   @override
   Future<void> markConflict(String id) async {}
@@ -258,6 +268,7 @@ class _RecordingNoteRepository implements NoteRepository {
     required DateTime syncedAt,
     required String baseContentHash,
     String? remoteFileId,
+    String? remoteEtag,
   }) async {}
 
   @override

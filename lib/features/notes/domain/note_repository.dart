@@ -8,6 +8,9 @@ abstract interface class NoteRepository {
   Future<int> countAttachmentReferences(String attachmentUri);
   Future<List<Note>> getActiveNotesForSync();
   Future<List<Note>> getDeletedNotesForSync();
+  Future<List<Note>> getPendingNotesForSync();
+  Future<List<Note>> getByIds(Iterable<String> ids);
+  Future<Map<String, String?>> getRemoteEtagsByPath();
   Future<Note?> getById(String id);
   Future<void> create(Note note);
   Future<void> update(Note note);
@@ -18,6 +21,7 @@ abstract interface class NoteRepository {
     required DateTime syncedAt,
     required String baseContentHash,
     String? remoteFileId,
+    String? remoteEtag,
   });
   Future<void> upsertRemoteNote(RemoteNote remoteNote);
   Future<void> markConflict(String id);

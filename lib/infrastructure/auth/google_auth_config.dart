@@ -21,6 +21,5 @@ class GoogleAuthConfig {
 
   bool get hasDesktopClientId => desktopClientId.trim().isNotEmpty;
   bool get hasDesktopClientSecret => desktopClientSecret.trim().isNotEmpty;
-  bool get hasAndroidServerClientId =>
-      androidServerClientId.trim().isNotEmpty;
+  bool get hasAndroidServerClientId => androidServerClientId.trim().isNotEmpty;
 }

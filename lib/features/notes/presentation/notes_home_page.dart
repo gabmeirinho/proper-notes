@@ -937,6 +937,14 @@ class NotesHomePageState extends State<NotesHomePage> {
 
   Future<void> _openEditor(Note note) async {
     if (_workspaceSection == _WorkspaceSection.notes) {
+      final currentNoteId = _desktopEditorSession?.note?.id;
+      if (currentNoteId != null && currentNoteId != note.id) {
+        final savedSuccessfully = await flushPendingEdits();
+        if (!savedSuccessfully || !mounted) {
+          return;
+        }
+      }
+
       setState(() {
         _workspaceSection = _WorkspaceSection.notes;
         _selectedFolderPath = _normalizeFolderPath(note.folderPath);

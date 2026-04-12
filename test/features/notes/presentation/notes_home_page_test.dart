@@ -7,6 +7,7 @@ import 'package:proper_notes/core/utils/attachments.dart';
 import 'package:proper_notes/features/auth/application/auth_controller.dart';
 import 'package:proper_notes/features/auth/domain/auth_service.dart';
 import 'package:proper_notes/features/auth/domain/auth_session.dart';
+import 'package:proper_notes/features/auth/domain/sync_account_credentials.dart';
 import 'package:proper_notes/features/notes/application/create_folder.dart';
 import 'package:proper_notes/features/notes/application/create_note.dart';
 import 'package:proper_notes/features/notes/application/delete_folder.dart';
@@ -836,6 +837,105 @@ void main() {
       bodyField = tester.widget<TextField>(find.byType(TextField).last);
       expect(bodyField.controller!.text, 'Conteúdo com ç e ~ atualizado');
       expect(find.text('Roadmap synced'), findsWidgets);
+    },
+  );
+
+  testWidgets(
+    'desktop note switching flushes the current note before opening another one',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final noteRepository = _FakeNoteRepository(
+        initialActiveNotes: [
+          Note(
+            id: 'note-1',
+            title: 'Roadmap',
+            content: 'Initial content',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 2),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'hash-1',
+            deviceId: 'device-1',
+          ),
+          Note(
+            id: 'note-2',
+            title: 'Ideas',
+            content: 'Second note',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 2),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'hash-2',
+            deviceId: 'device-1',
+          ),
+        ],
+      );
+      final folderRepository = _FakeFolderRepository();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NotesHomePage(
+            createNote: CreateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            createFolder: CreateFolder(repository: folderRepository),
+            deleteFolder: DeleteFolder(repository: folderRepository),
+            renameFolder: RenameFolder(repository: folderRepository),
+            moveNote: MoveNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            updateNote: UpdateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            deleteNote: DeleteNote(repository: noteRepository),
+            restoreNote: RestoreNote(repository: noteRepository),
+            searchNotes: SearchNotes(repository: noteRepository),
+            folderRepository: folderRepository,
+            noteRepository: noteRepository,
+            authController: AuthController(authService: _FakeAuthService()),
+            syncController: SyncController(
+              runManualSync: RunManualSync(
+                noteRepository: noteRepository,
+                syncGateway: _FakeSyncGateway(),
+                syncStateRepository: _FakeSyncStateRepository(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(find.text('Roadmap'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField).last, 'Updated roadmap');
+      await tester.pump(const Duration(milliseconds: 100));
+
+      await tester.tap(find.text('Ideas'));
+      await tester.pumpAndSettle();
+
+      final updatedRoadmap = await noteRepository.getById('note-1');
+      final untouchedIdeas = await noteRepository.getById('note-2');
+
+      expect(updatedRoadmap, isNotNull);
+      expect(updatedRoadmap!.content, 'Updated roadmap');
+      expect(updatedRoadmap.syncStatus, SyncStatus.pendingUpload);
+      expect(untouchedIdeas, isNotNull);
+      expect(untouchedIdeas!.content, 'Second note');
+      expect(untouchedIdeas.syncStatus, SyncStatus.synced);
+
+      final bodyField = tester.widget<TextField>(find.byType(TextField).last);
+      expect(bodyField.controller!.text, 'Second note');
+      expect(noteRepository.updatedNotes.where((note) => note.id == 'note-1'),
+          hasLength(1));
+      expect(noteRepository.updatedNotes.where((note) => note.id == 'note-2'),
+          isEmpty);
     },
   );
 
@@ -2529,11 +2629,15 @@ class _FakeAuthService implements AuthService {
   Future<AuthSession?> restoreSession() async => null;
 
   @override
-  Future<AuthSession> signIn() async =>
+  Future<void> testConnection(SyncAccountCredentials credentials) async {}
+
+  @override
+  Future<AuthSession> saveConnection(
+          SyncAccountCredentials credentials) async =>
       const AuthSession(email: 'test@example.com', displayName: 'Test');
 
   @override
-  Future<void> signOut() async {}
+  Future<void> clearConnection() async {}
 }
 
 class _SignedInFakeAuthService implements AuthService {
@@ -2542,11 +2646,15 @@ class _SignedInFakeAuthService implements AuthService {
       const AuthSession(email: 'test@example.com', displayName: 'Test');
 
   @override
-  Future<AuthSession> signIn() async =>
+  Future<void> testConnection(SyncAccountCredentials credentials) async {}
+
+  @override
+  Future<AuthSession> saveConnection(
+          SyncAccountCredentials credentials) async =>
       const AuthSession(email: 'test@example.com', displayName: 'Test');
 
   @override
-  Future<void> signOut() async {}
+  Future<void> clearConnection() async {}
 }
 
 class _FakeFolderRepository implements FolderRepository {
@@ -2675,13 +2783,35 @@ class _FakeNoteRepository implements NoteRepository {
   Future<void> create(Note note) async {}
 
   @override
-  Future<Note?> getById(String id) async => null;
+  Future<List<Note>> getByIds(Iterable<String> ids) async {
+    final idSet = ids.toSet();
+    return [..._activeNotes, ..._deletedNotes]
+        .where((note) => idSet.contains(note.id))
+        .toList(growable: false);
+  }
+
+  @override
+  Future<Note?> getById(String id) async {
+    for (final note in [..._activeNotes, ..._deletedNotes]) {
+      if (note.id == id) {
+        return note;
+      }
+    }
+    return null;
+  }
 
   @override
   Future<List<Note>> getActiveNotesForSync() async => const <Note>[];
 
   @override
   Future<List<Note>> getDeletedNotesForSync() async => const <Note>[];
+
+  @override
+  Future<List<Note>> getPendingNotesForSync() async => const <Note>[];
+
+  @override
+  Future<Map<String, String?>> getRemoteEtagsByPath() async =>
+      const <String, String?>{};
 
   @override
   Future<void> markConflict(String id) async {}
@@ -2692,6 +2822,7 @@ class _FakeNoteRepository implements NoteRepository {
     required DateTime syncedAt,
     required String baseContentHash,
     String? remoteFileId,
+    String? remoteEtag,
   }) async {}
 
   @override
@@ -2783,7 +2914,10 @@ class _FakeSyncGateway implements SyncGateway {
   Future<List<RemoteNote>> fetchAllNotes() async => const <RemoteNote>[];
 
   @override
-  Future<RemoteSyncBatch> fetchChangesSince(String token) async =>
+  Future<RemoteSyncBatch> fetchChangesSince(
+    String token, {
+    Map<String, String?> knownRemoteEtags = const <String, String?>{},
+  }) async =>
       const RemoteSyncBatch(
         notes: <RemoteNote>[],
         nextToken: 'token',
@@ -2813,11 +2947,11 @@ class _FakeSyncGateway implements SyncGateway {
 
 class _FakeSyncStateRepository implements SyncStateRepository {
   @override
-  Future<String?> getDriveSyncToken() async => null;
+  Future<String?> getRemoteSyncCursor() async => null;
 
   @override
   Future<String> getOrCreateDeviceId() async => 'device-1';
 
   @override
-  Future<void> setDriveSyncToken(String token) async {}
+  Future<void> setRemoteSyncCursor(String token) async {}
 }

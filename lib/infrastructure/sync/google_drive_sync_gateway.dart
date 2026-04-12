@@ -7,6 +7,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/utils/attachments.dart';
+import '../../core/utils/note_document.dart';
 import '../../features/notes/domain/note.dart';
 import '../../features/sync/domain/remote_note.dart';
 import '../../features/sync/domain/sync_gateway.dart';
@@ -53,7 +54,10 @@ class GoogleDriveSyncGateway implements SyncGateway {
   }
 
   @override
-  Future<RemoteSyncBatch> fetchChangesSince(String token) async {
+  Future<RemoteSyncBatch> fetchChangesSince(
+    String token, {
+    Map<String, String?> knownRemoteEtags = const <String, String?>{},
+  }) async {
     final authHeaders = await _getAuthHeaders();
     String pageToken = token;
     final notesById = <String, RemoteNote>{};
@@ -237,6 +241,9 @@ class GoogleDriveSyncGateway implements SyncGateway {
       id: note.id,
       title: note.title,
       content: note.content,
+      documentJson: note.documentJson.isEmpty
+          ? legacyDocumentFromContent(note.content)
+          : note.documentJson,
       createdAt: note.createdAt,
       updatedAt: note.updatedAt,
       deletedAt: note.deletedAt,
@@ -575,6 +582,8 @@ class GoogleDriveSyncGateway implements SyncGateway {
       id: jsonPayload['id'] as String,
       title: jsonPayload['title'] as String? ?? '',
       content: jsonPayload['content'] as String? ?? '',
+      documentJson:
+          legacyDocumentFromContent(jsonPayload['content'] as String? ?? ''),
       createdAt: DateTime.fromMillisecondsSinceEpoch(
         jsonPayload['created_at'] as int,
         isUtc: true,

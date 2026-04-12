@@ -316,8 +316,7 @@ void main() {
     expect(find.text('Code snippet copied'), findsOneWidget);
   });
 
-  testWidgets('delete code button removes the fenced snippet',
-      (tester) async {
+  testWidgets('delete code button removes the fenced snippet', (tester) async {
     final repository = _StubNoteRepository();
 
     await tester
@@ -2155,6 +2154,9 @@ class _StubNoteRepository implements NoteRepository {
   Future<void> create(Note note) async {}
 
   @override
+  Future<List<Note>> getByIds(Iterable<String> ids) async => const <Note>[];
+
+  @override
   Future<Note?> getById(String id) async => null;
 
   @override
@@ -2162,6 +2164,12 @@ class _StubNoteRepository implements NoteRepository {
 
   @override
   Future<List<Note>> getDeletedNotesForSync() async => const <Note>[];
+
+  @override
+  Future<List<Note>> getPendingNotesForSync() async => const <Note>[];
+
+  @override
+  Future<Map<String, String?>> getRemoteEtagsByPath() async => const {};
 
   @override
   Future<void> markConflict(String id) async {}
@@ -2172,6 +2180,7 @@ class _StubNoteRepository implements NoteRepository {
     required DateTime syncedAt,
     required String baseContentHash,
     String? remoteFileId,
+    String? remoteEtag,
   }) async {}
 
   @override

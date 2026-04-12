@@ -215,6 +215,34 @@ void main() {
     expect(stored?.folderPath, 'Projects/Proper Notes');
   });
 
+  test('getRemoteEtagsByPath repairs deleted notes to use tombstone paths',
+      () async {
+    final note = _buildNote(
+      id: 'deleted-note',
+      title: 'Deleted',
+      content: 'Body',
+      updatedAt: DateTime.utc(2026, 3, 24, 10),
+    ).copyWith(
+      deletedAt: DateTime.utc(2026, 3, 24, 11),
+      syncStatus: SyncStatus.synced,
+      remoteFileId: 'notes/deleted-note.json',
+      remoteEtag: '"old-note-etag"',
+    );
+
+    await repository.create(note);
+
+    final etags = await repository.getRemoteEtagsByPath();
+    final stored = await repository.getById(note.id);
+
+    expect(
+      etags,
+      containsPair('tombstones/deleted-note.json', isNull),
+    );
+    expect(stored, isNotNull);
+    expect(stored!.remoteFileId, 'tombstones/deleted-note.json');
+    expect(stored.remoteEtag, isNull);
+  });
+
   test(
       'countAttachmentReferences counts matches across active and deleted notes',
       () async {
@@ -243,6 +271,39 @@ void main() {
         await repository.countAttachmentReferences('attachment://figure.png');
 
     expect(count, 3);
+  });
+
+  test('getPendingNotesForSync only returns pending upload or delete notes',
+      () async {
+    final synced = _buildNote(
+      id: 'synced',
+      title: 'Synced',
+      content: 'content',
+      updatedAt: DateTime.utc(2026, 3, 24, 10),
+    ).copyWith(syncStatus: SyncStatus.synced);
+    final pendingUpload = _buildNote(
+      id: 'pending-upload',
+      title: 'Pending upload',
+      content: 'content',
+      updatedAt: DateTime.utc(2026, 3, 24, 11),
+    );
+    final pendingDelete = _buildNote(
+      id: 'pending-delete',
+      title: 'Pending delete',
+      content: 'content',
+      updatedAt: DateTime.utc(2026, 3, 24, 12),
+    ).copyWith(syncStatus: SyncStatus.pendingDelete);
+
+    await repository.create(synced);
+    await repository.create(pendingUpload);
+    await repository.create(pendingDelete);
+
+    final pending = await repository.getPendingNotesForSync();
+
+    expect(
+      pending.map((note) => note.id).toSet(),
+      {'pending-upload', 'pending-delete'},
+    );
   });
 }
 

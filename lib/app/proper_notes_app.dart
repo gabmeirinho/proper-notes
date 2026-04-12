@@ -23,14 +23,12 @@ import '../features/notes/presentation/notes_home_page.dart';
 import '../features/sync/application/auto_sync_coordinator.dart';
 import '../features/sync/application/run_manual_sync.dart';
 import '../features/sync/application/sync_controller.dart';
-import '../infrastructure/auth/google_auth_config.dart';
-import '../infrastructure/auth/google_auth_service.dart';
-import '../infrastructure/auth/google_oauth_token_client.dart';
-import '../infrastructure/auth/oauth_session_store.dart';
+import '../infrastructure/auth/webdav_account_store.dart';
+import '../infrastructure/auth/webdav_auth_service.dart';
 import '../infrastructure/database/app_database.dart';
 import '../infrastructure/repositories/drift_folder_repository.dart';
 import '../infrastructure/repositories/drift_sync_state_repository.dart';
-import '../infrastructure/sync/google_drive_sync_gateway.dart';
+import '../infrastructure/sync/webdav_sync_gateway.dart';
 
 class ProperNotesApp extends StatefulWidget {
   const ProperNotesApp({
@@ -51,9 +49,7 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
   late final AuthController _authController;
   late final SyncController _syncController;
   late final AutoSyncCoordinator _autoSyncCoordinator;
-  late final GoogleAuthConfig _googleAuthConfig;
-  late final SharedPreferencesOAuthSessionStore _sessionStore;
-  late final GoogleOAuthTokenClient _tokenClient;
+  late final WebDavAccountStore _accountStore;
   late final DriftSyncStateRepository _syncStateRepository;
   late final FolderRepository _folderRepository;
   late final AppLifecycleListener _appLifecycleListener;
@@ -66,26 +62,16 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
   @override
   void initState() {
     super.initState();
-    _googleAuthConfig = GoogleAuthConfig.fromEnvironment();
-    _sessionStore = SharedPreferencesOAuthSessionStore();
-    _tokenClient = GoogleOAuthTokenClient();
+    _accountStore = WebDavAccountStore();
     _syncStateRepository = DriftSyncStateRepository(widget.database);
     _folderRepository = DriftFolderRepository(widget.database);
     _authController = AuthController(
-      authService: GoogleAuthService(
-        config: _googleAuthConfig,
-        sessionStore: _sessionStore,
-        tokenClient: _tokenClient,
-      ),
+      authService: WebDavAuthService(accountStore: _accountStore),
     );
     _syncController = SyncController(
       runManualSync: RunManualSync(
         noteRepository: widget.noteRepository,
-        syncGateway: GoogleDriveSyncGateway(
-          config: _googleAuthConfig,
-          sessionStore: _sessionStore,
-          tokenClient: _tokenClient,
-        ),
+        syncGateway: WebDavSyncGateway(accountStore: _accountStore),
         syncStateRepository: _syncStateRepository,
       ),
     );

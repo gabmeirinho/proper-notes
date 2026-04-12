@@ -24,6 +24,7 @@ class NotesTable extends Table {
   TextColumn get deviceId => text()();
   TextColumn get folderPath => text().nullable()();
   TextColumn get remoteFileId => text().nullable()();
+  TextColumn get remoteEtag => text().nullable()();
 
   @override
   Set<Column<Object>> get primaryKey => {id};
@@ -43,6 +44,12 @@ class AppMetadataTable extends Table {
   TextColumn get deviceId => text()();
   TextColumn get accountEmail => text().nullable()();
   TextColumn get driveSyncToken => text().nullable()();
+  TextColumn get accountLabel => text().nullable()();
+  TextColumn get remoteBaseUrl => text().nullable()();
+  TextColumn get remoteUsername => text().nullable()();
+  TextColumn get remoteSyncCursor => text().nullable()();
+  TextColumn get remoteCollectionTag => text().nullable()();
+  IntColumn get remoteFormatVersion => integer().nullable()();
   IntColumn get lastFullSyncAt => integer().nullable()();
   IntColumn get lastSuccessfulSyncAt => integer().nullable()();
 
@@ -62,7 +69,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -85,6 +92,23 @@ class AppDatabase extends _$AppDatabase {
                 ),
               );
             }
+          }
+          if (from < 4) {
+            await migrator.addColumn(
+                appMetadataTable, appMetadataTable.accountLabel);
+            await migrator.addColumn(
+                appMetadataTable, appMetadataTable.remoteBaseUrl);
+            await migrator.addColumn(
+                appMetadataTable, appMetadataTable.remoteUsername);
+            await migrator.addColumn(
+                appMetadataTable, appMetadataTable.remoteSyncCursor);
+            await migrator.addColumn(
+                appMetadataTable, appMetadataTable.remoteCollectionTag);
+            await migrator.addColumn(
+                appMetadataTable, appMetadataTable.remoteFormatVersion);
+          }
+          if (from < 5) {
+            await migrator.addColumn(notesTable, notesTable.remoteEtag);
           }
         },
       );
