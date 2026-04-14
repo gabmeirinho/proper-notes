@@ -2110,6 +2110,10 @@ void main() {
       tester.widget<TextField>(_bodyField()).controller?.text,
       '- [x] Done task\nNext line',
     );
+    expect(
+      tester.widget<TextField>(_bodyField()).controller?.selection.baseOffset,
+      '- [x] Done task\nNext line'.length,
+    );
   });
 }
 

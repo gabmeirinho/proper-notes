@@ -3274,6 +3274,11 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   }
 
   void _toggleTaskCheckboxAt(int checkedCharacterOffset) {
+    _suppressNextEditorTap = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _suppressNextEditorTap = false;
+    });
+
     final text = widget.controller.text;
     if (checkedCharacterOffset < 0 || checkedCharacterOffset >= text.length) {
       return;
