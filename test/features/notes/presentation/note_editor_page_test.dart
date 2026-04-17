@@ -210,7 +210,10 @@ void main() {
     expect((openingSpans.single as TextSpan).style?.color,
         isNot(Colors.transparent));
 
-    expect((bodySpans.single as TextSpan).text, 'final value = 42;');
+    expect(
+      (bodySpans.single as TextSpan).text,
+      codeEditorDisplayText('final value = 42;'),
+    );
     expect((bodySpans.single as TextSpan).style?.fontFamily, 'JetBrainsMono');
 
     expect((closingSpans.single as TextSpan).text, '```');
@@ -238,6 +241,61 @@ void main() {
     expect((spans[0] as TextSpan).text, '- [x] ');
     expect((spans[0] as TextSpan).style?.color, Colors.transparent);
     expect((spans[1] as TextSpan).text, 'Done task');
+  });
+
+  test('code editor display text preserves visible spaces', () {
+    expect(
+      codeEditorDisplayText('  final value = 42;'),
+      '\u00A0\u00A0final\u00A0value\u00A0=\u00A042;',
+    );
+  });
+
+  testWidgets(
+      'typing a trailing space in an active code block advances the caret',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const content = '```dart\nab\n```';
+    final note = Note(
+      id: 'note-code-space-caret',
+      title: 'Code caret',
+      content: content,
+      documentJson: documentJsonFromEditableText(content),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    await tester.tap(_bodyField());
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    final controller = bodyField.controller!;
+    final codeLineEndOffset = content.indexOf('\n```');
+    controller.selection = TextSelection.collapsed(offset: codeLineEndOffset);
+    await tester.pumpAndSettle();
+
+    final editableState =
+        tester.state<EditableTextState>(find.byType(EditableText).last);
+    final beforeCaretRect = editableState.renderEditable.getLocalRectForCaret(
+      TextPosition(offset: codeLineEndOffset),
+    );
+
+    controller.value = TextEditingValue(
+      text: content.replaceRange(codeLineEndOffset, codeLineEndOffset, ' '),
+      selection: TextSelection.collapsed(offset: codeLineEndOffset + 1),
+    );
+    await tester.pumpAndSettle();
+
+    final afterCaretRect = editableState.renderEditable.getLocalRectForCaret(
+      TextPosition(offset: codeLineEndOffset + 1),
+    );
+
+    expect(afterCaretRect.left, greaterThan(beforeCaretRect.left));
   });
 
   testWidgets('inline checklist span preserves raw markdown length',
@@ -2113,6 +2171,39 @@ void main() {
     expect(
       tester.widget<TextField>(_bodyField()).controller?.selection.baseOffset,
       '- [x] Done task\nNext line'.length,
+    );
+  });
+
+  testWidgets('active checklist line keeps the checkbox rendered while editing',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    final note = Note(
+      id: 'note-active-checklist',
+      title: 'Checklist note',
+      content: '- [ ] Done task\nNext line',
+      documentJson: paragraphDocumentFromEditableText(
+        '- [ ] Done task\nNext line',
+      ),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    await tester.tap(_bodyField());
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    bodyField.controller!.selection = const TextSelection.collapsed(offset: 4);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('task-checkbox-overlay-0')),
+      findsOneWidget,
     );
   });
 }

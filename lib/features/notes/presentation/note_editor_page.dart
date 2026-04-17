@@ -2161,12 +2161,22 @@ class _MarkdownEditingController extends TextEditingController {
           isCodeSnippetOpeningTag ||
           isCodeSnippetClosingTag) {
         return TextSpan(
-          text: line,
+          text: codeEditorDisplayText(line),
           style: _codeSnippetTextStyle(
             baseStyle,
             colorScheme: Theme.of(context).colorScheme,
           ),
         );
+      }
+      final activeTaskListSpan = _buildActiveTaskListLineSpan(
+        line,
+        baseStyle: baseStyle,
+        colorScheme: Theme.of(context).colorScheme,
+        lineIndex: lineIndex,
+        lineStartOffset: lineStartOffset,
+      );
+      if (activeTaskListSpan != null) {
+        return activeTaskListSpan;
       }
       final activeHeadingSpan = _buildActiveHeadingLineSpan(
         line,
@@ -2222,7 +2232,7 @@ class _MarkdownEditingController extends TextEditingController {
           isCodeSnippetOpeningTag ||
           isCodeSnippetClosingTag) {
         return TextSpan(
-          text: line,
+          text: codeEditorDisplayText(line),
           style: _codeSnippetTextStyle(
             baseStyle,
             colorScheme: Theme.of(context).colorScheme,
@@ -2258,6 +2268,38 @@ class _MarkdownEditingController extends TextEditingController {
           baseStyle: baseStyle,
         ),
       ),
+    );
+  }
+
+  InlineSpan? _buildActiveTaskListLineSpan(
+    String line, {
+    required TextStyle baseStyle,
+    required ColorScheme colorScheme,
+    required int lineIndex,
+    required int lineStartOffset,
+  }) {
+    final taskMatch = _parseTaskListLine(line);
+    if (taskMatch == null || onToggleTaskCheckbox == null) {
+      return null;
+    }
+
+    return TextSpan(
+      children: [
+        if (taskMatch.indent.isNotEmpty)
+          TextSpan(text: taskMatch.indent, style: baseStyle),
+        _buildTaskCheckboxSpan(
+          taskMatch: taskMatch,
+          baseStyle: baseStyle,
+          lineIndex: lineIndex,
+          checkedCharacterOffset:
+              lineStartOffset + taskMatch.checkedCharacterIndex,
+        ),
+        if (taskMatch.content.isNotEmpty)
+          TextSpan(
+            text: taskMatch.content,
+            style: baseStyle.copyWith(color: colorScheme.onSurface),
+          ),
+      ],
     );
   }
 
@@ -2576,9 +2618,12 @@ List<InlineSpan> _buildInactiveCodeSnippetLineSpans(
 
   if (isCodeSnippetOpeningTag) {
     return [
-      if (indent.isNotEmpty) TextSpan(text: indent, style: codeStyle),
+      if (indent.isNotEmpty)
+        TextSpan(text: codeEditorDisplayText(indent), style: codeStyle),
       TextSpan(
-        text: codeSnippetLanguage.isEmpty ? '```' : '```$codeSnippetLanguage',
+        text: codeEditorDisplayText(
+          codeSnippetLanguage.isEmpty ? '```' : '```$codeSnippetLanguage',
+        ),
         style: fenceStyle,
       ),
     ];
@@ -2586,14 +2631,16 @@ List<InlineSpan> _buildInactiveCodeSnippetLineSpans(
 
   if (isCodeSnippetClosingTag) {
     return [
-      if (indent.isNotEmpty) TextSpan(text: indent, style: codeStyle),
+      if (indent.isNotEmpty)
+        TextSpan(text: codeEditorDisplayText(indent), style: codeStyle),
       TextSpan(text: '```', style: fenceStyle),
     ];
   }
 
   return [
-    if (indent.isNotEmpty) TextSpan(text: indent, style: codeStyle),
-    TextSpan(text: trimmedLeft, style: codeStyle),
+    if (indent.isNotEmpty)
+      TextSpan(text: codeEditorDisplayText(indent), style: codeStyle),
+    TextSpan(text: codeEditorDisplayText(trimmedLeft), style: codeStyle),
   ];
 }
 
@@ -2799,6 +2846,27 @@ _TaskListLineMatch? _parseTaskListLine(String line) {
     checkedCharacterIndex: match.group(1)!.length + 3,
   );
 }
+
+class _CodeEditingController extends TextEditingController {
+  _CodeEditingController({super.text});
+
+  @override
+  TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    // Keep typed indentation visible while preserving real spaces in storage.
+    final displayText = codeEditorDisplayText(text);
+    return TextSpan(
+      style: style ?? DefaultTextStyle.of(context).style,
+      text: displayText,
+    );
+  }
+}
+
+@visibleForTesting
+String codeEditorDisplayText(String text) => text.replaceAll(' ', '\u00A0');
 
 class _CodeSnippetSelection {
   const _CodeSnippetSelection({
@@ -4880,7 +4948,7 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
 
     final insertIndex = activeIndex == -1 ? 0 : activeIndex + 1;
     final block = _DocumentEditorBlock(
-      controller: TextEditingController(),
+      controller: _CodeEditingController(),
       languageController: TextEditingController(),
       focusNode: FocusNode(),
       isCode: true,
@@ -5092,7 +5160,7 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
 
     final existing = _blocks[index];
     final replacement = _DocumentEditorBlock(
-      controller: TextEditingController(
+      controller: _CodeEditingController(
           text: clearText ? '' : existing.controller.text),
       languageController: TextEditingController(),
       focusNode: FocusNode(),
@@ -5622,7 +5690,7 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
           isCode: false,
         ),
       _DocumentEditorBlock(
-        controller: TextEditingController(),
+        controller: _CodeEditingController(),
         languageController: TextEditingController(),
         focusNode: FocusNode(),
         isCode: true,
@@ -5943,7 +6011,7 @@ class _DocumentEditorBlock {
           isCode: false,
         ),
       CodeBlock(:final language, :final code) => _DocumentEditorBlock(
-          controller: TextEditingController(text: code),
+          controller: _CodeEditingController(text: code),
           languageController: TextEditingController(text: language),
           focusNode: focusNode,
           isCode: true,
@@ -6169,6 +6237,12 @@ class _CodeEditorBlockCard extends StatelessWidget {
                     controller: block.controller,
                     focusNode: focusNode,
                     onTap: onTap,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    smartDashesType: SmartDashesType.disabled,
+                    smartQuotesType: SmartQuotesType.disabled,
+                    spellCheckConfiguration:
+                        const SpellCheckConfiguration.disabled(),
                     decoration: const InputDecoration(
                       border: InputBorder.none,
                       isDense: true,
