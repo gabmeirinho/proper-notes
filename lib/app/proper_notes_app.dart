@@ -252,28 +252,36 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
   }
 
   ThemeData _buildLightTheme() {
-    const background = Color(0xFFFFFFFF);
-    const surface = Color(0xFFFFFFFF);
-    const primary = Color(0xFF161616);
-    const secondary = Color(0xFF6E6A64);
+    const background = Color(0xFFF6F7F4);
+    const surface = Color(0xFFFEFEFC);
+    const primary = Color(0xFF2F6657);
+    const onSurface = Color(0xFF1D2320);
+    const secondary = Color(0xFF746B55);
     final scheme = const ColorScheme.light(
       primary: primary,
       onPrimary: Colors.white,
       secondary: secondary,
       onSecondary: Colors.white,
       surface: surface,
-      onSurface: primary,
+      onSurface: onSurface,
       error: Color(0xFFB3261E),
       onError: Colors.white,
     ).copyWith(
-      surfaceContainerLowest: const Color(0xFFFBFAF8),
-      surfaceContainerLow: const Color(0xFFF3F0EB),
-      surfaceContainerHighest: const Color(0xFFEAE5DE),
-      outlineVariant: const Color(0xFFD9D2C9),
-      secondaryContainer: const Color(0xFFEAE6DF),
-      onSecondaryContainer: primary,
-      primaryContainer: const Color(0xFFEAE6DF),
-      onPrimaryContainer: primary,
+      surfaceContainerLowest: const Color(0xFFF1F3EF),
+      surfaceContainerLow: const Color(0xFFEAEDE8),
+      surfaceContainer: const Color(0xFFE4E8E1),
+      surfaceContainerHigh: const Color(0xFFDDE3DB),
+      surfaceContainerHighest: const Color(0xFFD5DDD3),
+      outline: const Color(0xFF8D998F),
+      outlineVariant: const Color(0xFFC9D1C8),
+      secondaryContainer: const Color(0xFFE8DFC9),
+      onSecondaryContainer: const Color(0xFF2A261C),
+      primaryContainer: const Color(0xFFD6EADF),
+      onPrimaryContainer: const Color(0xFF10291F),
+      tertiary: const Color(0xFF9C5A2E),
+      tertiaryContainer: const Color(0xFFFFDCC3),
+      onTertiaryContainer: const Color(0xFF321303),
+      onSurfaceVariant: const Color(0xFF58625A),
     );
 
     return ThemeData(
@@ -295,53 +303,77 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
         ),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: surface,
-        foregroundColor: primary,
+        backgroundColor: primary,
+        foregroundColor: Colors.white,
         extendedTextStyle: const TextStyle(
           fontWeight: FontWeight.w700,
-          fontSize: 22,
-          color: primary,
+          fontSize: 16,
+          color: Colors.white,
         ),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(28),
+          borderRadius: BorderRadius.circular(18),
         ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          foregroundColor: onSurface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+      ),
+      listTileTheme: const ListTileThemeData(
+        iconColor: Color(0xFF58625A),
+        selectedColor: onSurface,
+        selectedTileColor: Color(0xFFDCE8E0),
       ),
       bottomSheetTheme: const BottomSheetThemeData(
         backgroundColor: background,
         showDragHandle: true,
       ),
-      dividerColor: const Color(0xFFD9D2C9),
+      dividerColor: const Color(0xFFC9D1C8),
       textTheme: Typography.blackMountainView.copyWith(
         headlineSmall: const TextStyle(
           fontSize: 26,
           fontWeight: FontWeight.w700,
-          letterSpacing: -0.8,
-          color: primary,
+          letterSpacing: 0,
+          color: onSurface,
         ),
         titleLarge: const TextStyle(
           fontSize: 24,
           fontWeight: FontWeight.w700,
-          letterSpacing: -0.6,
-          color: primary,
+          letterSpacing: 0,
+          color: onSurface,
         ),
         titleMedium: const TextStyle(
-          fontSize: 20,
+          fontSize: 18,
           fontWeight: FontWeight.w700,
-          color: primary,
+          letterSpacing: 0,
+          color: onSurface,
         ),
         bodyLarge: const TextStyle(
-          fontSize: 18,
-          height: 1.45,
-          color: primary,
+          fontSize: 17,
+          height: 1.5,
+          letterSpacing: 0,
+          color: onSurface,
         ),
         bodyMedium: const TextStyle(
           fontSize: 16,
           height: 1.4,
-          color: primary,
+          letterSpacing: 0,
+          color: onSurface,
         ),
         bodySmall: const TextStyle(
           fontSize: 14,
           height: 1.35,
+          letterSpacing: 0,
           color: secondary,
         ),
       ),
@@ -349,36 +381,38 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
   }
 
   ThemeData _buildDarkTheme() {
-    const background = Color(0xFF11100F);
-    const surface = Color(0xFF1A1917);
-    const primary = Color(0xFFF5F1EA);
-    const secondary = Color(0xFFC8BFB4);
+    const background = Color(0xFF111412);
+    const surface = Color(0xFF171B18);
+    const primary = Color(0xFF8ECDB7);
+    const onSurface = Color(0xFFE8EEE9);
+    const secondary = Color(0xFFC9BE91);
     final scheme = const ColorScheme.dark(
       primary: primary,
-      onPrimary: Color(0xFF1A1917),
+      onPrimary: Color(0xFF0A231A),
       secondary: secondary,
-      onSecondary: Color(0xFF24211F),
+      onSecondary: Color(0xFF2D260D),
       surface: surface,
-      onSurface: primary,
+      onSurface: onSurface,
       error: Color(0xFFFFB4AB),
       onError: Color(0xFF690005),
       errorContainer: Color(0xFF93000A),
       onErrorContainer: Color(0xFFFFDAD6),
-      tertiaryContainer: Color(0xFF5E4F18),
-      onTertiaryContainer: Color(0xFFF7E4A4),
+      tertiary: Color(0xFFE6A06A),
+      tertiaryContainer: Color(0xFF5F3216),
+      onTertiaryContainer: Color(0xFFFFDCC3),
     ).copyWith(
-      surfaceContainerLowest: const Color(0xFF0C0B0A),
-      surfaceContainerLow: const Color(0xFF171614),
-      surfaceContainer: const Color(0xFF1F1D1B),
-      surfaceContainerHigh: const Color(0xFF292724),
-      surfaceContainerHighest: const Color(0xFF35312D),
-      outline: const Color(0xFF9E968C),
-      outlineVariant: const Color(0xFF4D4741),
-      secondaryContainer: const Color(0xFF3B342D),
-      onSecondaryContainer: const Color(0xFFE9DED2),
-      primaryContainer: const Color(0xFF403A33),
-      onPrimaryContainer: primary,
-      onSurfaceVariant: const Color(0xFFD1C7BB),
+      surfaceContainerLowest: const Color(0xFF0B0E0C),
+      surfaceContainerLow: const Color(0xFF121713),
+      surfaceContainer: const Color(0xFF1D241F),
+      surfaceContainerHigh: const Color(0xFF26302A),
+      surfaceContainerHighest: const Color(0xFF303B34),
+      outline: const Color(0xFF8F9C92),
+      outlineVariant: const Color(0xFF3D4840),
+      secondaryContainer: const Color(0xFF3B3420),
+      onSecondaryContainer: const Color(0xFFEDE4C2),
+      primaryContainer: const Color(0xFF1C3C30),
+      onPrimaryContainer: const Color(0xFFD8F5E9),
+      onSurfaceVariant: const Color(0xFFBAC6BD),
     );
 
     return ThemeData(
@@ -401,53 +435,77 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
         ),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: surface,
-        foregroundColor: primary,
+        backgroundColor: primary,
+        foregroundColor: const Color(0xFF0A231A),
         extendedTextStyle: const TextStyle(
           fontWeight: FontWeight.w700,
-          fontSize: 22,
-          color: primary,
+          fontSize: 16,
+          color: Color(0xFF0A231A),
         ),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(28),
+          borderRadius: BorderRadius.circular(18),
         ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          foregroundColor: onSurface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: const Color(0xFF1D241F),
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+      ),
+      listTileTheme: const ListTileThemeData(
+        iconColor: Color(0xFFBAC6BD),
+        selectedColor: onSurface,
+        selectedTileColor: Color(0xFF1C3C30),
       ),
       bottomSheetTheme: const BottomSheetThemeData(
         backgroundColor: background,
         showDragHandle: true,
       ),
-      dividerColor: const Color(0xFF4D4741),
+      dividerColor: const Color(0xFF3D4840),
       textTheme: Typography.whiteMountainView.copyWith(
         headlineSmall: const TextStyle(
           fontSize: 26,
           fontWeight: FontWeight.w700,
-          letterSpacing: -0.8,
-          color: primary,
+          letterSpacing: 0,
+          color: onSurface,
         ),
         titleLarge: const TextStyle(
           fontSize: 24,
           fontWeight: FontWeight.w700,
-          letterSpacing: -0.6,
-          color: primary,
+          letterSpacing: 0,
+          color: onSurface,
         ),
         titleMedium: const TextStyle(
-          fontSize: 20,
+          fontSize: 18,
           fontWeight: FontWeight.w700,
-          color: primary,
+          letterSpacing: 0,
+          color: onSurface,
         ),
         bodyLarge: const TextStyle(
-          fontSize: 18,
-          height: 1.45,
-          color: primary,
+          fontSize: 17,
+          height: 1.5,
+          letterSpacing: 0,
+          color: onSurface,
         ),
         bodyMedium: const TextStyle(
           fontSize: 16,
           height: 1.4,
-          color: primary,
+          letterSpacing: 0,
+          color: onSurface,
         ),
         bodySmall: const TextStyle(
           fontSize: 14,
           height: 1.35,
+          letterSpacing: 0,
           color: secondary,
         ),
       ),

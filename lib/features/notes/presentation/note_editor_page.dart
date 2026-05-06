@@ -1328,7 +1328,7 @@ class _NoteEditorContent extends StatelessWidget {
         Theme.of(context).textTheme.headlineSmall?.copyWith(
               fontSize: 26.0 * mobileTextScale,
               fontWeight: FontWeight.w800,
-              letterSpacing: -1.0,
+              letterSpacing: 0,
               height: 1.02,
             );
 
@@ -1358,6 +1358,7 @@ class _NoteEditorContent extends StatelessWidget {
           style: isDesktopEmbedded
               ? Theme.of(context).textTheme.headlineMedium?.copyWith(
                     fontWeight: FontWeight.w700,
+                    letterSpacing: 0,
                   )
               : isMobile
                   ? mobileTitleStyle

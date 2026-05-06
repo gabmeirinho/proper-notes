@@ -84,7 +84,7 @@ class NotesHomePage extends StatefulWidget {
 
 class NotesHomePageState extends State<NotesHomePage> {
   static const double _desktopBreakpoint = 900;
-  static const double _desktopSidebarWidth = 320;
+  static const double _desktopSidebarWidth = 336;
   static const Duration _timedSnackBarDuration = Duration(seconds: 4);
   static const double _mobileMinTextScale = 0.8;
   static const double _mobileMaxTextScale = 1.2;
@@ -461,12 +461,15 @@ class NotesHomePageState extends State<NotesHomePage> {
   }
 
   Widget _buildDesktopTopBar() {
-    return Padding(
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
       key: const ValueKey('desktop-top-bar'),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      color: colorScheme.surfaceContainerLowest,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
       child: Row(
         children: [
           _MobileChromeSurface(
+            padding: const EdgeInsets.all(3),
             child: IconButton(
               onPressed: _toggleDesktopSidebar,
               tooltip: _isDesktopSidebarCollapsed
@@ -482,7 +485,7 @@ class NotesHomePageState extends State<NotesHomePage> {
           ),
           const Spacer(),
           _MobileChromeSurface(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -2040,43 +2043,51 @@ class NotesHomePageState extends State<NotesHomePage> {
       MediaQuery.sizeOf(context).width >= _desktopBreakpoint;
 
   Widget _buildDesktopWorkspace() {
-    return Row(
-      key: const ValueKey('desktop-workspace'),
-      children: [
-        if (!_isDesktopSidebarCollapsed) ...[
-          SizedBox(
-            width: _desktopSidebarWidth,
-            child: _DesktopSidebarTree(
-              foldersStream: widget.folderRepository.watchFolders(),
-              notesStream: widget.noteRepository.watchActiveNotes(),
-              selectedFolderPath: _selectedFolderPath,
-              selectedNoteId: _desktopEditorSession?.note?.id,
-              selectedSection: _workspaceSection,
-              expandedFolderPaths: _expandedFolderPaths,
-              onSelectFolder: _selectFolder,
-              onSelectSection: _selectWorkspaceSection,
-              onToggleFolderExpansion: _toggleFolderExpansion,
-              onOpenNote: _openEditor,
-              onShowNoteMenu: _showActiveNoteMenu,
-              onShowRootMenu: _showDesktopRootMenu,
-              onCreateNoteInFolder: (path) async {
-                _selectFolder(path);
-                await _createNote();
-              },
-              onDeleteFolder: _deleteFolder,
-              onCreateFolder: _showCreateFolderDialog,
-              onRenameFolder: _renameFolder,
-              onMoveFolder: _moveFolder,
-              onMoveNoteToFolderPath: _moveNoteToFolderPath,
-              onMoveFolderToParentPath: _moveFolderToParentPath,
+    final colorScheme = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: colorScheme.surfaceContainerLowest,
+      child: Row(
+        key: const ValueKey('desktop-workspace'),
+        children: [
+          if (!_isDesktopSidebarCollapsed) ...[
+            SizedBox(
+              width: _desktopSidebarWidth,
+              child: _DesktopSidebarTree(
+                foldersStream: widget.folderRepository.watchFolders(),
+                notesStream: widget.noteRepository.watchActiveNotes(),
+                selectedFolderPath: _selectedFolderPath,
+                selectedNoteId: _desktopEditorSession?.note?.id,
+                selectedSection: _workspaceSection,
+                expandedFolderPaths: _expandedFolderPaths,
+                onSelectFolder: _selectFolder,
+                onSelectSection: _selectWorkspaceSection,
+                onToggleFolderExpansion: _toggleFolderExpansion,
+                onOpenNote: _openEditor,
+                onShowNoteMenu: _showActiveNoteMenu,
+                onShowRootMenu: _showDesktopRootMenu,
+                onCreateNoteInFolder: (path) async {
+                  _selectFolder(path);
+                  await _createNote();
+                },
+                onDeleteFolder: _deleteFolder,
+                onCreateFolder: _showCreateFolderDialog,
+                onRenameFolder: _renameFolder,
+                onMoveFolder: _moveFolder,
+                onMoveNoteToFolderPath: _moveNoteToFolderPath,
+                onMoveFolderToParentPath: _moveFolderToParentPath,
+              ),
             ),
+            VerticalDivider(
+              width: 1,
+              thickness: 1,
+              color: colorScheme.outlineVariant.withValues(alpha: 0.65),
+            ),
+          ],
+          Expanded(
+            child: _buildDesktopContent(),
           ),
-          const VerticalDivider(width: 1),
         ],
-        Expanded(
-          child: _buildDesktopContent(),
-        ),
-      ],
+      ),
     );
   }
 
@@ -2116,7 +2127,7 @@ class NotesHomePageState extends State<NotesHomePage> {
 
     return Container(
       color: Theme.of(context).colorScheme.surface,
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      padding: const EdgeInsets.fromLTRB(34, 20, 34, 28),
       child: editor,
     );
   }
@@ -2233,19 +2244,27 @@ class _DesktopEditorPlaceholder extends StatelessWidget {
     return Container(
       key: const ValueKey('desktop-editor-placeholder'),
       color: colorScheme.surface,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(32),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: const BoxConstraints(maxWidth: 460),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.edit_note_outlined,
-                size: 40,
-                color: colorScheme.primary,
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Icon(
+                  Icons.edit_note_outlined,
+                  size: 34,
+                  color: colorScheme.onPrimaryContainer,
+                ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 22),
               Text(
                 'Keep writing without leaving the workspace.',
                 textAlign: TextAlign.center,
@@ -2255,9 +2274,19 @@ class _DesktopEditorPlaceholder extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                'Select a note from the sidebar or create a new one. Current location: $selectionLabel.',
+                'Select a note from the sidebar or create a new one.',
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Current location: $selectionLabel.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
               ),
             ],
           ),
@@ -2333,6 +2362,7 @@ class _DesktopSidebarTree extends StatelessWidget {
                 selectedSection: selectedSection,
                 expandedFolderPaths: expandedFolderPaths,
                 enableDragDrop: true,
+                showAllNotesRow: true,
                 onSelectFolder: onSelectFolder,
                 onSelectSection: onSelectSection,
                 onToggleFolderExpansion: onToggleFolderExpansion,
@@ -2350,19 +2380,39 @@ class _DesktopSidebarTree extends StatelessWidget {
 
               return Column(
                 children: [
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onSecondaryTapDown: (details) =>
-                        onShowRootMenu(details.globalPosition),
-                    onLongPressStart: (details) =>
-                        onShowRootMenu(details.globalPosition),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 8, 8),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onSecondaryTapDown: (details) =>
+                          onShowRootMenu(details.globalPosition),
+                      onLongPressStart: (details) =>
+                          onShowRootMenu(details.globalPosition),
                       child: Row(
                         children: [
-                          Text(
-                            'Workspace',
-                            style: Theme.of(context).textTheme.titleMedium,
+                          Container(
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primaryContainer,
+                              borderRadius: BorderRadius.circular(9),
+                            ),
+                            child: Icon(
+                              Icons.edit_note_rounded,
+                              size: 18,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onPrimaryContainer,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Workspace',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
                           ),
                         ],
                       ),
@@ -2452,6 +2502,7 @@ class _MobileSidebarTree extends StatelessWidget {
                       selectedSection: selectedSection,
                       expandedFolderPaths: expandedFolderPaths,
                       enableDragDrop: false,
+                      showAllNotesRow: false,
                       onSelectFolder: onSelectFolder,
                       onSelectSection: onSelectSection,
                       onToggleFolderExpansion: onToggleFolderExpansion,
@@ -2486,6 +2537,7 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
     required this.selectedSection,
     required this.expandedFolderPaths,
     required this.enableDragDrop,
+    required this.showAllNotesRow,
     required this.onSelectFolder,
     required this.onSelectSection,
     required this.onToggleFolderExpansion,
@@ -2508,6 +2560,7 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
   final _WorkspaceSection selectedSection;
   final Set<String> expandedFolderPaths;
   final bool enableDragDrop;
+  final bool showAllNotesRow;
   final ValueChanged<String?> onSelectFolder;
   final ValueChanged<_WorkspaceSection> onSelectSection;
   final ValueChanged<String> onToggleFolderExpansion;
@@ -2548,6 +2601,14 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
     }
 
     final children = <Widget>[
+      if (showAllNotesRow)
+        _SidebarHeaderRow(
+          icon: Icons.library_books_outlined,
+          label: 'All notes',
+          selected: selectedSection == _WorkspaceSection.notes &&
+              selectedFolderPath == null,
+          onTap: () => onSelectFolder(null),
+        ),
       _SidebarHeaderRow(
         icon: Icons.delete_outline,
         label: 'Trash',
@@ -2627,6 +2688,8 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
         folder: folder,
         expanded: isExpanded,
         hasChildren: hasChildren,
+        selected: selectedSection == _WorkspaceSection.notes &&
+            selectedFolderPath == folder.path,
         onTap: () {
           if (hasChildren) {
             if (isExpanded) {
@@ -2749,27 +2812,45 @@ class _SidebarHeaderRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     Widget buildRow(bool isDropTargetActive) {
-      return Material(
-        color: selected || isDropTargetActive
-            ? colorScheme.secondaryContainer
-            : Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          hoverColor: colorScheme.primary.withValues(alpha: 0.16),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              children: [
-                Icon(icon, size: 18),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        child: Material(
+          color: selected || isDropTargetActive
+              ? colorScheme.primaryContainer
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(12),
+            hoverColor: colorScheme.primary.withValues(alpha: 0.1),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              child: Row(
+                children: [
+                  Icon(
+                    icon,
+                    size: 18,
+                    color: selected
+                        ? colorScheme.onPrimaryContainer
+                        : colorScheme.onSurfaceVariant,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: selected
+                                ? colorScheme.onPrimaryContainer
+                                : colorScheme.onSurface,
+                            fontWeight:
+                                selected ? FontWeight.w700 : FontWeight.w500,
+                          ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -2817,6 +2898,7 @@ class _SidebarFolderTile extends StatelessWidget {
     required this.folder,
     required this.expanded,
     required this.hasChildren,
+    required this.selected,
     required this.onTap,
     required this.onToggleExpanded,
     required this.onCreateNote,
@@ -2832,6 +2914,7 @@ class _SidebarFolderTile extends StatelessWidget {
   final Folder folder;
   final bool expanded;
   final bool hasChildren;
+  final bool selected;
   final VoidCallback onTap;
   final VoidCallback onToggleExpanded;
   final Future<void> Function() onCreateNote;
@@ -2906,87 +2989,109 @@ class _SidebarFolderTile extends StatelessWidget {
               _showFolderMenu(context, details.globalPosition),
           onLongPressStart: (details) =>
               _showFolderMenu(context, details.globalPosition),
-          child: Material(
-            color: isDropTargetActive
-                ? colorScheme.secondaryContainer
-                : Colors.transparent,
-            child: InkWell(
-              key: ValueKey('sidebar-folder-tile-${folder.path}'),
-              onTap: onTap,
-              hoverColor: colorScheme.primary.withValues(alpha: 0.18),
-              child: Padding(
-                padding: EdgeInsets.only(
-                  left: 8 + (folder.depth * 14),
-                  right: 4,
-                  top: 2,
-                  bottom: 2,
-                ),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 28,
-                      child: hasChildren
-                          ? IconButton(
-                              key: ValueKey(
-                                  'sidebar-folder-toggle-${folder.path}'),
-                              onPressed: onToggleExpanded,
-                              tooltip: expanded
-                                  ? 'Collapse folder'
-                                  : 'Expand folder',
-                              iconSize: 18,
-                              splashRadius: 16,
-                              icon: Icon(
-                                expanded
-                                    ? Icons.keyboard_arrow_down
-                                    : Icons.keyboard_arrow_right,
-                              ),
-                            )
-                          : const SizedBox.shrink(),
-                    ),
-                    const Icon(Icons.folder_outlined, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        folder.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            child: Material(
+              color: isDropTargetActive || selected
+                  ? colorScheme.primaryContainer
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                key: ValueKey('sidebar-folder-tile-${folder.path}'),
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(12),
+                hoverColor: colorScheme.primary.withValues(alpha: 0.1),
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left: 6 + (folder.depth * 14),
+                    right: 4,
+                    top: 3,
+                    bottom: 3,
+                  ),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 28,
+                        child: hasChildren
+                            ? IconButton(
+                                key: ValueKey(
+                                    'sidebar-folder-toggle-${folder.path}'),
+                                onPressed: onToggleExpanded,
+                                tooltip: expanded
+                                    ? 'Collapse folder'
+                                    : 'Expand folder',
+                                iconSize: 18,
+                                splashRadius: 16,
+                                icon: Icon(
+                                  expanded
+                                      ? Icons.keyboard_arrow_down
+                                      : Icons.keyboard_arrow_right,
+                                ),
+                              )
+                            : const SizedBox.shrink(),
                       ),
-                    ),
-                    if (enableDragDrop)
-                      Tooltip(
-                        message: 'Drag folder',
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: buildDragHandle(),
+                      Icon(
+                        expanded
+                            ? Icons.folder_open_outlined
+                            : Icons.folder_outlined,
+                        size: 18,
+                        color: selected
+                            ? colorScheme.onPrimaryContainer
+                            : colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          folder.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: selected
+                                        ? colorScheme.onPrimaryContainer
+                                        : colorScheme.onSurface,
+                                    fontWeight: selected
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
+                                  ),
                         ),
                       ),
-                    PopupMenuButton<_FolderMenuAction>(
-                      tooltip: 'Folder actions',
-                      onSelected: (action) => _handleFolderAction(action),
-                      itemBuilder: (context) => const [
-                        PopupMenuItem(
-                          value: _FolderMenuAction.createNote,
-                          child: Text('New note'),
+                      if (enableDragDrop)
+                        Tooltip(
+                          message: 'Drag folder',
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: buildDragHandle(),
+                          ),
                         ),
-                        PopupMenuItem(
-                          value: _FolderMenuAction.createFolder,
-                          child: Text('New folder'),
-                        ),
-                        PopupMenuItem(
-                          value: _FolderMenuAction.move,
-                          child: Text('Move'),
-                        ),
-                        PopupMenuItem(
-                          value: _FolderMenuAction.rename,
-                          child: Text('Rename'),
-                        ),
-                        PopupMenuItem(
-                          value: _FolderMenuAction.delete,
-                          child: Text('Delete'),
-                        ),
-                      ],
-                    ),
-                  ],
+                      PopupMenuButton<_FolderMenuAction>(
+                        tooltip: 'Folder actions',
+                        onSelected: (action) => _handleFolderAction(action),
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(
+                            value: _FolderMenuAction.createNote,
+                            child: Text('New note'),
+                          ),
+                          PopupMenuItem(
+                            value: _FolderMenuAction.createFolder,
+                            child: Text('New folder'),
+                          ),
+                          PopupMenuItem(
+                            value: _FolderMenuAction.move,
+                            child: Text('Move'),
+                          ),
+                          PopupMenuItem(
+                            value: _FolderMenuAction.rename,
+                            child: Text('Rename'),
+                          ),
+                          PopupMenuItem(
+                            value: _FolderMenuAction.delete,
+                            child: Text('Delete'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -3090,7 +3195,11 @@ class _SidebarNoteTile extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final titleStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
           fontWeight: selected ? FontWeight.w700 : null,
-          color: _isConflictCopy(note) ? colorScheme.tertiary : null,
+          color: _isConflictCopy(note)
+              ? colorScheme.tertiary
+              : selected
+                  ? colorScheme.onPrimaryContainer
+                  : colorScheme.onSurface,
         );
 
     Widget buildTile() {
@@ -3103,35 +3212,47 @@ class _SidebarNoteTile extends StatelessWidget {
               onShowContextMenu(note, details.globalPosition),
           onLongPressStart: (details) =>
               onShowContextMenu(note, details.globalPosition),
-          child: Material(
-            key: ValueKey('sidebar-note-surface-${note.id}'),
-            color: selected
-                ? colorScheme.surfaceContainerHigh
-                : Colors.transparent,
-            child: InkWell(
-              key: ValueKey('sidebar-note-${note.id}'),
-              onTap: () => onOpen(note),
-              hoverColor: colorScheme.primary.withValues(alpha: 0.18),
-              child: Padding(
-                padding: EdgeInsets.only(
-                  left: 48 + (depth * 14),
-                  right: 12,
-                  top: 8,
-                  bottom: 8,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: titleStyle,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            child: Material(
+              key: ValueKey('sidebar-note-surface-${note.id}'),
+              color:
+                  selected ? colorScheme.primaryContainer : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                key: ValueKey('sidebar-note-${note.id}'),
+                onTap: () => onOpen(note),
+                borderRadius: BorderRadius.circular(12),
+                hoverColor: colorScheme.primary.withValues(alpha: 0.1),
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left: 44 + (depth * 14),
+                    right: 10,
+                    top: 8,
+                    bottom: 8,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.sticky_note_2_outlined,
+                        size: 16,
+                        color: selected
+                            ? colorScheme.onPrimaryContainer
+                            : colorScheme.onSurfaceVariant,
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    _SidebarNoteSyncIndicator(status: note.syncStatus),
-                  ],
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: titleStyle,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _SidebarNoteSyncIndicator(status: note.syncStatus),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -3311,13 +3432,20 @@ class _NotesList extends StatelessWidget {
         }
 
         if (notes.isEmpty) {
-          return Center(child: Text(emptyState));
+          return Center(
+            child: Text(
+              emptyState,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          );
         }
 
         return ListView.separated(
-          padding: EdgeInsets.fromLTRB(4, mobileLayout ? 4 : 12, 4, 140),
+          padding: EdgeInsets.fromLTRB(4, mobileLayout ? 4 : 16, 4, 140),
           itemCount: notes.length,
-          separatorBuilder: (_, __) => SizedBox(height: mobileLayout ? 10 : 8),
+          separatorBuilder: (_, __) => SizedBox(height: mobileLayout ? 10 : 10),
           itemBuilder: (context, index) {
             final note = notes[index];
             final title = note.title.isEmpty ? 'Untitled note' : note.title;
@@ -3333,9 +3461,9 @@ class _NotesList extends StatelessWidget {
                   onShowContextMenu(note, details.globalPosition),
               child: Material(
                 color: Colors.transparent,
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: BorderRadius.circular(mobileLayout ? 18 : 14),
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(28),
+                  borderRadius: BorderRadius.circular(mobileLayout ? 18 : 14),
                   onTap: () => isConflictCopy
                       ? onRestoreConflictCopy(note)
                       : onTap(note),
@@ -3344,9 +3472,15 @@ class _NotesList extends StatelessWidget {
                       color: isConflictCopy
                           ? colorScheme.tertiaryContainer
                               .withValues(alpha: 0.36)
-                          : colorScheme.surface,
+                          : mobileLayout
+                              ? colorScheme.surface
+                              : colorScheme.surfaceContainerLow,
                       borderRadius:
-                          BorderRadius.circular(mobileLayout ? 28 : 22),
+                          BorderRadius.circular(mobileLayout ? 18 : 14),
+                      border: Border.all(
+                        color: colorScheme.outlineVariant
+                            .withValues(alpha: mobileLayout ? 0.45 : 0.55),
+                      ),
                       boxShadow: mobileLayout
                           ? [
                               BoxShadow(
@@ -3380,7 +3514,7 @@ class _NotesList extends StatelessWidget {
                                           .headlineSmall
                                           ?.copyWith(
                                             fontWeight: FontWeight.w700,
-                                            letterSpacing: -0.6,
+                                            letterSpacing: 0,
                                           ),
                                     ),
                                     const SizedBox(height: 10),
@@ -3544,13 +3678,19 @@ class _MobileChromeSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(28),
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Theme.of(context)
+              .colorScheme
+              .outlineVariant
+              .withValues(alpha: 0.65),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 22,
-            offset: const Offset(0, 10),
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
@@ -3638,19 +3778,19 @@ class _AppSyncStatusChip extends StatelessWidget {
         ),
     };
 
-    final iconSize = compact ? 14.0 : 16.0;
+    final iconSize = compact ? 13.0 : 16.0;
     final accentDotSize = compact ? 8.0 : 9.0;
 
     return Tooltip(
       message: 'App sync status: $label',
       child: Container(
         padding: EdgeInsets.symmetric(
-          horizontal: compact ? 10 : 12,
-          vertical: compact ? 6 : 7,
+          horizontal: compact ? 9 : 12,
+          vertical: compact ? 5 : 7,
         ),
         decoration: BoxDecoration(
           color: backgroundColor,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(13),
           border: Border.all(color: borderColor),
         ),
         child: Row(
@@ -3660,7 +3800,7 @@ class _AppSyncStatusChip extends StatelessWidget {
               width: compact ? 22 : 24,
               height: compact ? 22 : 24,
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.55),
+                color: foregroundColor.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
               child: Stack(
