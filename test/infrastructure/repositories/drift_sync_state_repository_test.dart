@@ -1,4 +1,5 @@
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proper_notes/infrastructure/database/app_database.dart';
 import 'package:proper_notes/infrastructure/repositories/drift_sync_state_repository.dart';
@@ -40,6 +41,24 @@ void main() {
     expect(deviceId, 'device-123');
     expect(token, 'token-1');
     expect(persistedDeviceId, 'device-123');
+  });
+
+  test('promotes a legacy drive token into the canonical remote cursor',
+      () async {
+    await database.into(database.appMetadataTable).insert(
+          AppMetadataTableCompanion.insert(
+            keyId: const Value(1),
+            deviceId: 'device-legacy',
+            driveSyncToken: const Value('legacy-drive-token'),
+          ),
+        );
+
+    final token = await repository.getRemoteSyncCursor();
+    final row = await database.select(database.appMetadataTable).getSingle();
+
+    expect(token, 'legacy-drive-token');
+    expect(row.remoteSyncCursor, 'legacy-drive-token');
+    expect(row.driveSyncToken, 'legacy-drive-token');
   });
 }
 

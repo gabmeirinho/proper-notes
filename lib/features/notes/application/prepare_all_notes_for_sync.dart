@@ -19,6 +19,7 @@ class PrepareAllNotesForSync {
 
       await _repository.update(
         note.copyWith(
+          baseContentHash: note.baseContentHash ?? note.contentHash,
           syncStatus: SyncStatus.pendingUpload,
         ),
       );

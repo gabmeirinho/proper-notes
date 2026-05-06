@@ -19,9 +19,7 @@ Linux release bundle not found at:
 
 Build it first:
   cd "$REPO_ROOT"
-  flutter build linux --release \\
-    --dart-define=GOOGLE_DESKTOP_CLIENT_ID=YOUR_DESKTOP_CLIENT_ID.apps.googleusercontent.com \\
-    --dart-define=GOOGLE_DESKTOP_CLIENT_SECRET=YOUR_DESKTOP_CLIENT_SECRET
+  flutter build linux --release
 EOF
   exit 1
 fi

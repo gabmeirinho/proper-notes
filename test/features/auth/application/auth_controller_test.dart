@@ -73,10 +73,10 @@ void main() {
     expect(controller.errorMessage, contains('sign-in failed'));
   });
 
-  test('summarizes common auth configuration errors', () async {
+  test('passes through non-standard auth configuration errors', () async {
     final controller = AuthController(
       authService: _FakeAuthService(
-        signInError: Exception('Missing Google client id for this build'),
+        signInError: Exception('Missing sync endpoint configuration'),
       ),
     );
 
@@ -84,7 +84,7 @@ void main() {
 
     expect(
       controller.errorMessage,
-      'Missing Google client id for this build',
+      'Missing sync endpoint configuration',
     );
   });
 

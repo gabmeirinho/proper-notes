@@ -78,6 +78,34 @@ void main() {
       expect(updated.updatedAt.isAfter(original.updatedAt), isTrue);
       expect(repository.updatedNotes.single.content, markdown);
     });
+
+    test('preserves the current content hash as base when editing a synced note with no baseline',
+        () async {
+      final repository = _FakeNoteRepository();
+      final useCase = UpdateNote(
+        repository: repository,
+        deviceId: 'device-b',
+      );
+      final original = _buildNote(
+        id: 'note-missing-base',
+        title: 'Title',
+        content: 'mobile content',
+        syncStatus: SyncStatus.synced,
+        deviceId: 'device-a',
+      );
+
+      final updated = await useCase(
+        original: original,
+        title: 'Title',
+        content: 'desktop content',
+      );
+
+      expect(updated.baseContentHash, computeContentHash('mobile content'));
+      expect(
+        repository.updatedNotes.single.baseContentHash,
+        computeContentHash('mobile content'),
+      );
+    });
   });
 
   group('DeleteNote', () {
@@ -117,6 +145,34 @@ void main() {
       expect(moved.syncStatus, SyncStatus.pendingUpload);
       expect(moved.deviceId, 'device-b');
       expect(repository.updatedNotes.single.folderPath, 'Archive');
+    });
+
+    test('preserves the current content hash as base when moving a synced note with no baseline',
+        () async {
+      final repository = _FakeNoteRepository();
+      final useCase = MoveNote(
+        repository: repository,
+        deviceId: 'device-b',
+      );
+      final original = _buildNote(
+        id: 'note-move-base',
+        title: 'Move me',
+        content: 'body',
+        syncStatus: SyncStatus.synced,
+        deviceId: 'device-a',
+        folderPath: 'Projects',
+      );
+
+      final moved = await useCase(
+        original: original,
+        folderPath: 'Archive',
+      );
+
+      expect(moved.baseContentHash, computeContentHash('body'));
+      expect(
+        repository.updatedNotes.single.baseContentHash,
+        computeContentHash('body'),
+      );
     });
   });
 
@@ -176,6 +232,30 @@ void main() {
       expect(repository.updatedNotes.single.id, 'note-sync-all');
       expect(
           repository.updatedNotes.single.syncStatus, SyncStatus.pendingUpload);
+    });
+
+    test('backfills missing base hashes before forcing notes pending upload',
+        () async {
+      final synced = _buildNote(
+        id: 'note-sync-all-base',
+        title: 'Title',
+        content: 'content',
+        syncStatus: SyncStatus.synced,
+        deviceId: 'device-a',
+      );
+      final repository = _FakeNoteRepository(
+        activeNotes: [synced],
+      );
+      final useCase = PrepareAllNotesForSync(
+        repository: repository,
+      );
+
+      await useCase();
+
+      expect(
+        repository.updatedNotes.single.baseContentHash,
+        computeContentHash('content'),
+      );
     });
   });
 }

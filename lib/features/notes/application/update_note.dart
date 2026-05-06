@@ -21,12 +21,16 @@ class UpdateNote {
     String? folderPath,
   }) async {
     final now = DateTime.now().toUtc();
+    final preservedBaseContentHash =
+        original.baseContentHash ??
+        (original.syncStatus == SyncStatus.synced ? original.contentHash : null);
     final updatedNote = original.copyWith(
       title: title,
       content: content,
       documentJson: documentJsonFromEditableText(content),
       updatedAt: now,
       contentHash: computeContentHash(content),
+      baseContentHash: preservedBaseContentHash,
       syncStatus: SyncStatus.pendingUpload,
       deviceId: _deviceId,
       folderPath: folderPath ?? original.folderPath,

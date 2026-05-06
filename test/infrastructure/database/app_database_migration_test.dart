@@ -19,7 +19,7 @@ void main() {
     try {
       final seedDatabase = sqlite3.open(databaseFile.path);
       _createSchemaV1(seedDatabase);
-      seedDatabase.dispose();
+      seedDatabase.close();
 
       appDatabase = AppDatabase.forTesting(NativeDatabase(databaseFile));
 
@@ -35,6 +35,11 @@ void main() {
       );
       expect(storedNote.deviceId, 'device-1');
       expect(storedNote.folderPath, isNull);
+      final metadata =
+          await appDatabase.select(appDatabase.appMetadataTable).getSingle();
+      expect(metadata.deviceId, 'device-1');
+      expect(metadata.remoteSyncCursor, 'drive-token-v1');
+      expect(metadata.driveSyncToken, 'drive-token-v1');
       expect(appDatabase.schemaVersion, 5);
 
       final folders = await appDatabase.select(appDatabase.foldersTable).get();
@@ -61,7 +66,7 @@ void main() {
     try {
       final seedDatabase = sqlite3.open(databaseFile.path);
       _createSchemaV2(seedDatabase);
-      seedDatabase.dispose();
+      seedDatabase.close();
 
       appDatabase = AppDatabase.forTesting(NativeDatabase(databaseFile));
 
@@ -74,6 +79,11 @@ void main() {
         storedNote.documentJson,
         legacyDocumentFromContent('Version 2 content'),
       );
+      final metadata =
+          await appDatabase.select(appDatabase.appMetadataTable).getSingle();
+      expect(metadata.deviceId, 'device-2');
+      expect(metadata.remoteSyncCursor, 'drive-token-v2');
+      expect(metadata.driveSyncToken, 'drive-token-v2');
       expect(appDatabase.schemaVersion, 5);
     } finally {
       await appDatabase?.close();
@@ -147,6 +157,26 @@ void _createSchemaV1(Database database) {
       'remote-1',
     ],
   );
+  database.execute(
+    '''
+    INSERT INTO app_metadata_table (
+      key_id,
+      device_id,
+      account_email,
+      drive_sync_token,
+      last_full_sync_at,
+      last_successful_sync_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+    ''',
+    <Object?>[
+      1,
+      'device-1',
+      'legacy@example.com',
+      'drive-token-v1',
+      1711111114000,
+      1711111115000,
+    ],
+  );
 }
 
 void _createSchemaV2(Database database) {
@@ -217,6 +247,26 @@ void _createSchemaV2(Database database) {
       'device-1',
       'Projects',
       'remote-2',
+    ],
+  );
+  database.execute(
+    '''
+    INSERT INTO app_metadata_table (
+      key_id,
+      device_id,
+      account_email,
+      drive_sync_token,
+      last_full_sync_at,
+      last_successful_sync_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+    ''',
+    <Object?>[
+      1,
+      'device-2',
+      'legacy2@example.com',
+      'drive-token-v2',
+      1711111114000,
+      1711111115000,
     ],
   );
 }

@@ -201,8 +201,20 @@ class RunManualSync {
           localNote: localNote,
           remoteNote: remoteNote,
         )) {
-          await _markSynced(localNote: localNote, remoteNote: remoteNote);
+          await _refreshSyncedState(
+            localNote: localNote,
+            remoteNote: remoteNote,
+          );
         }
+        unchangedCount += 1;
+        continue;
+      }
+
+      if (localNote.syncStatus == SyncStatus.conflicted) {
+        await _refreshSyncedState(
+          localNote: localNote,
+          remoteNote: remoteNote,
+        );
         unchangedCount += 1;
         continue;
       }
@@ -219,11 +231,11 @@ class RunManualSync {
         continue;
       }
 
-      final baseHash = localNote.baseContentHash;
-      final localChanged =
-          baseHash == null || localNote.contentHash != baseHash;
-      final remoteChanged =
-          baseHash == null || remoteNote.contentHash != baseHash;
+      final localChanged = _hasLocalChangedSinceBase(localNote);
+      final remoteChanged = _hasRemoteChangedSinceBaseForReconciliation(
+        localNote: localNote,
+        remoteNote: remoteNote,
+      );
 
       if (localChanged && !remoteChanged) {
         final uploaded = await _syncGateway.upsertNote(localNote);
@@ -235,6 +247,15 @@ class RunManualSync {
       if (!localChanged && remoteChanged) {
         await _noteRepository.upsertRemoteNote(remoteNote);
         downloadedCount += 1;
+        continue;
+      }
+
+      if (_hasOnlyTrailingWhitespaceContentDifference(localNote, remoteNote) &&
+          localNote.title == remoteNote.title &&
+          localNote.folderPath == remoteNote.folderPath) {
+        final uploaded = await _syncGateway.upsertNote(localNote);
+        await _markSynced(localNote: localNote, remoteNote: uploaded);
+        uploadedCount += 1;
         continue;
       }
 
@@ -306,11 +327,62 @@ class RunManualSync {
     return baseHash == null || remoteNote.contentHash != baseHash;
   }
 
+  bool _hasLocalChangedSinceBase(Note localNote) {
+    final baseHash = localNote.baseContentHash;
+    if (baseHash == null) {
+      return _shouldUploadLocalPendingNote(localNote);
+    }
+
+    return localNote.contentHash != baseHash;
+  }
+
+  bool _hasRemoteChangedSinceBaseForReconciliation({
+    required Note localNote,
+    required RemoteNote remoteNote,
+  }) {
+    final baseHash = localNote.baseContentHash;
+    if (baseHash == null) {
+      return !_isNoteEquivalent(localNote, remoteNote);
+    }
+
+    return remoteNote.contentHash != baseHash;
+  }
+
   bool _isNoteEquivalent(Note localNote, RemoteNote remoteNote) {
     return localNote.contentHash == remoteNote.contentHash &&
         localNote.title == remoteNote.title &&
         localNote.folderPath == remoteNote.folderPath &&
         localNote.deletedAt == remoteNote.deletedAt;
+  }
+
+  bool _hasOnlyTrailingWhitespaceContentDifference(
+    Note localNote,
+    RemoteNote remoteNote,
+  ) {
+    if (localNote.contentHash == remoteNote.contentHash) {
+      return false;
+    }
+
+    return localNote.content.trimRight() == remoteNote.content.trimRight();
+  }
+
+  Future<void> _refreshSyncedState({
+    required Note localNote,
+    required RemoteNote remoteNote,
+  }) {
+    if (localNote.syncStatus == SyncStatus.conflicted) {
+      return _noteRepository.update(
+        localNote.copyWith(
+          lastSyncedAt: DateTime.now().toUtc(),
+          baseContentHash: localNote.contentHash,
+          remoteFileId: remoteNote.remoteFileId,
+          remoteEtag: remoteNote.remoteEtag,
+          syncStatus: SyncStatus.conflicted,
+        ),
+      );
+    }
+
+    return _markSynced(localNote: localNote, remoteNote: remoteNote);
   }
 
   Future<void> _markSynced({

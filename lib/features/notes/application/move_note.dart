@@ -17,8 +17,12 @@ class MoveNote {
     required String? folderPath,
   }) async {
     final now = DateTime.now().toUtc();
+    final preservedBaseContentHash =
+        original.baseContentHash ??
+        (original.syncStatus == SyncStatus.synced ? original.contentHash : null);
     final movedNote = original.copyWith(
       updatedAt: now,
+      baseContentHash: preservedBaseContentHash,
       deviceId: _deviceId,
       folderPath: folderPath,
       clearFolderPath: folderPath == null,

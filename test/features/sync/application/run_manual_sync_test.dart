@@ -316,6 +316,45 @@ void main() {
     expect(repository.syncedIds, isEmpty);
   });
 
+  test(
+      'downloads a remote update without conflict when local note has no base hash and is not dirty',
+      () async {
+    final repository = _FakeNoteRepository(
+      localNotes: [
+        _localNote(
+          id: 'mobile-updated',
+          content: 'old desktop content',
+          baseContentHash: null,
+          syncStatus: SyncStatus.synced,
+          remoteFileId: 'remote-mobile-updated',
+        ),
+      ],
+    );
+    final gateway = _FakeSyncGateway(
+      remoteNotes: [
+        _remoteNote(
+          id: 'mobile-updated',
+          content: 'new mobile content',
+          remoteFileId: 'remote-mobile-updated',
+        ),
+      ],
+    );
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: _FakeSyncStateRepository(initialToken: 'token-1'),
+      uuid: const _FixedUuid('unexpected-conflict-copy'),
+    );
+
+    final result = await useCase();
+
+    expect(result.downloadedCount, 1);
+    expect(result.conflictCount, 0);
+    expect(repository.upsertedRemoteIds, ['mobile-updated']);
+    expect(repository.createdConflictCopies, isEmpty);
+    expect(gateway.uploadedNoteIds, isEmpty);
+  });
+
   test('marks a conflict when both local and remote changed', () async {
     final repository = _FakeNoteRepository(
       localNotes: [
@@ -358,6 +397,164 @@ void main() {
       repository.createdConflictCopies.single.syncStatus,
       SyncStatus.conflicted,
     );
+  });
+
+  test(
+      'uploads local note without conflict when concurrent content only differs by trailing whitespace',
+      () async {
+    final repository = _FakeNoteRepository(
+      localNotes: [
+        _localNote(
+          id: 'whitespace-only',
+          content: 'same visible content',
+          baseContentHash: computeContentHash('base'),
+          syncStatus: SyncStatus.pendingUpload,
+          remoteFileId: 'remote-whitespace-only',
+        ),
+      ],
+    );
+    final gateway = _FakeSyncGateway(
+      remoteNotes: [
+        _remoteNote(
+          id: 'whitespace-only',
+          content: 'same visible content\n',
+          remoteFileId: 'remote-whitespace-only',
+        ),
+      ],
+    );
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: _FakeSyncStateRepository(initialToken: 'token-1'),
+      uuid: const _FixedUuid('unexpected-conflict-copy'),
+    );
+
+    final result = await useCase();
+
+    expect(result.conflictCount, 0);
+    expect(result.uploadedCount, 1);
+    expect(repository.createdConflictCopies, isEmpty);
+    expect(gateway.uploadedNoteIds, ['whitespace-only']);
+    expect(repository.syncedIds, ['whitespace-only']);
+  });
+
+  test('keeps conflict copies conflicted when later sync sees no changes',
+      () async {
+    const content = 'preserved conflict version';
+    final repository = _FakeNoteRepository(
+      localNotes: [
+        _localNote(
+          id: 'existing-conflict-copy',
+          content: content,
+          baseContentHash: computeContentHash(content),
+          syncStatus: SyncStatus.conflicted,
+          remoteFileId: 'remote-existing-conflict-copy',
+        ),
+      ],
+    );
+    final gateway = _FakeSyncGateway(
+      remoteNotes: [
+        _remoteNote(
+          id: 'existing-conflict-copy',
+          content: content,
+          remoteFileId: 'remote-existing-conflict-copy',
+        ),
+      ],
+    );
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: _FakeSyncStateRepository(initialToken: 'token-1'),
+    );
+
+    final result = await useCase();
+
+    expect(result.unchangedCount, 1);
+    expect(repository.syncedIds, isEmpty);
+    expect(repository.updatedNotes, hasLength(1));
+    expect(repository.updatedNotes.single.id, 'existing-conflict-copy');
+    expect(repository.updatedNotes.single.syncStatus, SyncStatus.conflicted);
+  });
+
+  test('keeps conflict copies conflicted when remote metadata differs',
+      () async {
+    const content = 'preserved conflict version';
+    final repository = _FakeNoteRepository(
+      localNotes: [
+        _localNote(
+          id: 'metadata-conflict-copy',
+          content: content,
+          baseContentHash: computeContentHash(content),
+          syncStatus: SyncStatus.conflicted,
+          remoteFileId: 'remote-metadata-conflict-copy',
+        ),
+      ],
+    );
+    final gateway = _FakeSyncGateway(
+      remoteNotes: [
+        RemoteNote(
+          id: 'metadata-conflict-copy',
+          title: 'Renamed elsewhere',
+          content: content,
+          createdAt: DateTime.utc(2026, 3, 24, 10),
+          updatedAt: DateTime.utc(2026, 3, 24, 11),
+          contentHash: computeContentHash(content),
+          deviceId: 'device-b',
+          remoteFileId: 'remote-metadata-conflict-copy',
+        ),
+      ],
+    );
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: _FakeSyncStateRepository(initialToken: 'token-1'),
+    );
+
+    final result = await useCase();
+
+    expect(result.unchangedCount, 1);
+    expect(repository.syncedIds, isEmpty);
+    expect(repository.upsertedRemoteIds, isEmpty);
+    expect(repository.updatedNotes.single.syncStatus, SyncStatus.conflicted);
+  });
+
+  test(
+      'uploads a local edit without conflict when the remote note still matches the preserved base',
+      () async {
+    final repository = _FakeNoteRepository(
+      localNotes: [
+        _localNote(
+          id: 'desktop-edit',
+          content: 'desktop changed',
+          baseContentHash: computeContentHash('mobile content'),
+          syncStatus: SyncStatus.pendingUpload,
+          remoteFileId: 'remote-desktop-edit',
+        ),
+      ],
+    );
+    final gateway = _FakeSyncGateway(
+      remoteNotes: [
+        _remoteNote(
+          id: 'desktop-edit',
+          content: 'mobile content',
+          remoteFileId: 'remote-desktop-edit',
+        ),
+      ],
+    );
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: _FakeSyncStateRepository(initialToken: 'token-1'),
+      uuid: const _FixedUuid('unexpected-conflict-copy'),
+    );
+
+    final result = await useCase();
+
+    expect(result.uploadedCount, 1);
+    expect(result.conflictCount, 0);
+    expect(gateway.uploadedNoteIds, ['desktop-edit']);
+    expect(repository.createdConflictCopies, isEmpty);
+    expect(repository.syncedIds, ['desktop-edit']);
   });
 
   test('uploads local tombstones when remote note is still active', () async {
@@ -596,6 +793,7 @@ class _FakeNoteRepository implements NoteRepository {
   final List<String> upsertedRemoteIds = [];
   final List<String> appliedRemoteDeletionIds = [];
   final List<Note> createdConflictCopies = [];
+  final List<Note> updatedNotes = [];
 
   @override
   Future<int> countAttachmentReferences(String attachmentUri) async => 0;
@@ -672,7 +870,9 @@ class _FakeNoteRepository implements NoteRepository {
   Future<void> softDelete(String id, DateTime deletedAt) async {}
 
   @override
-  Future<void> update(Note note) async {}
+  Future<void> update(Note note) async {
+    updatedNotes.add(note);
+  }
 
   @override
   Future<void> upsertRemoteNote(RemoteNote remoteNote) async {

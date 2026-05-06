@@ -87,6 +87,7 @@ class WebDavSyncGateway implements SyncGateway {
   Future<RemoteNote> upsertNote(Note note) async {
     final context = await _loadContext();
     await _ensureBootstrapLayout(context);
+    final effectiveBaseContentHash = note.contentHash;
 
     final payload = <String, dynamic>{
       'id': note.id,
@@ -99,7 +100,7 @@ class WebDavSyncGateway implements SyncGateway {
       'updated_at': note.updatedAt.millisecondsSinceEpoch,
       'deleted_at': note.deletedAt?.millisecondsSinceEpoch,
       'content_hash': note.contentHash,
-      'base_content_hash': note.baseContentHash,
+      'base_content_hash': effectiveBaseContentHash,
       'device_id': note.deviceId,
       'folder_path': note.folderPath,
       'schema_version': _schemaVersion,
@@ -130,7 +131,7 @@ class WebDavSyncGateway implements SyncGateway {
         updatedAt: note.updatedAt,
         deletedAt: note.deletedAt,
         contentHash: note.contentHash,
-        baseContentHash: note.baseContentHash,
+        baseContentHash: effectiveBaseContentHash,
         deviceId: note.deviceId,
         folderPath: note.folderPath,
         remoteFileId: remotePath,
@@ -150,7 +151,7 @@ class WebDavSyncGateway implements SyncGateway {
       updatedAt: note.updatedAt,
       deletedAt: note.deletedAt,
       contentHash: note.contentHash,
-      baseContentHash: note.baseContentHash,
+      baseContentHash: effectiveBaseContentHash,
       deviceId: note.deviceId,
       folderPath: note.folderPath,
       remoteFileId: remotePath,

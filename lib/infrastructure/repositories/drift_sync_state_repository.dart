@@ -27,7 +27,7 @@ class DriftSyncStateRepository implements SyncStateRepository {
     if (row == null) {
       await _database.into(_database.appMetadataTable).insert(
             AppMetadataTableCompanion.insert(
-              keyId: Value(_singletonKey),
+              keyId: const Value(_singletonKey),
               deviceId: generatedDeviceId,
             ),
           );
@@ -47,8 +47,21 @@ class DriftSyncStateRepository implements SyncStateRepository {
   @override
   Future<String?> getRemoteSyncCursor() async {
     final row = await _getMetadataRow();
+    final remoteSyncCursor = row?.remoteSyncCursor?.trim();
+    if (remoteSyncCursor != null && remoteSyncCursor.isNotEmpty) {
+      return remoteSyncCursor;
+    }
 
-    return row?.remoteSyncCursor ?? row?.driveSyncToken;
+    final legacyDriveToken = row?.driveSyncToken?.trim();
+    if (legacyDriveToken == null || legacyDriveToken.isEmpty) {
+      return null;
+    }
+
+    await _promoteLegacyDriveSyncToken(
+      deviceId: row!.deviceId,
+      legacyDriveToken: legacyDriveToken,
+    );
+    return legacyDriveToken;
   }
 
   @override
@@ -61,7 +74,7 @@ class DriftSyncStateRepository implements SyncStateRepository {
     if (row == null) {
       await _database.into(_database.appMetadataTable).insert(
             AppMetadataTableCompanion.insert(
-              keyId: Value(_singletonKey),
+              keyId: const Value(_singletonKey),
               deviceId: deviceId,
               remoteSyncCursor: Value(token),
             ),
@@ -83,5 +96,19 @@ class DriftSyncStateRepository implements SyncStateRepository {
     return (_database.select(_database.appMetadataTable)
           ..where((tbl) => tbl.keyId.equals(_singletonKey)))
         .getSingleOrNull();
+  }
+
+  Future<void> _promoteLegacyDriveSyncToken({
+    required String deviceId,
+    required String legacyDriveToken,
+  }) async {
+    await (_database.update(_database.appMetadataTable)
+          ..where((tbl) => tbl.keyId.equals(_singletonKey)))
+        .write(
+      AppMetadataTableCompanion(
+        deviceId: Value(deviceId),
+        remoteSyncCursor: Value(legacyDriveToken),
+      ),
+    );
   }
 }

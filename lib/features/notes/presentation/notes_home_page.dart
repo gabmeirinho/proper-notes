@@ -31,6 +31,13 @@ import 'markdown_preview.dart';
 import 'note_editor_page.dart';
 import 'note_search_delegate.dart';
 
+const String _conflictCopySuffix = ' (Conflict Copy)';
+
+bool _isConflictCopy(Note note) {
+  return note.syncStatus == SyncStatus.conflicted ||
+      note.title.endsWith(_conflictCopySuffix);
+}
+
 class NotesHomePage extends StatefulWidget {
   const NotesHomePage({
     required this.createNote,
@@ -75,7 +82,6 @@ class NotesHomePageState extends State<NotesHomePage> {
   static const double _desktopBreakpoint = 900;
   static const double _desktopSidebarWidth = 320;
   static const Duration _timedSnackBarDuration = Duration(seconds: 4);
-  static const String _conflictCopySuffix = ' (Conflict Copy)';
   static const double _mobileMinTextScale = 0.8;
   static const double _mobileMaxTextScale = 1.2;
   static const double _defaultMobileTextScale = 0.92;
@@ -1562,7 +1568,7 @@ class NotesHomePageState extends State<NotesHomePage> {
           value: _NoteMenuAction.open,
           child: Text('Open'),
         ),
-        if (note.syncStatus == SyncStatus.conflicted)
+        if (_isConflictCopy(note))
           const PopupMenuItem(
             value: _NoteMenuAction.resolveConflict,
             child: Text('Resolve conflict'),
@@ -1584,7 +1590,7 @@ class NotesHomePageState extends State<NotesHomePage> {
 
     switch (action) {
       case _NoteMenuAction.open:
-        if (note.syncStatus == SyncStatus.conflicted) {
+        if (_isConflictCopy(note)) {
           await _restoreConflictCopy(note);
         } else {
           await _openEditor(note);
@@ -1632,7 +1638,7 @@ class NotesHomePageState extends State<NotesHomePage> {
   ) async {
     switch (action) {
       case _NoteMenuAction.open:
-        if (note.syncStatus == SyncStatus.conflicted) {
+        if (_isConflictCopy(note)) {
           await _restoreConflictCopy(note);
         } else {
           await _openEditor(note);
@@ -1656,7 +1662,7 @@ class NotesHomePageState extends State<NotesHomePage> {
         return _MobileNoteActionsSheet(
           note: note,
           showMoveAction: _workspaceSection == _WorkspaceSection.notes,
-          showResolveConflictAction: note.syncStatus == SyncStatus.conflicted,
+          showResolveConflictAction: _isConflictCopy(note),
         );
       },
     );
@@ -1718,7 +1724,7 @@ class NotesHomePageState extends State<NotesHomePage> {
               value: _NoteMenuAction.open,
               child: Text('Open'),
             ),
-            if (note.syncStatus == SyncStatus.conflicted)
+            if (_isConflictCopy(note))
               const PopupMenuItem(
                 value: _NoteMenuAction.resolveConflict,
                 child: Text('Resolve conflict'),
@@ -3035,9 +3041,7 @@ class _SidebarNoteTile extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final titleStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
           fontWeight: selected ? FontWeight.w700 : null,
-          color: note.syncStatus == SyncStatus.conflicted
-              ? colorScheme.tertiary
-              : null,
+          color: _isConflictCopy(note) ? colorScheme.tertiary : null,
         );
 
     Widget buildTile() {
@@ -3266,7 +3270,7 @@ class _NotesList extends StatelessWidget {
             final note = notes[index];
             final title = note.title.isEmpty ? 'Untitled note' : note.title;
             final secondaryLine = _buildSecondaryLine(note);
-            final isConflictCopy = note.syncStatus == SyncStatus.conflicted;
+            final isConflictCopy = _isConflictCopy(note);
             final colorScheme = Theme.of(context).colorScheme;
 
             return GestureDetector(

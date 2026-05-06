@@ -106,6 +106,12 @@ class AppDatabase extends _$AppDatabase {
                 appMetadataTable, appMetadataTable.remoteCollectionTag);
             await migrator.addColumn(
                 appMetadataTable, appMetadataTable.remoteFormatVersion);
+            await customStatement('''
+              UPDATE app_metadata_table
+              SET remote_sync_cursor = drive_sync_token
+              WHERE remote_sync_cursor IS NULL
+                AND drive_sync_token IS NOT NULL
+            ''');
           }
           if (from < 5) {
             await migrator.addColumn(notesTable, notesTable.remoteEtag);

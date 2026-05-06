@@ -129,6 +129,7 @@ void main() {
   test('upsertNote writes note payloads to notes/<id>.json', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final requests = <String>[];
+    Map<String, dynamic>? notePayload;
     final store = WebDavAccountStore(
       secretStore: _FakeSecretStore(),
     );
@@ -145,6 +146,10 @@ void main() {
             return http.Response('', 405);
           }
           if (request.method == 'PUT') {
+            if (request.url.path.endsWith('/notes/note-7.json')) {
+              notePayload =
+                  json.decode(request.body) as Map<String, dynamic>;
+            }
             return http.Response('', 201);
           }
           if (request.method == 'DELETE') {
@@ -172,6 +177,10 @@ void main() {
         requests,
         contains(
             'PUT /remote.php/dav/files/user/ProperNotes/notes/note-7.json'));
+    expect(
+      notePayload?['base_content_hash'],
+      computeContentHash('body'),
+    );
   });
 
   test('upsertNote returns tombstone path and etag for deleted notes',
