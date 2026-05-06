@@ -250,6 +250,45 @@ void main() {
     );
   });
 
+  testWidgets('loads editable text from canonical note content',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const content = 'First line\n';
+    final note = Note(
+      id: 'note-canonical-content',
+      title: 'Canonical content',
+      content: content,
+      documentJson: documentJsonFromEditableText(content),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    final controller = bodyField.controller!;
+    expect(controller.text, content);
+
+    controller.selection = TextSelection.collapsed(offset: content.length);
+    await tester.pumpWidget(
+      _buildEditor(
+        repository: repository,
+        note: note.copyWith(
+          updatedAt: DateTime.utc(2026, 1, 2),
+          syncStatus: SyncStatus.pendingUpload,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(controller.text, content);
+    expect(controller.selection.baseOffset, content.length);
+  });
+
   testWidgets(
       'typing a trailing space in an active code block advances the caret',
       (tester) async {

@@ -401,6 +401,10 @@ class NoteEditorPageState extends State<NoteEditorPage>
   }
 
   String _editableContentForNote(Note note) {
+    if (note.content.isNotEmpty || note.documentJson.isEmpty) {
+      return note.content;
+    }
+
     final editableText = editableTextFromDocument(note.document);
     return editableText.isEmpty ? note.content : editableText;
   }
@@ -431,15 +435,19 @@ class NoteEditorPageState extends State<NoteEditorPage>
 
     _isApplyingExternalNoteUpdate = true;
     try {
-      _titleController.value = TextEditingValue(
-        text: note.title,
-        selection: clampedTitleSelection,
-      );
-      _contentController.value = TextEditingValue(
-        text: content,
-        selection: clampedContentSelection,
-      );
-      _contentController.clearHistory();
+      if (_titleController.text != note.title) {
+        _titleController.value = TextEditingValue(
+          text: note.title,
+          selection: clampedTitleSelection,
+        );
+      }
+      if (_contentController.text != content) {
+        _contentController.value = TextEditingValue(
+          text: content,
+          selection: clampedContentSelection,
+        );
+        _contentController.clearHistory();
+      }
       _persistedNote = note;
       _lastPersistedSnapshot = snapshot;
       if (mounted) {
