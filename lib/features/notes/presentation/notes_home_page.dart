@@ -54,6 +54,8 @@ class NotesHomePage extends StatefulWidget {
     required this.noteRepository,
     required this.authController,
     required this.syncController,
+    this.themeMode = ThemeMode.system,
+    this.onThemeModeChanged,
     this.onLocalChangePersisted,
     super.key,
   });
@@ -72,6 +74,8 @@ class NotesHomePage extends StatefulWidget {
   final NoteRepository noteRepository;
   final AuthController authController;
   final SyncController syncController;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode>? onThemeModeChanged;
   final VoidCallback? onLocalChangePersisted;
 
   @override
@@ -391,6 +395,12 @@ class NotesHomePageState extends State<NotesHomePage> {
                         await _forceReuploadAllNotes();
                       case _MobileAppMenuAction.account:
                         await _showAccountSheet();
+                      case _MobileAppMenuAction.themeSystem:
+                        _setThemeMode(ThemeMode.system);
+                      case _MobileAppMenuAction.themeLight:
+                        _setThemeMode(ThemeMode.light);
+                      case _MobileAppMenuAction.themeDark:
+                        _setThemeMode(ThemeMode.dark);
                       case _MobileAppMenuAction.noteTextSize:
                         await _showMobileTextSizeSheet();
                       case _MobileAppMenuAction.importObsidianNotes:
@@ -399,28 +409,43 @@ class NotesHomePageState extends State<NotesHomePage> {
                         await _showAttachmentsFolder();
                     }
                   },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
                       value: _MobileAppMenuAction.syncNow,
                       child: Text('Sync now'),
                     ),
-                    PopupMenuItem(
+                    const PopupMenuItem(
                       value: _MobileAppMenuAction.forceReuploadAllNotes,
                       child: Text('Force re-upload all notes'),
                     ),
-                    PopupMenuItem(
+                    const PopupMenuItem(
                       value: _MobileAppMenuAction.account,
                       child: Text('Account'),
                     ),
-                    PopupMenuItem(
+                    CheckedPopupMenuItem(
+                      value: _MobileAppMenuAction.themeSystem,
+                      checked: widget.themeMode == ThemeMode.system,
+                      child: const Text('Use system theme'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: _MobileAppMenuAction.themeLight,
+                      checked: widget.themeMode == ThemeMode.light,
+                      child: const Text('Light mode'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: _MobileAppMenuAction.themeDark,
+                      checked: widget.themeMode == ThemeMode.dark,
+                      child: const Text('Dark mode'),
+                    ),
+                    const PopupMenuItem(
                       value: _MobileAppMenuAction.noteTextSize,
                       child: Text('Note text size'),
                     ),
-                    PopupMenuItem(
+                    const PopupMenuItem(
                       value: _MobileAppMenuAction.importObsidianNotes,
                       child: Text('Import Obsidian notes'),
                     ),
-                    PopupMenuItem(
+                    const PopupMenuItem(
                       value: _MobileAppMenuAction.showAttachmentsFolder,
                       child: Text('Show attachments folder'),
                     ),
@@ -738,31 +763,56 @@ class NotesHomePageState extends State<NotesHomePage> {
             await _runSync();
           case _TopBarMenuAction.forceReuploadAllNotes:
             await _forceReuploadAllNotes();
+          case _TopBarMenuAction.themeSystem:
+            _setThemeMode(ThemeMode.system);
+          case _TopBarMenuAction.themeLight:
+            _setThemeMode(ThemeMode.light);
+          case _TopBarMenuAction.themeDark:
+            _setThemeMode(ThemeMode.dark);
           case _TopBarMenuAction.importObsidianNotes:
             await _importObsidianNotes();
           case _TopBarMenuAction.showAttachmentsFolder:
             await _showAttachmentsFolder();
         }
       },
-      itemBuilder: (context) => const [
-        PopupMenuItem(
+      itemBuilder: (context) => [
+        const PopupMenuItem(
           value: _TopBarMenuAction.syncNow,
           child: Text('Sync now'),
         ),
-        PopupMenuItem(
+        const PopupMenuItem(
           value: _TopBarMenuAction.forceReuploadAllNotes,
           child: Text('Force re-upload all notes'),
         ),
-        PopupMenuItem(
+        CheckedPopupMenuItem(
+          value: _TopBarMenuAction.themeSystem,
+          checked: widget.themeMode == ThemeMode.system,
+          child: const Text('Use system theme'),
+        ),
+        CheckedPopupMenuItem(
+          value: _TopBarMenuAction.themeLight,
+          checked: widget.themeMode == ThemeMode.light,
+          child: const Text('Light mode'),
+        ),
+        CheckedPopupMenuItem(
+          value: _TopBarMenuAction.themeDark,
+          checked: widget.themeMode == ThemeMode.dark,
+          child: const Text('Dark mode'),
+        ),
+        const PopupMenuItem(
           value: _TopBarMenuAction.importObsidianNotes,
           child: Text('Import Obsidian notes'),
         ),
-        PopupMenuItem(
+        const PopupMenuItem(
           value: _TopBarMenuAction.showAttachmentsFolder,
           child: Text('Show attachments folder'),
         ),
       ],
     );
+  }
+
+  void _setThemeMode(ThemeMode themeMode) {
+    widget.onThemeModeChanged?.call(themeMode);
   }
 
   Future<void> _createNote() async {
@@ -3214,6 +3264,9 @@ class _SidebarNoteSyncIndicator extends StatelessWidget {
 enum _TopBarMenuAction {
   syncNow,
   forceReuploadAllNotes,
+  themeSystem,
+  themeLight,
+  themeDark,
   importObsidianNotes,
   showAttachmentsFolder,
 }
@@ -3514,6 +3567,9 @@ enum _MobileAppMenuAction {
   syncNow,
   forceReuploadAllNotes,
   account,
+  themeSystem,
+  themeLight,
+  themeDark,
   noteTextSize,
   importObsidianNotes,
   showAttachmentsFolder,

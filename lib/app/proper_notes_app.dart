@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/services/window_control_service.dart';
 import '../features/auth/application/auth_controller.dart';
@@ -46,6 +47,7 @@ class ProperNotesApp extends StatefulWidget {
 
 class _ProperNotesAppState extends State<ProperNotesApp> {
   static const Duration _desktopExitSyncTimeout = Duration(seconds: 3);
+  static const String _themeModePreferenceKey = 'appearance.theme_mode';
   late final AuthController _authController;
   late final SyncController _syncController;
   late final AutoSyncCoordinator _autoSyncCoordinator;
@@ -58,6 +60,7 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
   final WindowControlService _windowControlService =
       const WindowControlService();
   String? _deviceId;
+  ThemeMode _themeMode = ThemeMode.system;
 
   @override
   void initState() {
@@ -90,6 +93,7 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
       onExitRequested: _handleExitRequested,
     );
     _restoreBootstrapState();
+    unawaited(_restoreThemeMode());
   }
 
   Future<void> _restoreBootstrapState() async {
@@ -101,6 +105,35 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
       _deviceId = deviceId;
     });
     _authController.restore();
+  }
+
+  Future<void> _restoreThemeMode() async {
+    final preferences = await SharedPreferences.getInstance();
+    final restoredThemeMode = _themeModeFromPreference(
+        preferences.getString(_themeModePreferenceKey));
+    if (!mounted || restoredThemeMode == _themeMode) {
+      return;
+    }
+
+    setState(() {
+      _themeMode = restoredThemeMode;
+    });
+  }
+
+  Future<void> _setThemeMode(ThemeMode themeMode) async {
+    if (_themeMode == themeMode) {
+      return;
+    }
+
+    setState(() {
+      _themeMode = themeMode;
+    });
+
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(
+      _themeModePreferenceKey,
+      _themeModeToPreference(themeMode),
+    );
   }
 
   @override
@@ -119,7 +152,9 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
     if (deviceId == null) {
       return MaterialApp(
         title: 'Proper Notes',
-        theme: _buildTheme(),
+        theme: _buildLightTheme(),
+        darkTheme: _buildDarkTheme(),
+        themeMode: _themeMode,
         builder: _wrapWithSystemUiStyle,
         home: const Scaffold(
           body: Center(
@@ -131,7 +166,9 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
 
     return MaterialApp(
       title: 'Proper Notes',
-      theme: _buildTheme(),
+      theme: _buildLightTheme(),
+      darkTheme: _buildDarkTheme(),
+      themeMode: _themeMode,
       builder: _wrapWithSystemUiStyle,
       home: NotesHomePage(
         key: _homePageKey,
@@ -160,6 +197,8 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
         noteRepository: widget.noteRepository,
         authController: _authController,
         syncController: _syncController,
+        themeMode: _themeMode,
+        onThemeModeChanged: _setThemeMode,
         onLocalChangePersisted: _autoSyncCoordinator.notifyLocalChangePersisted,
       ),
     );
@@ -198,19 +237,21 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
   }
 
   Widget _wrapWithSystemUiStyle(BuildContext context, Widget? child) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: const SystemUiOverlayStyle(
+      value: SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.dark,
-        statusBarBrightness: Brightness.light,
+        statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+        statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
         systemNavigationBarColor: Colors.transparent,
-        systemNavigationBarIconBrightness: Brightness.dark,
+        systemNavigationBarIconBrightness:
+            isDark ? Brightness.light : Brightness.dark,
       ),
       child: child ?? const SizedBox.shrink(),
     );
   }
 
-  ThemeData _buildTheme() {
+  ThemeData _buildLightTheme() {
     const background = Color(0xFFFFFFFF);
     const surface = Color(0xFFFFFFFF);
     const primary = Color(0xFF161616);
@@ -305,5 +346,127 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
         ),
       ),
     );
+  }
+
+  ThemeData _buildDarkTheme() {
+    const background = Color(0xFF11100F);
+    const surface = Color(0xFF1A1917);
+    const primary = Color(0xFFF5F1EA);
+    const secondary = Color(0xFFC8BFB4);
+    final scheme = const ColorScheme.dark(
+      primary: primary,
+      onPrimary: Color(0xFF1A1917),
+      secondary: secondary,
+      onSecondary: Color(0xFF24211F),
+      surface: surface,
+      onSurface: primary,
+      error: Color(0xFFFFB4AB),
+      onError: Color(0xFF690005),
+      errorContainer: Color(0xFF93000A),
+      onErrorContainer: Color(0xFFFFDAD6),
+      tertiaryContainer: Color(0xFF5E4F18),
+      onTertiaryContainer: Color(0xFFF7E4A4),
+    ).copyWith(
+      surfaceContainerLowest: const Color(0xFF0C0B0A),
+      surfaceContainerLow: const Color(0xFF171614),
+      surfaceContainer: const Color(0xFF1F1D1B),
+      surfaceContainerHigh: const Color(0xFF292724),
+      surfaceContainerHighest: const Color(0xFF35312D),
+      outline: const Color(0xFF9E968C),
+      outlineVariant: const Color(0xFF4D4741),
+      secondaryContainer: const Color(0xFF3B342D),
+      onSecondaryContainer: const Color(0xFFE9DED2),
+      primaryContainer: const Color(0xFF403A33),
+      onPrimaryContainer: primary,
+      onSurfaceVariant: const Color(0xFFD1C7BB),
+    );
+
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      colorScheme: scheme,
+      scaffoldBackgroundColor: background,
+      canvasColor: background,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: background,
+        foregroundColor: primary,
+        elevation: 0,
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: const Color(0xFFF5F1EA),
+        contentTextStyle: const TextStyle(color: Color(0xFF171614)),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+      ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: surface,
+        foregroundColor: primary,
+        extendedTextStyle: const TextStyle(
+          fontWeight: FontWeight.w700,
+          fontSize: 22,
+          color: primary,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(28),
+        ),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: background,
+        showDragHandle: true,
+      ),
+      dividerColor: const Color(0xFF4D4741),
+      textTheme: Typography.whiteMountainView.copyWith(
+        headlineSmall: const TextStyle(
+          fontSize: 26,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.8,
+          color: primary,
+        ),
+        titleLarge: const TextStyle(
+          fontSize: 24,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.6,
+          color: primary,
+        ),
+        titleMedium: const TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+          color: primary,
+        ),
+        bodyLarge: const TextStyle(
+          fontSize: 18,
+          height: 1.45,
+          color: primary,
+        ),
+        bodyMedium: const TextStyle(
+          fontSize: 16,
+          height: 1.4,
+          color: primary,
+        ),
+        bodySmall: const TextStyle(
+          fontSize: 14,
+          height: 1.35,
+          color: secondary,
+        ),
+      ),
+    );
+  }
+
+  ThemeMode _themeModeFromPreference(String? preference) {
+    return switch (preference) {
+      'dark' => ThemeMode.dark,
+      'light' => ThemeMode.light,
+      _ => ThemeMode.system,
+    };
+  }
+
+  String _themeModeToPreference(ThemeMode themeMode) {
+    return switch (themeMode) {
+      ThemeMode.dark => 'dark',
+      ThemeMode.light => 'light',
+      ThemeMode.system => 'system',
+    };
   }
 }

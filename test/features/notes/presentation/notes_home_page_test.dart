@@ -96,6 +96,9 @@ void main() {
 
       expect(find.text('Sync now'), findsOneWidget);
       expect(find.text('Force re-upload all notes'), findsOneWidget);
+      expect(find.text('Use system theme'), findsOneWidget);
+      expect(find.text('Light mode'), findsOneWidget);
+      expect(find.text('Dark mode'), findsOneWidget);
       expect(find.text('Import Obsidian notes'), findsOneWidget);
       expect(find.text('Show attachments folder'), findsOneWidget);
     },
