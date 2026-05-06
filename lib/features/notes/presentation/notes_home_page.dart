@@ -2629,14 +2629,13 @@ class _DesktopSidebarTreeContent extends StatelessWidget {
         hasChildren: hasChildren,
         onTap: () {
           if (hasChildren) {
-            if (isExpanded && selectedFolderPath == folder.path) {
+            if (isExpanded) {
+              onSelectFolder(folder.path);
               onToggleFolderExpansion(folder.path);
               return;
             }
 
-            if (!isExpanded) {
-              onToggleFolderExpansion(folder.path);
-            }
+            onToggleFolderExpansion(folder.path);
           }
 
           onSelectFolder(folder.path);

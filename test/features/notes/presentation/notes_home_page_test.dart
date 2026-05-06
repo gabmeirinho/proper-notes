@@ -762,6 +762,96 @@ void main() {
   );
 
   testWidgets(
+    'desktop sidebar folder row collapses an expanded unselected folder',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final folderRepository = _FakeFolderRepository(
+        initialFolders: [
+          Folder(
+            path: 'Projects',
+            parentPath: null,
+            createdAt: DateTime(2026, 1, 1),
+          ),
+        ],
+      );
+      final noteRepository = _FakeNoteRepository(
+        initialActiveNotes: [
+          Note(
+            id: 'note-1',
+            title: 'Roadmap',
+            content: 'Plan the next release',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 2),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'hash-1',
+            deviceId: 'device-1',
+            folderPath: 'Projects',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NotesHomePage(
+            createNote: CreateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            createFolder: CreateFolder(repository: folderRepository),
+            deleteFolder: DeleteFolder(repository: folderRepository),
+            renameFolder: RenameFolder(repository: folderRepository),
+            moveNote: MoveNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            updateNote: UpdateNote(
+              repository: noteRepository,
+              deviceId: 'device-1',
+            ),
+            deleteNote: DeleteNote(repository: noteRepository),
+            restoreNote: RestoreNote(repository: noteRepository),
+            searchNotes: SearchNotes(repository: noteRepository),
+            folderRepository: folderRepository,
+            noteRepository: noteRepository,
+            authController: AuthController(authService: _FakeAuthService()),
+            syncController: SyncController(
+              runManualSync: RunManualSync(
+                noteRepository: noteRepository,
+                syncGateway: _FakeSyncGateway(),
+                syncStateRepository: _FakeSyncStateRepository(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(
+        find.byKey(const ValueKey('sidebar-folder-toggle-Projects')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('sidebar-note-note-1')), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('sidebar-note-note-1')), findsNothing);
+      expect(
+        find.textContaining('Current location: "Projects"'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
     'desktop editor refreshes when the open note changes in the repository',
     (tester) async {
       tester.view.physicalSize = const Size(1400, 900);
