@@ -1,126 +1,155 @@
-# Proper Notes Next Steps
+# Proper Notes Backend Plan
 
-This file replaces the earlier migration document with the concrete next milestone for the app.
+This file is the reviewed source for the current backend and sync direction.
+Keep implementation changes aligned with it, or update this file in the same
+change when the direction intentionally changes.
 
-The current product already has:
-- local-first notes and folders
-- editor and autosave flows
-- manual sync wiring
-- WebDAV account setup
-- a working WebDAV gateway
+## Current State
 
-The main remaining risk is not feature breadth. It is trust:
-- finishing the backend cutover cleanly
-- proving sync safety in edge cases
-- shipping a version that matches the stated v1 scope
+Proper Notes is now centered on the v1 backend direction:
+
+- Flutter and Dart app for Linux and Android
+- Drift over SQLite as the local source of truth
+- WebDAV as the sync transport
+- Nextcloud-compatible account setup through server URL, username, and app
+  password
+- manual sync as the correctness baseline
+- tombstone-based deletes
+- content-hash and base-content-hash reconciliation
+- conflict copies when concurrent changes cannot be resolved safely
+- attachment sync for note-referenced local images
+- conflict and pending-sync status shown distinctly in the notes list and
+  editor
+- manual sync results shown after successful foreground sync without implying
+  automatic conflict resolution
+- clean `flutter analyze` output
+
+Google Drive is not an active v1 backend. Legacy Google-era database fields may
+remain only to preserve upgrade safety for existing local databases.
 
 ## Current Priority
 
-Finish the WebDAV transition and harden sync correctness before adding more product surface area.
+The next milestone is v0.1 stabilization:
 
-Why this is the next step:
-- the app already delivers the core offline note workflow
-- WebDAV is already the active runtime direction
-- Google-era code and vocabulary still remain in the repo
-- sync is the safety-critical subsystem for this product
+1. Keep the local database as the source of truth.
+2. Keep sync conservative and conflict-safe.
+3. Make the project clean under analyzer.
+4. Keep docs aligned with the implementation.
+5. Avoid adding new product surface until the existing backend path is boring
+   and reliable.
 
-## Milestone Goal
+Do not add a WebDAV smoke-test harness as part of this milestone. WebDAV
+behavior should continue to be covered through focused unit and application
+tests unless that priority is explicitly reopened later.
 
-Reach a v1-ready backend state where:
-- WebDAV is the only supported sync path in the product
-- Google OAuth and Google Drive are no longer required to build or run the app
-- upgrade from older local databases is safe
-- sync behavior is conservative and test-covered for conflict and deletion scenarios
-- real Nextcloud verification is repeatable
+## Backend Rules
 
-## Step 1: Complete The WebDAV Cutover
+The backend must continue to follow these constraints:
 
-Remove Google-specific product and infrastructure code that no longer fits v1.
+- UI code must not call WebDAV directly.
+- Remote sync logic must stay behind `SyncGateway`.
+- Credential handling must stay behind the auth/account store boundary.
+- WebDAV passwords must not be stored in SQLite.
+- Note identity must use app-owned UUIDs.
+- Remote paths, hrefs, ETags, and collection tags are cache metadata only.
+- Sync correctness must not depend primarily on wall-clock timestamps.
+- Missing remote files must not be treated as deletions by themselves.
+- Deletes must remain tombstone-first.
+- Conflict preservation is preferred over automatic merge behavior.
 
-Deliverables:
-- remove `google_sign_in` and any unused Google-only dependencies
-- remove Google auth services, token clients, config files, and Drive gateway code once migration safety is covered
-- remove Google-era tests that only validate dead paths
-- remove fallback behavior that treats Drive-specific state as normal runtime sync state
-- update labels, comments, and naming that still describe the app as Google-backed
+## Completed Backend Work
 
-Guardrails:
-- do not break upgrade safety for existing local databases
-- do not remove fields or code paths until migration coverage exists
+The current codebase already includes:
 
-## Step 2: Finish Metadata Migration Cleanly
+- Drift schema and migrations through schema version 6
+- canonical `remote_sync_cursor` metadata
+- legacy Drive-token migration coverage
+- WebDAV deterministic remote layout
+- note and tombstone upload/download behavior
+- ETag-based fetch optimization with fallback when ETags are missing
+- attachment upload and download behavior
+- conflict-copy preservation
+- stale-device, delete/edit, restore, retry, attachment retry, and
+  shared-remote sync regression tests
+- sync-result and conflict-status UI coverage
 
-The app metadata layer still carries migration residue. Clean that up explicitly.
+## Next Implementation Steps
 
-Deliverables:
-- review whether `drive_sync_token` should be preserved only for one-time upgrade handling or removed entirely
-- make `remote_sync_cursor` the canonical sync cursor field
-- preserve `device_id`
-- preserve enough account metadata for debuggability without storing secrets in SQLite
-- document the final meaning of app metadata fields
+### 1. Preserve Migration Safety
 
-Required tests:
-- migration from a Google-era schema to the current schema
-- migration preserving `device_id`
-- migration behavior when legacy Drive token data exists
+Any schema change must include:
 
-## Step 3: Harden WebDAV Sync Safety
+- explicit Drift migration logic
+- migration tests from older known schemas
+- preservation of `device_id`
+- preservation or deliberate migration of sync metadata
+- no storage of WebDAV secrets in SQLite
 
-Expand coverage around the cases most likely to damage trust.
+Legacy Google-era fields should be removed only when there is a reviewed
+migration plan proving old local databases upgrade safely.
 
-Required behavior to verify:
-- missing remote note file without tombstone is treated as ambiguous, not deletion
-- concurrent local edit and remote delete preserves user content
-- stale device returns after long offline period without silent loss
-- partial failure mid-sync is recoverable on retry
-- malformed `PROPFIND` responses fail explicitly
-- missing ETags do not break correctness
-- attachment upload and download retries remain safe
-- delete and restore flows remain tombstone-first
+### 2. Keep Sync Regression Coverage Current
 
-Required tests:
-- application-layer reconciliation tests
-- WebDAV gateway failure-mode tests
-- stale-device tests
-- delete-resurrection tests
-- conflict-copy preservation tests
+Sync coverage is current for the existing backend behavior. When sync behavior
+changes, add or update tests for the exact safety property.
 
-## Step 4: Run Real Nextcloud Verification
+Covered priority cases include:
 
-Mock tests are necessary but not sufficient.
+- stale devices returning after remote changes
+- local edit versus remote delete
+- local delete versus remote edit
+- tombstone and restore cycles
+- partial sync failure followed by retry
+- malformed WebDAV responses
+- missing or unstable ETags
+- attachment retry behavior
 
-Create a repeatable manual verification checklist against a real Nextcloud server.
+### 3. Finish Conflict UX Release Polish
 
-Minimum checklist:
-- connect with server URL, username, and app password
-- bootstrap remote folder layout
-- upload a new note
-- edit the same note on another device and sync both sides
-- delete and restore notes across devices
-- verify attachment upload and retrieval
-- verify auth failure handling without corrupting local state
-- verify reconnect after invalid credentials
+Conflict and sync-status basics are now in place:
 
-## Step 5: Only Then Add New Features
+- conflict copies are called out in app-level sync status
+- note/editor badges distinguish pending upload, pending delete, and conflict
+- successful manual sync results are visible and dismissible
+- conflict counts are described as preserved conflicts, not resolved conflicts
 
-After the cutover and hardening milestone is complete, the next product-facing priorities should be:
-- polish sync status UX so users understand what happened during manual sync
-- improve conflict visibility and recovery UX
-- add stronger attachment handling polish
-- consider background sync only after manual sync is boring and reliable
+Remaining release-polish work should stay narrow:
 
-Not the next step right now:
-- new backend providers
+- make the conflict resolution sheet clearer about which note is original and
+  which note is the preserved conflict copy
+- show enough note metadata in conflict resolution to compare versions without
+  opening both notes first
+- keep the resolution flow explicit: deleting or keeping a version must remain a
+  user action
+- add focused widget coverage for the conflict resolution choices
+
+## Out Of Scope For This Milestone
+
+- WebDAV smoke-test harness
+- Google Drive or Google OAuth product support
+- additional sync providers
 - collaboration
-- rich editor expansion
-- broad platform expansion beyond the current Linux and Android focus
+- shared notebooks
+- rich block editor expansion
+- end-to-end encryption
+- web app
+- background sync as a correctness dependency
+
+## Next Step
+
+The next implementation step is to improve the conflict resolution sheet. It
+should display both candidate versions with title, folder, updated time, and a
+short content preview, then keep the existing explicit actions for opening or
+choosing a version. This is product-facing polish only; it should not change
+sync reconciliation, schema, or conflict-copy preservation semantics.
 
 ## Definition Of Done
 
 This milestone is complete when:
-- the app builds and runs without Google dependencies
-- WebDAV is the only active sync backend
-- migration tests pass
-- sync safety tests cover the critical edge cases
-- a real Nextcloud checklist has been executed successfully
-- docs describe the actual shipped architecture rather than the transition
+
+- `flutter analyze` is clean
+- `flutter test` is clean
+- docs describe WebDAV as the current backend, not a migration placeholder
+- `PLAN.MD` matches the implemented direction
+- sync safety tests cover any behavior changed during the milestone
+- no new feature work has weakened local-first or conflict-preserving behavior

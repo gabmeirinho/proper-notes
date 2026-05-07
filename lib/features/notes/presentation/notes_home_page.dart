@@ -138,7 +138,7 @@ class NotesHomePageState extends State<NotesHomePage> {
   }
 
   void _handleSyncControllerChanged() {
-    final summary = widget.syncController.errorMessage;
+    final summary = _currentSyncNotice;
 
     if (summary == null) {
       _syncNoticeDismissTimer?.cancel();
@@ -157,6 +157,15 @@ class NotesHomePageState extends State<NotesHomePage> {
     if (mounted) {
       setState(() {});
     }
+  }
+
+  String? get _currentSyncNotice {
+    if (widget.syncController.isSyncing) {
+      return null;
+    }
+
+    return widget.syncController.errorMessage ??
+        widget.syncController.lastMessage;
   }
 
   @override
@@ -203,17 +212,33 @@ class NotesHomePageState extends State<NotesHomePage> {
                         return const SizedBox.shrink();
                       }
 
-                      final error = widget.syncController.errorMessage;
-                      if (error == null) {
+                      final summary = _currentSyncNotice;
+                      if (summary == null) {
                         return const SizedBox.shrink();
                       }
 
-                      const isError = true;
-                      final summary = error;
                       if (_dismissedSyncNotice == summary) {
                         return const SizedBox.shrink();
                       }
-                      final details = widget.syncController.errorDetails;
+                      final colorScheme = Theme.of(context).colorScheme;
+                      final isError =
+                          widget.syncController.errorMessage != null;
+                      final hasConflicts =
+                          (widget.syncController.lastResult?.conflictCount ??
+                                  0) >
+                              0;
+                      final backgroundColor = isError
+                          ? colorScheme.errorContainer
+                          : hasConflicts
+                              ? colorScheme.tertiaryContainer
+                              : colorScheme.secondaryContainer;
+                      final foregroundColor = isError
+                          ? colorScheme.onErrorContainer
+                          : hasConflicts
+                              ? colorScheme.onTertiaryContainer
+                              : colorScheme.onSecondaryContainer;
+                      final details =
+                          isError ? widget.syncController.errorDetails : null;
 
                       return Container(
                         width: double.infinity,
@@ -223,11 +248,7 @@ class NotesHomePageState extends State<NotesHomePage> {
                           vertical: 10,
                         ),
                         decoration: BoxDecoration(
-                          color: isError
-                              ? Theme.of(context).colorScheme.errorContainer
-                              : Theme.of(context)
-                                  .colorScheme
-                                  .secondaryContainer,
+                          color: backgroundColor,
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Row(
@@ -238,15 +259,11 @@ class NotesHomePageState extends State<NotesHomePage> {
                               child: Icon(
                                 isError
                                     ? Icons.error_outline
-                                    : Icons.check_circle_outline,
+                                    : hasConflicts
+                                        ? Icons.warning_amber_outlined
+                                        : Icons.cloud_done_outlined,
                                 size: 18,
-                                color: isError
-                                    ? Theme.of(context)
-                                        .colorScheme
-                                        .onErrorContainer
-                                    : Theme.of(context)
-                                        .colorScheme
-                                        .onSecondaryContainer,
+                                color: foregroundColor,
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -257,19 +274,11 @@ class NotesHomePageState extends State<NotesHomePage> {
                                     .textTheme
                                     .bodySmall
                                     ?.copyWith(
-                                      color: isError
-                                          ? Theme.of(context)
-                                              .colorScheme
-                                              .onErrorContainer
-                                          : Theme.of(context)
-                                              .colorScheme
-                                              .onSecondaryContainer,
+                                      color: foregroundColor,
                                     ),
                               ),
                             ),
-                            if (isError &&
-                                details != null &&
-                                details != summary) ...[
+                            if (details != null && details != summary) ...[
                               const SizedBox(width: 8),
                               TextButton(
                                 onPressed: () => _showSyncErrorDetails(
@@ -660,6 +669,10 @@ class NotesHomePageState extends State<NotesHomePage> {
                   activeSnapshot.data ?? const <Note>[],
                   deletedSnapshot.data ?? const <Note>[],
                 );
+                final hasConflictedNotes = _hasConflictedNotes(
+                  activeSnapshot.data ?? const <Note>[],
+                  deletedSnapshot.data ?? const <Note>[],
+                );
 
                 return _AppSyncStatusChip(
                   key: ValueKey(
@@ -671,6 +684,7 @@ class NotesHomePageState extends State<NotesHomePage> {
                     syncReady: syncReady,
                     isCheckingAccount: isCheckingAccount,
                     hasUnsyncedNotes: hasUnsyncedNotes,
+                    hasConflictedNotes: hasConflictedNotes,
                   ),
                   compact: compact,
                 );
@@ -685,6 +699,11 @@ class NotesHomePageState extends State<NotesHomePage> {
   bool _hasUnsyncedNotes(List<Note> activeNotes, List<Note> deletedNotes) {
     return activeNotes.any(_noteRequiresSyncAttention) ||
         deletedNotes.any(_noteRequiresSyncAttention);
+  }
+
+  bool _hasConflictedNotes(List<Note> activeNotes, List<Note> deletedNotes) {
+    return activeNotes.any(_isConflictCopy) ||
+        deletedNotes.any(_isConflictCopy);
   }
 
   bool _noteRequiresSyncAttention(Note note) {
@@ -737,6 +756,7 @@ class NotesHomePageState extends State<NotesHomePage> {
     required bool syncReady,
     required bool isCheckingAccount,
     required bool hasUnsyncedNotes,
+    required bool hasConflictedNotes,
   }) {
     if (widget.syncController.errorMessage != null) {
       return 'Sync failed';
@@ -749,6 +769,9 @@ class NotesHomePageState extends State<NotesHomePage> {
     }
     if (!syncReady) {
       return 'Sync off';
+    }
+    if (hasConflictedNotes) {
+      return 'Conflicts';
     }
     if (hasUnsyncedNotes) {
       return 'Not synced';
@@ -3769,6 +3792,13 @@ class _AppSyncStatusChip extends StatelessWidget {
           colorScheme.onPrimaryContainer,
           colorScheme.primary.withValues(alpha: 0.18),
         ),
+      'Conflicts' => (
+          Icons.warning_amber_outlined,
+          colorScheme.tertiary,
+          colorScheme.tertiaryContainer.withValues(alpha: 0.92),
+          colorScheme.onTertiaryContainer,
+          colorScheme.tertiary.withValues(alpha: 0.18),
+        ),
       _ => (
           Icons.cloud_done_outlined,
           colorScheme.secondary,
@@ -3808,7 +3838,7 @@ class _AppSyncStatusChip extends StatelessWidget {
                 children: [
                   Center(
                     child: Icon(
-                      Icons.sync_outlined,
+                      statusIcon,
                       size: iconSize,
                       color: foregroundColor,
                     ),
@@ -4110,19 +4140,19 @@ class _SyncStatusChip extends StatelessWidget {
           colorScheme.onSecondaryContainer,
         ),
       SyncStatus.pendingUpload => (
-          'Not synced',
+          'Pending sync',
           Icons.cloud_upload_outlined,
           colorScheme.primaryContainer,
           colorScheme.onPrimaryContainer,
         ),
       SyncStatus.pendingDelete => (
-          'Not synced',
+          'Pending delete',
           Icons.delete_outline,
           colorScheme.errorContainer,
           colorScheme.onErrorContainer,
         ),
       SyncStatus.conflicted => (
-          'Not synced',
+          'Conflict',
           Icons.warning_amber_outlined,
           colorScheme.tertiaryContainer,
           colorScheme.onTertiaryContainer,

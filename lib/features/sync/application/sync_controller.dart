@@ -12,6 +12,7 @@ class SyncController extends ChangeNotifier {
 
   bool _isSyncing = false;
   String? _lastMessage;
+  ManualSyncResult? _lastResult;
   String? _errorMessage;
   String? _errorDetails;
   DateTime? _lastCompletedAt;
@@ -19,6 +20,7 @@ class SyncController extends ChangeNotifier {
 
   bool get isSyncing => _isSyncing;
   String? get lastMessage => _lastMessage;
+  ManualSyncResult? get lastResult => _lastResult;
   String? get errorMessage => _errorMessage;
   String? get errorDetails => _errorDetails;
   DateTime? get lastCompletedAt => _lastCompletedAt;
@@ -45,11 +47,13 @@ class SyncController extends ChangeNotifier {
     _isSyncing = true;
     _errorMessage = null;
     _errorDetails = null;
+    _lastResult = null;
     _lastMessage = 'Syncing notes...';
     notifyListeners();
 
     try {
       final result = await _runManualSync();
+      _lastResult = result;
       _lastMessage = result.summary();
       debugPrint('[Sync] ${result.summary()}');
       _lastCompletedAt = result.completedAt;

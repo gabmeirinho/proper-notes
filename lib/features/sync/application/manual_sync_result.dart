@@ -27,7 +27,7 @@ class ManualSyncResult {
       if (downloadedCount > 0) '$downloadedCount downloaded',
       if (unchangedCount > 0) '$unchangedCount unchanged',
       if (conflictCount > 0)
-        '$conflictCount conflict${conflictCount == 1 ? '' : 's'}',
+        '$conflictCount conflict${conflictCount == 1 ? '' : 's'} preserved',
     ];
 
     if (parts.isEmpty) {

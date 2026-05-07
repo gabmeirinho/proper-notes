@@ -293,6 +293,78 @@ void main() {
     );
   });
 
+  testWidgets('mobile sync status indicator calls out conflict copies',
+      (tester) async {
+    tester.view.physicalSize = const Size(430, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'conflict-note',
+          title: 'Roadmap (Conflict Copy)',
+          content: 'Body',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 1),
+          syncStatus: SyncStatus.conflicted,
+          contentHash: 'hash-1',
+          deviceId: 'device-1',
+        ),
+      ],
+    );
+    final folderRepository = _FakeFolderRepository();
+    final authController =
+        AuthController(authService: _SignedInFakeAuthService());
+    await authController.restore();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: authController,
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('compact-app-sync-status-indicator')),
+        matching: find.text('Conflicts'),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets(
       'mobile editor keeps the app-bar sync status visible while editing',
       (tester) async {
@@ -2404,7 +2476,7 @@ void main() {
   );
 
   testWidgets(
-    'successful sync does not show a sync notice',
+    'successful sync shows a dismissible sync result notice',
     (tester) async {
       final noteRepository = _FakeNoteRepository();
       final folderRepository = _FakeFolderRepository();
@@ -2452,8 +2524,13 @@ void main() {
       await syncController.syncNow();
       await tester.pumpAndSettle();
 
+      expect(find.textContaining('Sync complete'), findsOneWidget);
+      expect(find.byTooltip('Dismiss sync notice'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Dismiss sync notice'));
+      await tester.pumpAndSettle();
+
       expect(find.textContaining('Sync complete'), findsNothing);
-      expect(find.byTooltip('Dismiss sync notice'), findsNothing);
     },
   );
 
