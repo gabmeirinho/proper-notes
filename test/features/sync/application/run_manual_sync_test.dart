@@ -841,6 +841,292 @@ void main() {
       ['remote-conflict-copy', 'edited-remotely'],
     );
   });
+
+  test('stale device preserves both edits after returning offline', () async {
+    const baseContent = 'shared base';
+    final remoteStore = _SharedRemoteStore()
+      ..seed(_remoteNote(id: 'stale-note', content: baseContent));
+    final desktop = _SyncingNoteRepository(
+      deviceId: 'desktop',
+      initialNotes: [
+        _syncedNote(
+          id: 'stale-note',
+          content: baseContent,
+          deviceId: 'desktop',
+        ),
+      ],
+    );
+    final mobile = _SyncingNoteRepository(
+      deviceId: 'mobile',
+      initialNotes: [
+        _syncedNote(
+          id: 'stale-note',
+          content: baseContent,
+          deviceId: 'mobile',
+        ),
+      ],
+    );
+    final desktopSync = RunManualSync(
+      noteRepository: desktop,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository:
+          _FakeSyncStateRepository(initialToken: 'desktop-old'),
+    );
+    final mobileSync = RunManualSync(
+      noteRepository: mobile,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository: _FakeSyncStateRepository(initialToken: 'mobile-old'),
+      uuid: const _FixedUuid('stale-conflict-copy'),
+    );
+
+    desktop.editLocal('stale-note', 'desktop edit while mobile was away');
+    await desktopSync();
+    mobile.editLocal('stale-note', 'mobile stale edit');
+
+    final result = await mobileSync();
+
+    expect(result.conflictCount, 1);
+    expect(mobile.noteById('stale-note')?.content, 'mobile stale edit');
+    expect(
+      mobile.noteById('stale-conflict-copy')?.content,
+      'desktop edit while mobile was away',
+    );
+    expect(
+      remoteStore.noteById('stale-note')?.content,
+      'mobile stale edit',
+    );
+    expect(
+      remoteStore.noteById('stale-conflict-copy')?.content,
+      'desktop edit while mobile was away',
+    );
+  });
+
+  test('offline edit survives when another device deleted the note first',
+      () async {
+    const baseContent = 'delete edit base';
+    final remoteStore = _SharedRemoteStore()
+      ..seed(_remoteNote(id: 'delete-edit', content: baseContent));
+    final deletingDevice = _SyncingNoteRepository(
+      deviceId: 'deleter',
+      initialNotes: [
+        _syncedNote(
+          id: 'delete-edit',
+          content: baseContent,
+          deviceId: 'deleter',
+        ),
+      ],
+    );
+    final editingDevice = _SyncingNoteRepository(
+      deviceId: 'editor',
+      initialNotes: [
+        _syncedNote(
+          id: 'delete-edit',
+          content: baseContent,
+          deviceId: 'editor',
+        ),
+      ],
+    );
+
+    deletingDevice.deleteLocal('delete-edit');
+    await RunManualSync(
+      noteRepository: deletingDevice,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository: _FakeSyncStateRepository(initialToken: 'delete-old'),
+    )();
+
+    editingDevice.editLocal('delete-edit', 'offline edit to preserve');
+    final result = await RunManualSync(
+      noteRepository: editingDevice,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository: _FakeSyncStateRepository(initialToken: 'edit-old'),
+      uuid: const _FixedUuid('delete-edit-conflict-copy'),
+    )();
+
+    expect(result.conflictCount, 1);
+    expect(editingDevice.noteById('delete-edit')?.deletedAt, isNotNull);
+    expect(
+      editingDevice.noteById('delete-edit-conflict-copy')?.content,
+      'offline edit to preserve',
+    );
+    expect(remoteStore.noteById('delete-edit')?.deletedAt, isNotNull);
+    expect(
+      remoteStore.noteById('delete-edit-conflict-copy')?.content,
+      'offline edit to preserve',
+    );
+  });
+
+  test('tombstone restore cycle converges across devices', () async {
+    const content = 'restore cycle content';
+    final remoteStore = _SharedRemoteStore()
+      ..seed(_remoteNote(id: 'restore-cycle', content: content));
+    final firstDevice = _SyncingNoteRepository(
+      deviceId: 'device-a',
+      initialNotes: [
+        _syncedNote(
+          id: 'restore-cycle',
+          content: content,
+          deviceId: 'device-a',
+        ),
+      ],
+    );
+    final secondDevice = _SyncingNoteRepository(
+      deviceId: 'device-b',
+      initialNotes: [
+        _syncedNote(
+          id: 'restore-cycle',
+          content: content,
+          deviceId: 'device-b',
+        ),
+      ],
+    );
+    final firstSyncState = _FakeSyncStateRepository(initialToken: 'first-old');
+    final secondSyncState =
+        _FakeSyncStateRepository(initialToken: 'second-old');
+
+    firstDevice.deleteLocal('restore-cycle');
+    await RunManualSync(
+      noteRepository: firstDevice,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository: firstSyncState,
+    )();
+
+    await RunManualSync(
+      noteRepository: secondDevice,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository: secondSyncState,
+    )();
+    expect(secondDevice.noteById('restore-cycle')?.deletedAt, isNotNull);
+
+    secondDevice.restoreLocal('restore-cycle');
+    await RunManualSync(
+      noteRepository: secondDevice,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository: secondSyncState,
+    )();
+
+    await RunManualSync(
+      noteRepository: firstDevice,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository: firstSyncState,
+    )();
+
+    expect(remoteStore.noteById('restore-cycle')?.deletedAt, isNull);
+    expect(firstDevice.noteById('restore-cycle')?.deletedAt, isNull);
+    expect(secondDevice.noteById('restore-cycle')?.deletedAt, isNull);
+    expect(
+        firstDevice.noteById('restore-cycle')?.syncStatus, SyncStatus.synced);
+    expect(
+      secondDevice.noteById('restore-cycle')?.syncStatus,
+      SyncStatus.synced,
+    );
+  });
+
+  test('partial tombstone upload failure is recoverable on retry', () async {
+    const content = 'partial failure content';
+    final remoteStore = _SharedRemoteStore()
+      ..seed(_remoteNote(id: 'partial-delete', content: content));
+    final repository = _SyncingNoteRepository(
+      deviceId: 'device-a',
+      initialNotes: [
+        _syncedNote(
+          id: 'partial-delete',
+          content: content,
+          deviceId: 'device-a',
+        ),
+      ],
+    );
+    final gateway = _SharedRemoteSyncGateway(
+      remoteStore,
+      failAfterPersistingUploadForId: 'partial-delete',
+    );
+    final syncState = _FakeSyncStateRepository(initialToken: 'partial-old');
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: syncState,
+    );
+
+    repository.deleteLocal('partial-delete');
+
+    await expectLater(useCase(), throwsA(isA<Exception>()));
+
+    expect(remoteStore.noteById('partial-delete')?.deletedAt, isNotNull);
+    expect(
+      repository.noteById('partial-delete')?.syncStatus,
+      SyncStatus.pendingDelete,
+    );
+    expect(syncState.savedToken, isNull);
+
+    final retryResult = await useCase();
+
+    expect(retryResult.uploadedCount, 0);
+    expect(repository.noteById('partial-delete')?.deletedAt, isNotNull);
+    expect(
+        repository.noteById('partial-delete')?.syncStatus, SyncStatus.synced);
+    expect(syncState.savedToken, isNotNull);
+  });
+
+  test('two local repositories converge through one shared fake remote',
+      () async {
+    final remoteStore = _SharedRemoteStore();
+    final firstDevice = _SyncingNoteRepository(deviceId: 'device-a');
+    final secondDevice = _SyncingNoteRepository(deviceId: 'device-b');
+    final firstSyncState = _FakeSyncStateRepository();
+    final secondSyncState = _FakeSyncStateRepository();
+
+    firstDevice.addLocalNote(
+      id: 'e2e-note',
+      title: 'E2E note',
+      content: 'created on first device',
+    );
+    await RunManualSync(
+      noteRepository: firstDevice,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository: firstSyncState,
+    )();
+
+    await RunManualSync(
+      noteRepository: secondDevice,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository: secondSyncState,
+    )();
+    expect(
+      secondDevice.noteById('e2e-note')?.content,
+      'created on first device',
+    );
+
+    secondDevice.editLocal('e2e-note', 'edited on second device');
+    await RunManualSync(
+      noteRepository: secondDevice,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository: secondSyncState,
+    )();
+
+    await RunManualSync(
+      noteRepository: firstDevice,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository: firstSyncState,
+    )();
+    expect(
+        firstDevice.noteById('e2e-note')?.content, 'edited on second device');
+
+    firstDevice.deleteLocal('e2e-note');
+    await RunManualSync(
+      noteRepository: firstDevice,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository: firstSyncState,
+    )();
+
+    await RunManualSync(
+      noteRepository: secondDevice,
+      syncGateway: _SharedRemoteSyncGateway(remoteStore),
+      syncStateRepository: secondSyncState,
+    )();
+
+    expect(remoteStore.noteById('e2e-note')?.deletedAt, isNotNull);
+    expect(firstDevice.noteById('e2e-note')?.deletedAt, isNotNull);
+    expect(secondDevice.noteById('e2e-note')?.deletedAt, isNotNull);
+  });
 }
 
 class _FakeNoteRepository implements NoteRepository {
@@ -1078,6 +1364,382 @@ class _FakeSyncStateRepository implements SyncStateRepository {
   }
 }
 
+class _SharedRemoteStore {
+  final Map<String, RemoteNote> _notesById = <String, RemoteNote>{};
+  int _version = 0;
+
+  String get cursor => 'shared-remote-$_version';
+
+  List<RemoteNote> get snapshot {
+    final notes = _notesById.values.toList(growable: false)
+      ..sort((a, b) => a.id.compareTo(b.id));
+    return notes;
+  }
+
+  RemoteNote? noteById(String id) => _notesById[id];
+
+  void seed(RemoteNote note) {
+    _notesById[note.id] = note;
+    _version += 1;
+  }
+
+  RemoteNote upsert(Note note) {
+    _version += 1;
+    final remotePath = note.deletedAt == null
+        ? 'notes/${note.id}.json'
+        : 'tombstones/${note.id}.json';
+    final remoteNote = RemoteNote(
+      id: note.id,
+      title: note.title,
+      content: note.content,
+      documentJson: note.documentJson,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt,
+      deletedAt: note.deletedAt,
+      contentHash: note.contentHash,
+      baseContentHash: note.contentHash,
+      deviceId: note.deviceId,
+      folderPath: note.folderPath,
+      remoteFileId: remotePath,
+      remoteEtag: '"$_version"',
+    );
+    _notesById[note.id] = remoteNote;
+    return remoteNote;
+  }
+}
+
+class _SharedRemoteSyncGateway implements SyncGateway {
+  _SharedRemoteSyncGateway(
+    this._remoteStore, {
+    this.failAfterPersistingUploadForId,
+  });
+
+  final _SharedRemoteStore _remoteStore;
+  String? failAfterPersistingUploadForId;
+  final List<String> uploadedNoteIds = [];
+  final List<String> syncedAttachmentNoteIds = [];
+
+  @override
+  Future<RemoteSyncBatch> bootstrap() async {
+    return RemoteSyncBatch(
+      notes: _remoteStore.snapshot,
+      nextToken: _remoteStore.cursor,
+      isFullSnapshot: true,
+    );
+  }
+
+  @override
+  Future<void> ensureRemoteAttachmentsAvailable(List<RemoteNote> notes) async {}
+
+  @override
+  Future<RemoteSyncBatch> fetchChangesSince(
+    String token, {
+    Map<String, String?> knownRemoteEtags = const <String, String?>{},
+  }) async {
+    if (token == _remoteStore.cursor) {
+      return RemoteSyncBatch(
+        notes: const <RemoteNote>[],
+        nextToken: token,
+        isFullSnapshot: false,
+      );
+    }
+
+    return RemoteSyncBatch(
+      notes: _remoteStore.snapshot,
+      nextToken: _remoteStore.cursor,
+      isFullSnapshot: false,
+    );
+  }
+
+  @override
+  Future<List<RemoteNote>> fetchAllNotes() async => _remoteStore.snapshot;
+
+  @override
+  Future<void> syncNoteAttachments(Note note) async {
+    syncedAttachmentNoteIds.add(note.id);
+  }
+
+  @override
+  Future<RemoteNote> upsertNote(Note note) async {
+    uploadedNoteIds.add(note.id);
+    final remoteNote = _remoteStore.upsert(note);
+    if (failAfterPersistingUploadForId == note.id) {
+      failAfterPersistingUploadForId = null;
+      throw Exception('simulated partial WebDAV upload failure');
+    }
+    return remoteNote;
+  }
+}
+
+class _SyncingNoteRepository implements NoteRepository {
+  _SyncingNoteRepository({
+    required this.deviceId,
+    List<Note>? initialNotes,
+  }) {
+    for (final note in initialNotes ?? const <Note>[]) {
+      _notesById[note.id] = note;
+    }
+  }
+
+  final String deviceId;
+  final Map<String, Note> _notesById = <String, Note>{};
+  final List<String> appliedRemoteDeletionIds = [];
+  final List<String> upsertedRemoteIds = [];
+
+  Note? noteById(String id) => _notesById[id];
+
+  void addLocalNote({
+    required String id,
+    required String title,
+    required String content,
+  }) {
+    final now = DateTime.utc(2026, 4, 1, 10, _notesById.length);
+    _notesById[id] = Note(
+      id: id,
+      title: title,
+      content: content,
+      createdAt: now,
+      updatedAt: now,
+      syncStatus: SyncStatus.pendingUpload,
+      contentHash: computeContentHash(content),
+      deviceId: deviceId,
+    );
+  }
+
+  void editLocal(String id, String content) {
+    final note = _notesById[id];
+    if (note == null) {
+      throw StateError('Cannot edit missing note $id');
+    }
+    _notesById[id] = note.copyWith(
+      content: content,
+      updatedAt: note.updatedAt.add(const Duration(minutes: 1)),
+      syncStatus: SyncStatus.pendingUpload,
+      contentHash: computeContentHash(content),
+      deviceId: deviceId,
+      clearDeletedAt: true,
+    );
+  }
+
+  void deleteLocal(String id) {
+    final note = _notesById[id];
+    if (note == null) {
+      throw StateError('Cannot delete missing note $id');
+    }
+    _notesById[id] = note.copyWith(
+      deletedAt: note.updatedAt.add(const Duration(minutes: 1)),
+      syncStatus: SyncStatus.pendingDelete,
+      deviceId: deviceId,
+    );
+  }
+
+  void restoreLocal(String id) {
+    final note = _notesById[id];
+    if (note == null) {
+      throw StateError('Cannot restore missing note $id');
+    }
+    _notesById[id] = note.copyWith(
+      clearDeletedAt: true,
+      updatedAt: note.updatedAt.add(const Duration(minutes: 1)),
+      syncStatus: SyncStatus.pendingUpload,
+      contentHash: computeContentHash(note.content),
+      deviceId: deviceId,
+    );
+  }
+
+  @override
+  Future<int> countAttachmentReferences(String attachmentUri) async => 0;
+
+  @override
+  Future<void> create(Note note) async {
+    _notesById[note.id] = note;
+  }
+
+  @override
+  Future<void> applyRemoteDeletion(RemoteNote remoteNote) async {
+    appliedRemoteDeletionIds.add(remoteNote.id);
+    final existing = _notesById[remoteNote.id];
+    final deletedAt = remoteNote.deletedAt ?? DateTime.now().toUtc();
+    final syncedAt = DateTime.now().toUtc();
+    if (existing == null) {
+      _notesById[remoteNote.id] = Note(
+        id: remoteNote.id,
+        title: remoteNote.title,
+        content: remoteNote.content,
+        documentJson: remoteNote.documentJson,
+        createdAt: remoteNote.createdAt,
+        updatedAt: remoteNote.updatedAt,
+        deletedAt: deletedAt,
+        lastSyncedAt: syncedAt,
+        syncStatus: SyncStatus.synced,
+        contentHash: remoteNote.contentHash,
+        baseContentHash: remoteNote.baseContentHash ?? remoteNote.contentHash,
+        deviceId: remoteNote.deviceId,
+        folderPath: remoteNote.folderPath,
+        remoteFileId: remoteNote.remoteFileId,
+        remoteEtag: remoteNote.remoteEtag,
+      );
+      return;
+    }
+
+    _notesById[remoteNote.id] = existing.copyWith(
+      title: remoteNote.title.isEmpty ? existing.title : remoteNote.title,
+      content:
+          remoteNote.content.isEmpty ? existing.content : remoteNote.content,
+      documentJson: remoteNote.content.isEmpty
+          ? existing.documentJson
+          : remoteNote.documentJson,
+      updatedAt: remoteNote.updatedAt,
+      deletedAt: deletedAt,
+      lastSyncedAt: syncedAt,
+      syncStatus: SyncStatus.synced,
+      contentHash: remoteNote.contentHash,
+      baseContentHash: remoteNote.baseContentHash ?? remoteNote.contentHash,
+      deviceId: remoteNote.deviceId,
+      folderPath: remoteNote.folderPath,
+      remoteFileId: remoteNote.remoteFileId,
+      remoteEtag: remoteNote.remoteEtag,
+    );
+  }
+
+  @override
+  Future<Note?> getById(String id) async => _notesById[id];
+
+  @override
+  Future<List<Note>> getActiveNotesForSync() async {
+    return _notesById.values
+        .where((note) => note.deletedAt == null)
+        .toList(growable: false);
+  }
+
+  @override
+  Future<List<Note>> getByIds(Iterable<String> ids) async {
+    final idSet = ids.toSet();
+    return _notesById.values
+        .where((note) => idSet.contains(note.id))
+        .toList(growable: false);
+  }
+
+  @override
+  Future<List<Note>> getDeletedNotesForSync() async {
+    return _notesById.values
+        .where((note) => note.deletedAt != null)
+        .toList(growable: false);
+  }
+
+  @override
+  Future<List<Note>> getPendingNotesForSync() async {
+    return _notesById.values.where((note) {
+      return note.syncStatus == SyncStatus.pendingUpload ||
+          note.syncStatus == SyncStatus.pendingDelete;
+    }).toList(growable: false);
+  }
+
+  @override
+  Future<Map<String, String?>> getRemoteEtagsByPath() async => {
+        for (final note in _notesById.values)
+          if (note.remoteFileId != null) note.remoteFileId!: note.remoteEtag,
+      };
+
+  @override
+  Future<void> markConflict(String id) async {
+    final note = _notesById[id];
+    if (note != null) {
+      _notesById[id] = note.copyWith(syncStatus: SyncStatus.conflicted);
+    }
+  }
+
+  @override
+  Future<void> markSynced({
+    required String id,
+    required DateTime syncedAt,
+    required String baseContentHash,
+    String? remoteFileId,
+    String? remoteEtag,
+  }) async {
+    final note = _notesById[id];
+    if (note == null) {
+      return;
+    }
+    _notesById[id] = note.copyWith(
+      lastSyncedAt: syncedAt,
+      baseContentHash: baseContentHash,
+      remoteFileId: remoteFileId,
+      remoteEtag: remoteEtag,
+      syncStatus: SyncStatus.synced,
+    );
+  }
+
+  @override
+  Future<void> restore(String id) async {
+    restoreLocal(id);
+  }
+
+  @override
+  Future<List<Note>> searchNotes(String query, {String? folderPath}) async {
+    return _notesById.values
+        .where((note) => note.deletedAt == null && note.content.contains(query))
+        .toList(growable: false);
+  }
+
+  @override
+  Future<void> softDelete(String id, DateTime deletedAt) async {
+    final note = _notesById[id];
+    if (note != null) {
+      _notesById[id] = note.copyWith(
+        deletedAt: deletedAt,
+        syncStatus: SyncStatus.pendingDelete,
+      );
+    }
+  }
+
+  @override
+  Future<void> update(Note note) async {
+    _notesById[note.id] = note;
+  }
+
+  @override
+  Future<void> upsertRemoteNote(RemoteNote remoteNote) async {
+    upsertedRemoteIds.add(remoteNote.id);
+    final syncedAt = DateTime.now().toUtc();
+    final existing = _notesById[remoteNote.id];
+    final syncedNote = Note(
+      id: remoteNote.id,
+      title: remoteNote.title,
+      content: remoteNote.content,
+      documentJson: remoteNote.documentJson,
+      createdAt: remoteNote.createdAt,
+      updatedAt: remoteNote.updatedAt,
+      deletedAt: remoteNote.deletedAt,
+      lastSyncedAt: syncedAt,
+      syncStatus: SyncStatus.synced,
+      contentHash: remoteNote.contentHash,
+      baseContentHash: remoteNote.baseContentHash ?? remoteNote.contentHash,
+      deviceId: remoteNote.deviceId,
+      folderPath: remoteNote.folderPath,
+      remoteFileId: remoteNote.remoteFileId,
+      remoteEtag: remoteNote.remoteEtag,
+    );
+
+    if (existing == null || remoteNote.deletedAt != null) {
+      _notesById[remoteNote.id] = syncedNote;
+      return;
+    }
+
+    _notesById[remoteNote.id] = syncedNote.copyWith(clearDeletedAt: true);
+  }
+
+  @override
+  Stream<List<Note>> watchActiveNotes({String? folderPath}) {
+    return const Stream<List<Note>>.empty();
+  }
+
+  @override
+  Stream<List<Note>> watchDeletedNotes({String? folderPath}) {
+    return const Stream<List<Note>>.empty();
+  }
+}
+
 Note _localNote({
   required String id,
   required String content,
@@ -1102,6 +1764,27 @@ Note _localNote({
     baseContentHash: baseContentHash,
     deviceId: 'device-a',
     remoteFileId: remoteFileId,
+  );
+}
+
+Note _syncedNote({
+  required String id,
+  required String content,
+  required String deviceId,
+}) {
+  return Note(
+    id: id,
+    title: id,
+    content: content,
+    createdAt: DateTime.utc(2026, 3, 24, 10),
+    updatedAt: DateTime.utc(2026, 3, 24, 11),
+    lastSyncedAt: DateTime.utc(2026, 3, 24, 12),
+    syncStatus: SyncStatus.synced,
+    contentHash: computeContentHash(content),
+    baseContentHash: computeContentHash(content),
+    deviceId: deviceId,
+    remoteFileId: 'notes/$id.json',
+    remoteEtag: '"seed-$id"',
   );
 }
 

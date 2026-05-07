@@ -6,11 +6,11 @@ Current coverage includes:
 - auth controller behavior
 - sync gateway behavior
 - manual sync application logic
+- stale-device, delete-resurrection, and shared-remote sync regression flows
 - markdown preview behavior
 - editor autosave behavior
 - notes home/workspace widget behavior
 
 Still worth adding next:
-- broader stale-device and delete-resurrection integration cases
-- more end-to-end sync regression coverage
+- WebDAV integration smoke coverage against a real or containerized server
 - future code snippet parsing, rendering, and copy-flow coverage
