@@ -2007,6 +2007,47 @@ void main() {
     );
   });
 
+  testWidgets('app resume restores the body caret from before suspension',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const content = 'Keep this caret position stable';
+    final note = Note(
+      id: 'note-resume-caret',
+      title: 'Resume caret',
+      content: content,
+      documentJson: paragraphDocumentFromEditableText(content),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    await tester.tap(_bodyField());
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    bodyField.controller!.selection = const TextSelection.collapsed(offset: 24);
+    await tester.pump();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+
+    bodyField.controller!.selection = const TextSelection.collapsed(offset: 19);
+    await tester.pump();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+
+    expect(
+      tester.widget<TextField>(_bodyField()).controller?.selection.baseOffset,
+      24,
+    );
+  });
+
   testWidgets('slash menu inserts code block below existing text',
       (tester) async {
     final repository = _StubNoteRepository();

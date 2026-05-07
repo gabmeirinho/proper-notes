@@ -72,6 +72,10 @@ class NoteEditorPageState extends State<NoteEditorPage>
   String? _saveErrorMessage;
   TextSelection _lastKnownContentSelection =
       const TextSelection.collapsed(offset: 0);
+  TextSelection? _contentSelectionBeforeLifecyclePause;
+  String? _contentTextBeforeLifecyclePause;
+  bool _isAppLifecycleSuspended = false;
+  bool _isRestoringSuspendedContentSelection = false;
   bool _didAutofocusNewNoteTitle = false;
 
   @override
@@ -158,7 +162,13 @@ class NoteEditorPageState extends State<NoteEditorPage>
       return;
     }
 
-    if (_contentController.selection.isValid) {
+    if (_isAppLifecycleSuspended &&
+        _contentTextBeforeLifecyclePause == _contentController.text) {
+      _restoreSuspendedContentSelectionIfNeeded();
+      return;
+    }
+
+    if (!_isAppLifecycleSuspended && _contentController.selection.isValid) {
       _lastKnownContentSelection = _contentController.selection;
     }
 
@@ -219,7 +229,89 @@ class NoteEditorPageState extends State<NoteEditorPage>
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
+      _captureContentSelectionBeforeLifecyclePause();
       unawaited(_flushPendingChanges());
+      return;
+    }
+
+    if (state == AppLifecycleState.resumed) {
+      _restoreContentSelectionAfterLifecycleResume();
+    }
+  }
+
+  void _captureContentSelectionBeforeLifecyclePause() {
+    if (_isAppLifecycleSuspended) {
+      return;
+    }
+
+    _isAppLifecycleSuspended = true;
+    _contentTextBeforeLifecyclePause = _contentController.text;
+
+    final selection = _contentController.selection.isValid
+        ? _contentController.selection
+        : _lastKnownContentSelection;
+    if (selection.isValid) {
+      _contentSelectionBeforeLifecyclePause = TextSelection(
+        baseOffset:
+            selection.baseOffset.clamp(0, _contentController.text.length),
+        extentOffset:
+            selection.extentOffset.clamp(0, _contentController.text.length),
+      );
+    }
+  }
+
+  void _restoreContentSelectionAfterLifecycleResume() {
+    final selection = _contentSelectionBeforeLifecyclePause;
+    final pausedText = _contentTextBeforeLifecyclePause;
+    _contentSelectionBeforeLifecyclePause = null;
+    _contentTextBeforeLifecyclePause = null;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      _isAppLifecycleSuspended = false;
+      if (selection == null || pausedText != _contentController.text) {
+        return;
+      }
+
+      final restoredSelection = TextSelection(
+        baseOffset:
+            selection.baseOffset.clamp(0, _contentController.text.length),
+        extentOffset:
+            selection.extentOffset.clamp(0, _contentController.text.length),
+      );
+      _contentController.selection = restoredSelection;
+      _lastKnownContentSelection = restoredSelection;
+    });
+  }
+
+  void _restoreSuspendedContentSelectionIfNeeded() {
+    if (_isRestoringSuspendedContentSelection) {
+      return;
+    }
+
+    final selection = _contentSelectionBeforeLifecyclePause;
+    if (selection == null) {
+      return;
+    }
+
+    final restoredSelection = TextSelection(
+      baseOffset: selection.baseOffset.clamp(0, _contentController.text.length),
+      extentOffset:
+          selection.extentOffset.clamp(0, _contentController.text.length),
+    );
+    if (_contentController.selection == restoredSelection) {
+      return;
+    }
+
+    _isRestoringSuspendedContentSelection = true;
+    try {
+      _contentController.selection = restoredSelection;
+      _lastKnownContentSelection = restoredSelection;
+    } finally {
+      _isRestoringSuspendedContentSelection = false;
     }
   }
 
