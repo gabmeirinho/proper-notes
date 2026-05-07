@@ -62,6 +62,7 @@ dart run scripts/import_obsidian.dart \
 * `lib/features/`: App features such as notes, authentication, and sync.
 * `lib/infrastructure/`: Database, repository, and service implementations.
 * `lib/core/`: Shared utilities, errors, and common services.
+* `docs/backend_metadata.md`: Meaning of sync metadata and legacy migration fields.
 * `test/`: Unit and widget tests.
 
 ---

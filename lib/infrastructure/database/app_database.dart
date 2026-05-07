@@ -42,6 +42,7 @@ class FoldersTable extends Table {
 class AppMetadataTable extends Table {
   IntColumn get keyId => integer()();
   TextColumn get deviceId => text()();
+  // Legacy Google-era metadata kept only so old databases can migrate safely.
   TextColumn get accountEmail => text().nullable()();
   TextColumn get driveSyncToken => text().nullable()();
   TextColumn get accountLabel => text().nullable()();
@@ -69,7 +70,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -115,6 +116,20 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from < 5) {
             await migrator.addColumn(notesTable, notesTable.remoteEtag);
+          }
+          if (from < 6) {
+            await customStatement('''
+              UPDATE app_metadata_table
+              SET remote_sync_cursor = drive_sync_token
+              WHERE (remote_sync_cursor IS NULL OR TRIM(remote_sync_cursor) = '')
+                AND drive_sync_token IS NOT NULL
+                AND TRIM(drive_sync_token) <> ''
+            ''');
+            await customStatement('''
+              UPDATE app_metadata_table
+              SET drive_sync_token = NULL,
+                  account_email = NULL
+            ''');
           }
         },
       );

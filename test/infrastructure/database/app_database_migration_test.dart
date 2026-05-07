@@ -8,7 +8,7 @@ import 'package:proper_notes/infrastructure/database/app_database.dart';
 import 'package:sqlite3/sqlite3.dart' show Database, sqlite3;
 
 void main() {
-  test('migrates a version 1 database file to schema version 5', () async {
+  test('migrates a version 1 database file to schema version 6', () async {
     final tempDirectory = await Directory.systemTemp.createTemp(
       'proper_notes_migration_test_',
     );
@@ -39,8 +39,9 @@ void main() {
           await appDatabase.select(appDatabase.appMetadataTable).getSingle();
       expect(metadata.deviceId, 'device-1');
       expect(metadata.remoteSyncCursor, 'drive-token-v1');
-      expect(metadata.driveSyncToken, 'drive-token-v1');
-      expect(appDatabase.schemaVersion, 5);
+      expect(metadata.driveSyncToken, isNull);
+      expect(metadata.accountEmail, isNull);
+      expect(appDatabase.schemaVersion, 6);
 
       final folders = await appDatabase.select(appDatabase.foldersTable).get();
       expect(folders, isEmpty);
@@ -55,7 +56,7 @@ void main() {
     }
   });
 
-  test('migrates a version 2 database file to schema version 5', () async {
+  test('migrates a version 2 database file to schema version 6', () async {
     final tempDirectory = await Directory.systemTemp.createTemp(
       'proper_notes_migration_test_',
     );
@@ -83,8 +84,43 @@ void main() {
           await appDatabase.select(appDatabase.appMetadataTable).getSingle();
       expect(metadata.deviceId, 'device-2');
       expect(metadata.remoteSyncCursor, 'drive-token-v2');
-      expect(metadata.driveSyncToken, 'drive-token-v2');
-      expect(appDatabase.schemaVersion, 5);
+      expect(metadata.driveSyncToken, isNull);
+      expect(metadata.accountEmail, isNull);
+      expect(appDatabase.schemaVersion, 6);
+    } finally {
+      await appDatabase?.close();
+      if (databaseFile.existsSync()) {
+        databaseFile.deleteSync();
+      }
+      if (tempDirectory.existsSync()) {
+        tempDirectory.deleteSync();
+      }
+    }
+  });
+
+  test('migrates a version 5 legacy drive token to the canonical cursor',
+      () async {
+    final tempDirectory = await Directory.systemTemp.createTemp(
+      'proper_notes_migration_test_',
+    );
+    final databaseFile =
+        File(p.join(tempDirectory.path, 'proper_notes.sqlite'));
+    AppDatabase? appDatabase;
+
+    try {
+      final seedDatabase = sqlite3.open(databaseFile.path);
+      _createSchemaV5WithLegacyToken(seedDatabase);
+      seedDatabase.close();
+
+      appDatabase = AppDatabase.forTesting(NativeDatabase(databaseFile));
+
+      final metadata =
+          await appDatabase.select(appDatabase.appMetadataTable).getSingle();
+      expect(metadata.deviceId, 'device-5');
+      expect(metadata.remoteSyncCursor, 'drive-token-v5');
+      expect(metadata.driveSyncToken, isNull);
+      expect(metadata.accountEmail, isNull);
+      expect(appDatabase.schemaVersion, 6);
     } finally {
       await appDatabase?.close();
       if (databaseFile.existsSync()) {
@@ -267,6 +303,70 @@ void _createSchemaV2(Database database) {
       'drive-token-v2',
       1711111114000,
       1711111115000,
+    ],
+  );
+}
+
+void _createSchemaV5WithLegacyToken(Database database) {
+  database.execute('PRAGMA user_version = 5;');
+  database.execute('''
+    CREATE TABLE notes_table (
+      id TEXT NOT NULL PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      document_json TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      deleted_at INTEGER NULL,
+      last_synced_at INTEGER NULL,
+      sync_status TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      base_content_hash TEXT NULL,
+      device_id TEXT NOT NULL,
+      folder_path TEXT NULL,
+      remote_file_id TEXT NULL,
+      remote_etag TEXT NULL
+    );
+  ''');
+  database.execute('''
+    CREATE TABLE folders_table (
+      path TEXT NOT NULL PRIMARY KEY,
+      parent_path TEXT NULL,
+      created_at INTEGER NOT NULL
+    );
+  ''');
+  database.execute('''
+    CREATE TABLE app_metadata_table (
+      key_id INTEGER NOT NULL PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      account_email TEXT NULL,
+      drive_sync_token TEXT NULL,
+      account_label TEXT NULL,
+      remote_base_url TEXT NULL,
+      remote_username TEXT NULL,
+      remote_sync_cursor TEXT NULL,
+      remote_collection_tag TEXT NULL,
+      remote_format_version INTEGER NULL,
+      last_full_sync_at INTEGER NULL,
+      last_successful_sync_at INTEGER NULL
+    );
+  ''');
+  database.execute(
+    '''
+    INSERT INTO app_metadata_table (
+      key_id,
+      device_id,
+      account_email,
+      drive_sync_token,
+      remote_sync_cursor
+    ) VALUES (?, ?, ?, ?, ?)
+    ''',
+    <Object?>[
+      1,
+      'device-5',
+      'legacy5@example.com',
+      'drive-token-v5',
+      null,
     ],
   );
 }

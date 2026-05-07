@@ -43,8 +43,7 @@ void main() {
     expect(persistedDeviceId, 'device-123');
   });
 
-  test('promotes a legacy drive token into the canonical remote cursor',
-      () async {
+  test('does not use a legacy drive token as runtime sync state', () async {
     await database.into(database.appMetadataTable).insert(
           AppMetadataTableCompanion.insert(
             keyId: const Value(1),
@@ -56,8 +55,8 @@ void main() {
     final token = await repository.getRemoteSyncCursor();
     final row = await database.select(database.appMetadataTable).getSingle();
 
-    expect(token, 'legacy-drive-token');
-    expect(row.remoteSyncCursor, 'legacy-drive-token');
+    expect(token, null);
+    expect(row.remoteSyncCursor, null);
     expect(row.driveSyncToken, 'legacy-drive-token');
   });
 }

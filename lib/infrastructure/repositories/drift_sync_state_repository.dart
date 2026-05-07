@@ -52,16 +52,7 @@ class DriftSyncStateRepository implements SyncStateRepository {
       return remoteSyncCursor;
     }
 
-    final legacyDriveToken = row?.driveSyncToken?.trim();
-    if (legacyDriveToken == null || legacyDriveToken.isEmpty) {
-      return null;
-    }
-
-    await _promoteLegacyDriveSyncToken(
-      deviceId: row!.deviceId,
-      legacyDriveToken: legacyDriveToken,
-    );
-    return legacyDriveToken;
+    return null;
   }
 
   @override
@@ -77,6 +68,7 @@ class DriftSyncStateRepository implements SyncStateRepository {
               keyId: const Value(_singletonKey),
               deviceId: deviceId,
               remoteSyncCursor: Value(token),
+              driveSyncToken: const Value(null),
             ),
           );
       return;
@@ -88,6 +80,7 @@ class DriftSyncStateRepository implements SyncStateRepository {
       AppMetadataTableCompanion(
         deviceId: Value(deviceId),
         remoteSyncCursor: Value(token),
+        driveSyncToken: const Value(null),
       ),
     );
   }
@@ -96,19 +89,5 @@ class DriftSyncStateRepository implements SyncStateRepository {
     return (_database.select(_database.appMetadataTable)
           ..where((tbl) => tbl.keyId.equals(_singletonKey)))
         .getSingleOrNull();
-  }
-
-  Future<void> _promoteLegacyDriveSyncToken({
-    required String deviceId,
-    required String legacyDriveToken,
-  }) async {
-    await (_database.update(_database.appMetadataTable)
-          ..where((tbl) => tbl.keyId.equals(_singletonKey)))
-        .write(
-      AppMetadataTableCompanion(
-        deviceId: Value(deviceId),
-        remoteSyncCursor: Value(legacyDriveToken),
-      ),
-    );
   }
 }
