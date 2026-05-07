@@ -147,8 +147,7 @@ void main() {
           }
           if (request.method == 'PUT') {
             if (request.url.path.endsWith('/notes/note-7.json')) {
-              notePayload =
-                  json.decode(request.body) as Map<String, dynamic>;
+              notePayload = json.decode(request.body) as Map<String, dynamic>;
             }
             return http.Response('', 201);
           }
@@ -501,6 +500,104 @@ void main() {
     );
   });
 
+  test('fetchChangesSince fetches changed notes when WebDAV omits etags',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final requests = <String>[];
+    final store = WebDavAccountStore(
+      secretStore: _FakeSecretStore(),
+    );
+    await store.write(
+      const _CredentialsBuilder().build(),
+    );
+
+    final gateway = WebDavSyncGateway(
+      accountStore: store,
+      webDavClient: WebDavClient(
+        httpClient: MockClient((request) async {
+          requests.add('${request.method} ${request.url.path}');
+          if (request.method == 'MKCOL') {
+            return http.Response('', 405);
+          }
+          if (request.method == 'PUT' &&
+              request.url.path.endsWith('/meta/schema.json')) {
+            return http.Response('', 201);
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.path.endsWith('/notes')) {
+            return http.Response(
+              _multistatusWithoutEtags(<String>[
+                '/remote.php/dav/files/user/ProperNotes/notes/',
+                '/remote.php/dav/files/user/ProperNotes/notes/note-1.json',
+              ]),
+              207,
+            );
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.path.endsWith('/tombstones')) {
+            return http.Response(
+              _multistatusWithoutEtags(<String>[
+                '/remote.php/dav/files/user/ProperNotes/tombstones/',
+              ]),
+              207,
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.path.endsWith('/notes/note-1.json')) {
+            return http.Response(
+              json.encode(<String, dynamic>{
+                'id': 'note-1',
+                'title': 'Remote note',
+                'content': 'changed without etag',
+                'created_at': DateTime.utc(2026, 4, 1).millisecondsSinceEpoch,
+                'updated_at': DateTime.utc(2026, 4, 2).millisecondsSinceEpoch,
+                'content_hash': computeContentHash('changed without etag'),
+                'device_id': 'device-a',
+              }),
+              200,
+            );
+          }
+          return http.Response('unexpected', 500);
+        }),
+      ),
+    );
+
+    final batch = await gateway.fetchChangesSince(
+      'stale-token',
+      knownRemoteEtags: const <String, String?>{
+        'notes/note-1.json': null,
+      },
+    );
+
+    expect(batch.notes.map((note) => note.id), ['note-1']);
+    expect(
+      requests,
+      contains('GET /remote.php/dav/files/user/ProperNotes/notes/note-1.json'),
+    );
+  });
+
+  test('propfindDirectory reports malformed XML explicitly', () async {
+    final client = WebDavClient(
+      httpClient: MockClient((request) async {
+        return http.Response('<d:multistatus>', 207);
+      }),
+    );
+    final context = await client.resolveContext(
+      const _CredentialsBuilder().build(),
+    );
+
+    await expectLater(
+      client.propfindDirectory(context, 'notes'),
+      throwsA(
+        predicate<Object>(
+          (error) => error
+              .toString()
+              .contains('Malformed WebDAV PROPFIND response for notes'),
+        ),
+      ),
+    );
+  });
+
   test('bootstrap prefers tombstones over note files for the same note id',
       () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -711,6 +808,22 @@ String _multistatus(List<String> hrefs) {
       '<d:response>'
       '<d:href>$href</d:href>'
       '<d:propstat><d:prop><d:getetag>"etag-$href"</d:getetag></d:prop></d:propstat>'
+      '</d:response>',
+    );
+  }
+  buffer.write('</d:multistatus>');
+  return buffer.toString();
+}
+
+String _multistatusWithoutEtags(List<String> hrefs) {
+  final buffer = StringBuffer(
+    '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">',
+  );
+  for (final href in hrefs) {
+    buffer.write(
+      '<d:response>'
+      '<d:href>$href</d:href>'
+      '<d:propstat><d:prop></d:prop></d:propstat>'
       '</d:response>',
     );
   }

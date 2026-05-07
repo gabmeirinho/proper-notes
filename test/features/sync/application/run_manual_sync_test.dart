@@ -167,6 +167,70 @@ void main() {
     expect(gateway.uploadedNoteIds, ['pending-local']);
   });
 
+  test(
+      'full snapshot reuploads a missing remote note instead of deleting local',
+      () async {
+    const content = 'trusted local content';
+    final repository = _FakeNoteRepository(
+      localNotes: [
+        _localNote(
+          id: 'missing-remotely',
+          content: content,
+          baseContentHash: computeContentHash(content),
+          syncStatus: SyncStatus.synced,
+          remoteFileId: 'notes/missing-remotely.json',
+        ),
+      ],
+    );
+    final gateway = _FakeSyncGateway();
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: _FakeSyncStateRepository(),
+    );
+
+    final result = await useCase();
+
+    expect(result.uploadedCount, 1);
+    expect(result.downloadedCount, 0);
+    expect(repository.appliedRemoteDeletionIds, isEmpty);
+    expect(gateway.uploadedNoteIds, ['missing-remotely']);
+  });
+
+  test('cursor write failure after upload is recoverable on retry', () async {
+    final repository = _FakeNoteRepository(
+      localNotes: [
+        _localNote(
+          id: 'retry-upload',
+          content: 'local edit',
+          baseContentHash: computeContentHash('base'),
+        ),
+      ],
+    );
+    final gateway = _FakeSyncGateway();
+    final syncStateRepository = _FakeSyncStateRepository(
+      initialToken: 'token-1',
+      failNextCursorWrite: true,
+    );
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: syncStateRepository,
+    );
+
+    await expectLater(useCase(), throwsA(isA<Exception>()));
+
+    expect(gateway.uploadedNoteIds, ['retry-upload']);
+    expect(repository.syncedIds, ['retry-upload']);
+    expect(syncStateRepository.savedToken, isNull);
+
+    final retryResult = await useCase();
+
+    expect(retryResult.uploadedCount, 0);
+    expect(gateway.uploadedNoteIds, ['retry-upload']);
+    expect(syncStateRepository.savedToken, 'delta-token');
+  });
+
   test('marks unchanged notes as synced when hashes match', () async {
     const content = 'same content';
     final repository = _FakeNoteRepository(
@@ -857,6 +921,16 @@ class _FakeNoteRepository implements NoteRepository {
     String? remoteEtag,
   }) async {
     syncedIds.add(id);
+    _replaceNote(
+      id,
+      (note) => note.copyWith(
+        lastSyncedAt: syncedAt,
+        baseContentHash: baseContentHash,
+        remoteFileId: remoteFileId,
+        remoteEtag: remoteEtag,
+        syncStatus: SyncStatus.synced,
+      ),
+    );
   }
 
   @override
@@ -872,6 +946,7 @@ class _FakeNoteRepository implements NoteRepository {
   @override
   Future<void> update(Note note) async {
     updatedNotes.add(note);
+    _replaceNote(note.id, (_) => note);
   }
 
   @override
@@ -886,6 +961,19 @@ class _FakeNoteRepository implements NoteRepository {
   @override
   Stream<List<Note>> watchDeletedNotes({String? folderPath}) =>
       const Stream.empty();
+
+  void _replaceNote(String id, Note Function(Note note) update) {
+    final activeIndex = _localNotes.indexWhere((note) => note.id == id);
+    if (activeIndex != -1) {
+      _localNotes[activeIndex] = update(_localNotes[activeIndex]);
+      return;
+    }
+
+    final deletedIndex = _deletedNotes.indexWhere((note) => note.id == id);
+    if (deletedIndex != -1) {
+      _deletedNotes[deletedIndex] = update(_deletedNotes[deletedIndex]);
+    }
+  }
 }
 
 class _FixedUuid extends Uuid {
@@ -965,20 +1053,28 @@ class _FakeSyncGateway implements SyncGateway {
 class _FakeSyncStateRepository implements SyncStateRepository {
   _FakeSyncStateRepository({
     this.initialToken,
-  });
+    this.failNextCursorWrite = false,
+  }) : _currentToken = initialToken;
 
   final String? initialToken;
+  String? _currentToken;
+  bool failNextCursorWrite;
   String? savedToken;
 
   @override
   Future<String> getOrCreateDeviceId() async => 'test-device';
 
   @override
-  Future<String?> getRemoteSyncCursor() async => initialToken;
+  Future<String?> getRemoteSyncCursor() async => _currentToken;
 
   @override
   Future<void> setRemoteSyncCursor(String token) async {
+    if (failNextCursorWrite) {
+      failNextCursorWrite = false;
+      throw Exception('cursor write failed');
+    }
     savedToken = token;
+    _currentToken = token;
   }
 }
 

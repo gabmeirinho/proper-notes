@@ -431,7 +431,12 @@ class WebDavSyncGateway implements SyncGateway {
   }
 
   bool _remoteEtagsMatch(String? known, String? current) {
-    return _normalizeEtag(known) == _normalizeEtag(current);
+    final normalizedKnown = _normalizeEtag(known);
+    final normalizedCurrent = _normalizeEtag(current);
+    if (normalizedKnown == null || normalizedCurrent == null) {
+      return false;
+    }
+    return normalizedKnown == normalizedCurrent;
   }
 
   String? _normalizeEtag(String? value) {

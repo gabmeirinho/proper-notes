@@ -90,7 +90,14 @@ class WebDavClient {
       );
     }
 
-    final document = XmlDocument.parse(utf8.decode(response.bodyBytes));
+    final XmlDocument document;
+    try {
+      document = XmlDocument.parse(utf8.decode(response.bodyBytes));
+    } catch (error) {
+      throw Exception(
+        'Malformed WebDAV PROPFIND response for $relativePath: $error',
+      );
+    }
     final responses = document.descendants
         .whereType<XmlElement>()
         .where((node) => node.name.local.toLowerCase() == 'response');
