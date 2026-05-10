@@ -136,13 +136,17 @@ class NoteEditorPageState extends State<NoteEditorPage>
     }
 
     final incomingSnapshot = _snapshotFromNote(incomingNote);
-    final lastPersistedSnapshot = _lastPersistedSnapshot;
-    final persistedNote = _persistedNote;
-    final isSamePersistedSnapshot = persistedNote?.id == incomingNote.id &&
-        lastPersistedSnapshot == incomingSnapshot;
+    final editorHasFocus = _titleFocusNode.hasFocus || _contentFocusNode.hasFocus;
+    final isSameNote = _persistedNote?.id == incomingNote.id;
 
-    if (isSamePersistedSnapshot) {
+    if (editorHasFocus && isSameNote) {
       _persistedNote = incomingNote;
+    
+
+      if (incomingSnapshot == _currentSnapshot) {
+        _lastPersistedSnapshot = incomingSnapshot;
+      }
+
       _notifyStatusChanged();
       return;
     }
@@ -183,9 +187,11 @@ class NoteEditorPageState extends State<NoteEditorPage>
       return;
     }
 
-    setState(() {
-      _saveErrorMessage = null;
-    });
+    if (_saveErrorMessage != null) {
+      setState(() {
+        _saveErrorMessage = null;
+      });
+    }
   }
 
   void _handleEditorFocusChanged() {
