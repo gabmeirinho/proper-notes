@@ -164,8 +164,7 @@ class NotesHomePageState extends State<NotesHomePage> {
       return null;
     }
 
-    return widget.syncController.errorMessage ??
-        widget.syncController.lastMessage;
+    return widget.syncController.errorMessage;
   }
 
   @override
@@ -702,8 +701,7 @@ class NotesHomePageState extends State<NotesHomePage> {
   }
 
   bool _hasConflictedNotes(List<Note> activeNotes, List<Note> deletedNotes) {
-    return activeNotes.any(_isConflictCopy) ||
-        deletedNotes.any(_isConflictCopy);
+    return activeNotes.any(_isConflictCopy);
   }
 
   bool _noteRequiresSyncAttention(Note note) {
@@ -1780,6 +1778,7 @@ class NotesHomePageState extends State<NotesHomePage> {
           : 'No notes in this folder yet.',
       onTap: _openEditor,
       onRestoreConflictCopy: _restoreConflictCopy,
+      showConflictState: true,
       onShowContextMenu: isDesktopWide
           ? _showActiveNoteMenu
           : (note, _) => _showMobileNoteActions(note),
@@ -1830,6 +1829,7 @@ class NotesHomePageState extends State<NotesHomePage> {
           : 'No deleted notes in this folder.',
       onTap: (_) async {},
       onRestoreConflictCopy: _restoreConflictCopy,
+      showConflictState: false,
       onShowContextMenu: _showDeletedNoteMenu,
       trailingBuilder: (context, note) {
         return IconButton(
@@ -3431,6 +3431,7 @@ class _NotesList extends StatelessWidget {
     required this.emptyState,
     required this.onTap,
     required this.onRestoreConflictCopy,
+    required this.showConflictState,
     required this.onShowContextMenu,
     required this.trailingBuilder,
   });
@@ -3440,6 +3441,7 @@ class _NotesList extends StatelessWidget {
   final String emptyState;
   final Future<void> Function(Note note) onTap;
   final Future<void> Function(Note note) onRestoreConflictCopy;
+  final bool showConflictState;
   final Future<void> Function(Note note, Offset position) onShowContextMenu;
   final Widget Function(BuildContext context, Note note) trailingBuilder;
 
@@ -3473,7 +3475,10 @@ class _NotesList extends StatelessWidget {
             final note = notes[index];
             final title = note.title.isEmpty ? 'Untitled note' : note.title;
             final secondaryLine = _buildSecondaryLine(note);
-            final isConflictCopy = _isConflictCopy(note);
+            final isConflictCopy = showConflictState && _isConflictCopy(note);
+            final syncStatus = showConflictState
+                ? note.syncStatus
+                : _deletedNoteSyncStatusForDisplay(note);
             final colorScheme = Theme.of(context).colorScheme;
 
             return GestureDetector(
@@ -3544,7 +3549,7 @@ class _NotesList extends StatelessWidget {
                                     Row(
                                       children: [
                                         _SyncStatusChip(
-                                          status: note.syncStatus,
+                                          status: syncStatus,
                                           compact: true,
                                         ),
                                       ],
@@ -3609,7 +3614,7 @@ class _NotesList extends StatelessWidget {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                _SyncStatusChip(status: note.syncStatus),
+                                _SyncStatusChip(status: syncStatus),
                               ],
                             ),
                             subtitle: Padding(
@@ -3685,6 +3690,13 @@ class _NotesList extends StatelessWidget {
         .replaceAll(RegExp(r'^>\s+'), '')
         .trim();
     return cleaned.isEmpty ? 'Start writing...' : cleaned;
+  }
+
+  SyncStatus _deletedNoteSyncStatusForDisplay(Note note) {
+    if (note.syncStatus == SyncStatus.conflicted) {
+      return SyncStatus.pendingDelete;
+    }
+    return note.syncStatus;
   }
 }
 

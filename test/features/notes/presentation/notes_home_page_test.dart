@@ -365,6 +365,90 @@ void main() {
     );
   });
 
+  testWidgets('trashed conflict notes do not show conflict warnings',
+      (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final noteRepository = _FakeNoteRepository(
+      initialDeletedNotes: [
+        Note(
+          id: 'deleted-conflict-note',
+          title: 'Roadmap (Conflict Copy)',
+          content: 'Body',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 1),
+          deletedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.conflicted,
+          contentHash: 'hash-1',
+          deviceId: 'device-1',
+        ),
+      ],
+    );
+    final folderRepository = _FakeFolderRepository();
+    final authController =
+        AuthController(authService: _SignedInFakeAuthService());
+    await authController.restore();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: authController,
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('app-sync-status-indicator')),
+        matching: find.text('Conflicts'),
+      ),
+      findsNothing,
+    );
+
+    await tester.tap(find.text('Trash').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Conflict copy preserved during sync.'), findsNothing);
+    expect(
+      find.text(
+          'Conflict copy preserved during sync. Review before editing further.'),
+      findsNothing,
+    );
+    expect(find.text('Pending delete'), findsOneWidget);
+  });
+
   testWidgets(
       'mobile editor keeps the app-bar sync status visible while editing',
       (tester) async {
