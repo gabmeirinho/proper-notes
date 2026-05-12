@@ -28,6 +28,7 @@ class NoteEditorPage extends StatefulWidget {
     this.embedded = false,
     this.showInlineStatus = true,
     this.mobileTextScale = 0.92,
+    this.editingLocked = false,
     this.onClose,
     this.onPersisted,
     this.onStatusChanged,
@@ -42,6 +43,7 @@ class NoteEditorPage extends StatefulWidget {
   final bool embedded;
   final bool showInlineStatus;
   final double mobileTextScale;
+  final bool editingLocked;
   final VoidCallback? onClose;
   final ValueChanged<Note>? onPersisted;
   final ValueChanged<NoteEditorStatusSnapshot>? onStatusChanged;
@@ -69,6 +71,7 @@ class NoteEditorPageState extends State<NoteEditorPage>
   bool _saveQueued = false;
   bool _isClosing = false;
   bool _isApplyingExternalNoteUpdate = false;
+  Note? _blockedExternalNoteUpdate;
   String? _saveErrorMessage;
   TextSelection _lastKnownContentSelection =
       const TextSelection.collapsed(offset: 0);
@@ -136,12 +139,44 @@ class NoteEditorPageState extends State<NoteEditorPage>
     }
 
     final incomingSnapshot = _snapshotFromNote(incomingNote);
-    final editorHasFocus = _titleFocusNode.hasFocus || _contentFocusNode.hasFocus;
+    final editorHasFocus =
+        _titleFocusNode.hasFocus || _contentFocusNode.hasFocus;
     final isSameNote = _persistedNote?.id == incomingNote.id;
 
     if (editorHasFocus && isSameNote) {
+      final hasUnsavedChanges = _hasUnsavedChanges;
+      final persistedNote = _persistedNote;
+      final persistedSnapshot =
+          persistedNote == null ? null : _snapshotFromNote(persistedNote);
+      final remoteChangedUnderEdit = hasUnsavedChanges &&
+          persistedSnapshot != null &&
+          incomingSnapshot != persistedSnapshot;
+
+      if (remoteChangedUnderEdit) {
+        _autosaveTimer?.cancel();
+        _blockedExternalNoteUpdate = incomingNote;
+        if (mounted) {
+          setState(() {
+            _saveErrorMessage =
+                'Sync updated this note. Reopen it before editing.';
+          });
+        } else {
+          _saveErrorMessage =
+              'Sync updated this note. Reopen it before editing.';
+        }
+        _notifyStatusChanged();
+        return;
+      }
+
+      if (!hasUnsavedChanges && incomingSnapshot != _currentSnapshot) {
+        _applyExternalNoteUpdate(
+          incomingNote,
+          snapshot: incomingSnapshot,
+        );
+        return;
+      }
+
       _persistedNote = incomingNote;
-    
 
       if (incomingSnapshot == _currentSnapshot) {
         _lastPersistedSnapshot = incomingSnapshot;
@@ -163,6 +198,11 @@ class NoteEditorPageState extends State<NoteEditorPage>
 
   void _handleTextChanged() {
     if (_isApplyingExternalNoteUpdate) {
+      return;
+    }
+
+    if (_editingBlocked) {
+      _autosaveTimer?.cancel();
       return;
     }
 
@@ -376,7 +416,7 @@ class NoteEditorPageState extends State<NoteEditorPage>
         actions: <Type, Action<Intent>>{
           _SaveNoteIntent: CallbackAction<_SaveNoteIntent>(
             onInvoke: (_) {
-              if (_isSaving) {
+              if (_isSaving || _editingBlocked) {
                 return null;
               }
               return _flushPendingChanges();
@@ -384,30 +424,45 @@ class NoteEditorPageState extends State<NoteEditorPage>
           ),
           _ApplyHeadingIntent: CallbackAction<_ApplyHeadingIntent>(
             onInvoke: (intent) {
+              if (_editingBlocked) {
+                return null;
+              }
               _applyHeading(intent.level);
               return null;
             },
           ),
           _UndoEditIntent: CallbackAction<_UndoEditIntent>(
             onInvoke: (_) {
+              if (_editingBlocked) {
+                return null;
+              }
               _undoEdit();
               return null;
             },
           ),
           _RedoEditIntent: CallbackAction<_RedoEditIntent>(
             onInvoke: (_) {
+              if (_editingBlocked) {
+                return null;
+              }
               _redoEdit();
               return null;
             },
           ),
           _ToggleBoldIntent: CallbackAction<_ToggleBoldIntent>(
             onInvoke: (_) {
+              if (_editingBlocked) {
+                return null;
+              }
               _toggleInlineMarkdown('**', placeholder: 'bold text');
               return null;
             },
           ),
           _ToggleItalicIntent: CallbackAction<_ToggleItalicIntent>(
             onInvoke: (_) {
+              if (_editingBlocked) {
+                return null;
+              }
               _toggleInlineMarkdown('*', placeholder: 'italic text');
               return null;
             },
@@ -429,6 +484,7 @@ class NoteEditorPageState extends State<NoteEditorPage>
           titleFocusNode: _titleFocusNode,
           contentFocusNode: _contentFocusNode,
           isSaving: _isSaving,
+          editingLocked: _editingBlocked,
           status: _saveStatus,
           noteSyncStatus: _persistedNote?.syncStatus,
           canRetrySave: _saveErrorMessage != null,
@@ -573,6 +629,24 @@ class NoteEditorPageState extends State<NoteEditorPage>
   }
 
   _EditorSaveStatus get _saveStatus {
+    if (_blockedExternalNoteUpdate != null) {
+      return _EditorSaveStatus(
+        icon: Icons.warning_amber_outlined,
+        label: 'Sync updated this note. Reopen it before editing.',
+        compactLabel: 'Reopen needed',
+        color: Theme.of(context).colorScheme.error,
+      );
+    }
+
+    if (widget.editingLocked) {
+      return _EditorSaveStatus(
+        icon: Icons.sync,
+        label: 'Checking latest version...',
+        compactLabel: 'Checking',
+        color: Theme.of(context).colorScheme.primary,
+      );
+    }
+
     if (_saveErrorMessage != null) {
       return _EditorSaveStatus(
         icon: Icons.error_outline,
@@ -631,6 +705,10 @@ class NoteEditorPageState extends State<NoteEditorPage>
   }
 
   bool get _shouldShowSaveBadge {
+    if (_editingBlocked) {
+      return true;
+    }
+
     if (_saveErrorMessage != null || _isSaving || _hasUnsavedChanges) {
       return true;
     }
@@ -638,8 +716,29 @@ class NoteEditorPageState extends State<NoteEditorPage>
     return _persistedNote == null;
   }
 
+  bool get _editingBlocked =>
+      widget.editingLocked || _blockedExternalNoteUpdate != null;
+
   Future<bool> _flushPendingChanges() async {
     _autosaveTimer?.cancel();
+    if (_blockedExternalNoteUpdate != null) {
+      if (mounted) {
+        setState(() {
+          _saveErrorMessage =
+              'Sync updated this note. Reopen it before editing.';
+        });
+      } else {
+        _saveErrorMessage = 'Sync updated this note. Reopen it before editing.';
+      }
+      _notifyStatusChanged();
+      return false;
+    }
+
+    if (widget.editingLocked) {
+      _notifyStatusChanged();
+      return true;
+    }
+
     final snapshot = _currentSnapshot;
     if (!_shouldPersistSnapshot(snapshot)) {
       if (mounted) {
@@ -908,6 +1007,10 @@ class NoteEditorPageState extends State<NoteEditorPage>
   }
 
   void _applyHeading(int level) {
+    if (_editingBlocked) {
+      return;
+    }
+
     _applySelectedLinesTransform((lines) {
       final nonEmptyLines = lines.where((line) => line.trim().isNotEmpty);
       final allAlreadyAtLevel = nonEmptyLines.isNotEmpty &&
@@ -935,6 +1038,10 @@ class NoteEditorPageState extends State<NoteEditorPage>
   }
 
   void _toggleBulletList() {
+    if (_editingBlocked) {
+      return;
+    }
+
     _applySelectedLinesTransform((lines) {
       final nonEmptyLines =
           lines.where((line) => line.trim().isNotEmpty).toList(growable: false);
@@ -957,6 +1064,10 @@ class NoteEditorPageState extends State<NoteEditorPage>
   }
 
   void _toggleChecklist() {
+    if (_editingBlocked) {
+      return;
+    }
+
     _applySelectedLinesTransform((lines) {
       final nonEmptyLines =
           lines.where((line) => line.trim().isNotEmpty).toList(growable: false);
@@ -984,6 +1095,10 @@ class NoteEditorPageState extends State<NoteEditorPage>
   }
 
   void _toggleQuote() {
+    if (_editingBlocked) {
+      return;
+    }
+
     _applySelectedLinesTransform((lines) {
       final nonEmptyLines =
           lines.where((line) => line.trim().isNotEmpty).toList(growable: false);
@@ -1009,6 +1124,10 @@ class NoteEditorPageState extends State<NoteEditorPage>
     String marker, {
     required String placeholder,
   }) {
+    if (_editingBlocked) {
+      return;
+    }
+
     final text = _contentController.text;
     final rawSelection = _validSelection(text);
     final collapsedSpan = rawSelection.isCollapsed
@@ -1139,6 +1258,10 @@ class NoteEditorPageState extends State<NoteEditorPage>
   }
 
   void _insertCodeSnippet() {
+    if (_editingBlocked) {
+      return;
+    }
+
     if (_documentEditorKey.currentState case final editor?) {
       editor.insertCodeBlock();
       return;
@@ -1163,6 +1286,10 @@ class NoteEditorPageState extends State<NoteEditorPage>
   }
 
   Future<void> _attachImageFromFile() async {
+    if (_editingBlocked) {
+      return;
+    }
+
     const imageTypes = XTypeGroup(
       label: 'images',
       extensions: <String>['png', 'jpg', 'jpeg', 'gif', 'webp'],
@@ -1359,6 +1486,7 @@ class _NoteEditorContent extends StatelessWidget {
     required this.contentController,
     required this.contentFocusNode,
     required this.isSaving,
+    required this.editingLocked,
     required this.status,
     required this.noteSyncStatus,
     required this.canRetrySave,
@@ -1391,6 +1519,7 @@ class _NoteEditorContent extends StatelessWidget {
   final _MarkdownEditingController contentController;
   final FocusNode contentFocusNode;
   final bool isSaving;
+  final bool editingLocked;
   final _EditorSaveStatus status;
   final SyncStatus? noteSyncStatus;
   final bool canRetrySave;
@@ -1435,6 +1564,8 @@ class _NoteEditorContent extends StatelessWidget {
         TextField(
           controller: titleController,
           focusNode: titleFocusNode,
+          readOnly: editingLocked,
+          enableInteractiveSelection: true,
           decoration: isDesktopEmbedded
               ? const InputDecoration(
                   hintText: 'Untitled',
@@ -1499,35 +1630,35 @@ class _NoteEditorContent extends StatelessWidget {
               children: [
                 _EditorCommandButton(
                   label: 'H1',
-                  onPressed: () => applyHeading(1),
+                  onPressed: editingLocked ? null : () => applyHeading(1),
                 ),
                 _EditorCommandButton(
                   label: 'H2',
-                  onPressed: () => applyHeading(2),
+                  onPressed: editingLocked ? null : () => applyHeading(2),
                 ),
                 _EditorCommandButton(
                   label: 'H3',
-                  onPressed: () => applyHeading(3),
+                  onPressed: editingLocked ? null : () => applyHeading(3),
                 ),
                 _EditorCommandButton(
                   label: 'Bold',
-                  onPressed: toggleBold,
+                  onPressed: editingLocked ? null : toggleBold,
                 ),
                 _EditorCommandButton(
                   label: 'Italic',
-                  onPressed: toggleItalic,
+                  onPressed: editingLocked ? null : toggleItalic,
                 ),
                 _EditorCommandButton(
                   label: 'Checklist',
-                  onPressed: toggleChecklist,
+                  onPressed: editingLocked ? null : toggleChecklist,
                 ),
                 _EditorCommandButton(
                   label: 'List',
-                  onPressed: toggleBulletList,
+                  onPressed: editingLocked ? null : toggleBulletList,
                 ),
                 _EditorCommandButton(
                   label: 'Quote',
-                  onPressed: toggleQuote,
+                  onPressed: editingLocked ? null : toggleQuote,
                 ),
               ],
             ),
@@ -1549,6 +1680,7 @@ class _NoteEditorContent extends StatelessWidget {
               mobileLayout: mobileLayout,
               mobileTextScale: mobileTextScale,
               mobileBodyStyle: mobileBodyStyle,
+              editingLocked: editingLocked,
               deleteAttachmentFile: deleteAttachmentFile,
               onTap: onContentTap,
             ),
@@ -1572,6 +1704,7 @@ class _NoteEditorContent extends StatelessWidget {
                     toggleQuote: toggleQuote,
                     insertCodeSnippet: insertCodeSnippet,
                     attachImage: attachImage,
+                    editingLocked: editingLocked,
                   )
                 : const SizedBox.shrink(
                     key: ValueKey('mobile-editor-toolbar-hidden')),
@@ -1595,6 +1728,7 @@ class _MobileEditorToolbar extends StatelessWidget {
     required this.toggleQuote,
     required this.insertCodeSnippet,
     required this.attachImage,
+    required this.editingLocked,
   });
 
   final VoidCallback undoEdit;
@@ -1606,6 +1740,7 @@ class _MobileEditorToolbar extends StatelessWidget {
   final VoidCallback toggleQuote;
   final VoidCallback insertCodeSnippet;
   final Future<void> Function() attachImage;
+  final bool editingLocked;
 
   @override
   Widget build(BuildContext context) {
@@ -1637,51 +1772,53 @@ class _MobileEditorToolbar extends StatelessWidget {
                 _MobileToolbarButton(
                   tooltip: 'Undo',
                   icon: Icons.undo_rounded,
-                  onPressed: undoEdit,
+                  onPressed: editingLocked ? null : undoEdit,
                 ),
                 _MobileToolbarButton(
                   tooltip: 'Redo',
                   icon: Icons.redo_rounded,
-                  onPressed: redoEdit,
+                  onPressed: editingLocked ? null : redoEdit,
                 ),
                 _MobileToolbarDivider(color: colorScheme.outlineVariant),
                 _MobileToolbarButton(
                   tooltip: 'Bold',
                   icon: Icons.format_bold_rounded,
-                  onPressed: toggleBold,
+                  onPressed: editingLocked ? null : toggleBold,
                 ),
                 _MobileToolbarButton(
                   tooltip: 'Italic',
                   icon: Icons.format_italic_rounded,
-                  onPressed: toggleItalic,
+                  onPressed: editingLocked ? null : toggleItalic,
                 ),
                 _MobileToolbarButton(
                   tooltip: 'Checklist',
                   icon: Icons.check_box_outlined,
-                  onPressed: toggleChecklist,
+                  onPressed: editingLocked ? null : toggleChecklist,
                 ),
                 _MobileToolbarButton(
                   tooltip: 'Bullet list',
                   icon: Icons.format_list_bulleted_rounded,
-                  onPressed: toggleBulletList,
+                  onPressed: editingLocked ? null : toggleBulletList,
                 ),
                 _MobileToolbarDivider(color: colorScheme.outlineVariant),
                 _MobileToolbarButton(
                   tooltip: 'Quote',
                   icon: Icons.format_quote_rounded,
-                  onPressed: toggleQuote,
+                  onPressed: editingLocked ? null : toggleQuote,
                 ),
                 _MobileToolbarButton(
                   tooltip: 'Code block',
                   icon: Icons.data_object_rounded,
-                  onPressed: insertCodeSnippet,
+                  onPressed: editingLocked ? null : insertCodeSnippet,
                 ),
                 _MobileToolbarButton(
                   tooltip: 'Attach image',
                   icon: Icons.image_outlined,
-                  onPressed: () {
-                    attachImage();
-                  },
+                  onPressed: editingLocked
+                      ? null
+                      : () {
+                          attachImage();
+                        },
                 ),
               ],
             ),
@@ -1885,7 +2022,7 @@ class _MobileToolbarButton extends StatelessWidget {
   });
 
   final String tooltip;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final IconData? icon;
 
   @override
@@ -3095,6 +3232,7 @@ class _MarkdownEditorPane extends StatelessWidget {
     required this.mobileLayout,
     required this.mobileTextScale,
     required this.mobileBodyStyle,
+    required this.editingLocked,
     required this.deleteAttachmentFile,
     required this.onTap,
   });
@@ -3106,6 +3244,7 @@ class _MarkdownEditorPane extends StatelessWidget {
   final bool mobileLayout;
   final double mobileTextScale;
   final TextStyle? mobileBodyStyle;
+  final bool editingLocked;
   final Future<bool> Function(String attachmentUri) deleteAttachmentFile;
   final VoidCallback onTap;
 
@@ -3127,6 +3266,7 @@ class _MarkdownEditorPane extends StatelessWidget {
         mobileLayout: mobileLayout,
         mobileTextScale: mobileTextScale,
         mobileBodyStyle: mobileBodyStyle,
+        editingLocked: editingLocked,
         deleteAttachmentFile: deleteAttachmentFile,
         onTap: onTap,
       ),
@@ -3142,6 +3282,7 @@ class _UnifiedMarkdownEditor extends StatefulWidget {
     required this.mobileLayout,
     required this.mobileTextScale,
     required this.mobileBodyStyle,
+    required this.editingLocked,
     required this.deleteAttachmentFile,
     required this.onTap,
   });
@@ -3151,6 +3292,7 @@ class _UnifiedMarkdownEditor extends StatefulWidget {
   final bool mobileLayout;
   final double mobileTextScale;
   final TextStyle? mobileBodyStyle;
+  final bool editingLocked;
   final Future<bool> Function(String attachmentUri) deleteAttachmentFile;
   final VoidCallback onTap;
 
@@ -3178,7 +3320,8 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   @override
   void initState() {
     super.initState();
-    widget.controller.onToggleTaskCheckbox = _toggleTaskCheckboxAt;
+    widget.controller.onToggleTaskCheckbox =
+        widget.editingLocked ? null : _toggleTaskCheckboxAt;
     _editorScrollController = ScrollController()
       ..addListener(_handleScrollChanged);
     _lastRenderedText = widget.controller.text;
@@ -3195,7 +3338,11 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
       oldWidget.controller.removeListener(_handleControllerChanged);
       oldWidget.controller.onToggleTaskCheckbox = null;
       widget.controller.addListener(_handleControllerChanged);
-      widget.controller.onToggleTaskCheckbox = _toggleTaskCheckboxAt;
+      widget.controller.onToggleTaskCheckbox =
+          widget.editingLocked ? null : _toggleTaskCheckboxAt;
+    } else if (oldWidget.editingLocked != widget.editingLocked) {
+      widget.controller.onToggleTaskCheckbox =
+          widget.editingLocked ? null : _toggleTaskCheckboxAt;
     }
     if (oldWidget.focusNode != widget.focusNode) {
       oldWidget.focusNode.removeListener(_handleFocusChanged);
@@ -3976,7 +4123,8 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                           return;
                         }
                         _clearSelectedAttachmentImage();
-                        if (widget.controller.text.isEmpty) {
+                        if (!widget.editingLocked &&
+                            widget.controller.text.isEmpty) {
                           _focusEditorAt(0);
                         }
                       },
@@ -3992,6 +4140,8 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                             controller: widget.controller,
                             focusNode: widget.focusNode,
                             scrollController: _editorScrollController,
+                            readOnly: widget.editingLocked,
+                            enableInteractiveSelection: true,
                             onTap: _handleEditorTap,
                             inputFormatters: const [
                               _MarkdownListEditingFormatter(),
@@ -6621,7 +6771,7 @@ class _EditorCommandButton extends StatelessWidget {
   });
 
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {

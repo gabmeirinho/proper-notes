@@ -2286,12 +2286,85 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('locks existing note editing while sync is checking',
+      (tester) async {
+    final repository = _RecordingNoteRepository();
+    final note = Note(
+      id: 'note-sync-lock',
+      title: 'Sync lock',
+      content: 'Local content',
+      createdAt: DateTime.utc(2026),
+      updatedAt: DateTime.utc(2026),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+      baseContentHash: 'hash',
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(
+        repository: repository,
+        note: note,
+        editingLocked: true,
+      ),
+    );
+
+    expect(find.text('Checking'), findsOneWidget);
+    expect(tester.widget<TextField>(_bodyField()).readOnly, isTrue);
+    expect(
+      tester.widget<TextField>(find.byType(TextField).first).readOnly,
+      isTrue,
+    );
+  });
+
+  testWidgets('blocks autosave when sync updates the open note under an edit',
+      (tester) async {
+    final repository = _RecordingNoteRepository();
+    final originalNote = Note(
+      id: 'note-sync-race',
+      title: 'Race',
+      content: 'Old local content',
+      createdAt: DateTime.utc(2026),
+      updatedAt: DateTime.utc(2026),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'old-hash',
+      deviceId: 'device-1',
+      baseContentHash: 'old-hash',
+    );
+    final syncedNote = originalNote.copyWith(
+      content: 'Downloaded remote content',
+      updatedAt: DateTime.utc(2026, 1, 2),
+      contentHash: 'remote-hash',
+      baseContentHash: 'remote-hash',
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(repository: repository, note: originalNote),
+    );
+
+    await tester.tap(_bodyField());
+    await tester.enterText(_bodyField(), 'User typed on stale content');
+    await tester.pump();
+
+    await tester.pumpWidget(
+      _buildEditor(repository: repository, note: syncedNote),
+    );
+    await tester.pump(const Duration(milliseconds: 900));
+
+    expect(repository.updatedNotes, isEmpty);
+    expect(
+      find.text('Reopen needed'),
+      findsOneWidget,
+    );
+  });
 }
 
 Widget _buildEditor({
   required NoteRepository repository,
   Note? note,
   bool embedded = false,
+  bool editingLocked = false,
 }) {
   return MaterialApp(
     home: Scaffold(
@@ -2307,6 +2380,7 @@ Widget _buildEditor({
         noteRepository: repository,
         note: note,
         embedded: embedded,
+        editingLocked: editingLocked,
         onClose: embedded ? () {} : null,
       ),
     ),

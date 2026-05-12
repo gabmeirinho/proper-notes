@@ -2560,7 +2560,7 @@ void main() {
   );
 
   testWidgets(
-    'successful sync shows a dismissible sync result notice',
+    'successful sync without conflicts does not show a result notice',
     (tester) async {
       final noteRepository = _FakeNoteRepository();
       final folderRepository = _FakeFolderRepository();
@@ -2608,13 +2608,8 @@ void main() {
       await syncController.syncNow();
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Sync complete'), findsOneWidget);
-      expect(find.byTooltip('Dismiss sync notice'), findsOneWidget);
-
-      await tester.tap(find.byTooltip('Dismiss sync notice'));
-      await tester.pumpAndSettle();
-
       expect(find.textContaining('Sync complete'), findsNothing);
+      expect(find.byTooltip('Dismiss sync notice'), findsNothing);
     },
   );
 

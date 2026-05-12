@@ -143,6 +143,9 @@ class NotesHomePageState extends State<NotesHomePage> {
     if (summary == null) {
       _syncNoticeDismissTimer?.cancel();
       _lastSeenSyncNotice = null;
+      if (mounted) {
+        setState(() {});
+      }
       return;
     }
 
@@ -164,7 +167,17 @@ class NotesHomePageState extends State<NotesHomePage> {
       return null;
     }
 
-    return widget.syncController.errorMessage;
+    final errorMessage = widget.syncController.errorMessage;
+    if (errorMessage != null) {
+      return errorMessage;
+    }
+
+    final lastResult = widget.syncController.lastResult;
+    if (lastResult != null && lastResult.conflictCount > 0) {
+      return lastResult.summary();
+    }
+
+    return null;
   }
 
   @override
@@ -2170,6 +2183,7 @@ class NotesHomePageState extends State<NotesHomePage> {
       embedded: true,
       showInlineStatus: false,
       mobileTextScale: _mobileNoteTextScale,
+      editingLocked: note != null && widget.syncController.isSyncing,
       onPersisted: _handleDesktopEditorPersisted,
       onStatusChanged: _handleDesktopEditorStatusChanged,
       onClose: _closeDesktopEditor,
