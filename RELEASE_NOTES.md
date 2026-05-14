@@ -14,7 +14,7 @@ Current work beyond `v0.1.0-rc1` includes:
 Current editor/code status:
 - fenced code block preview support has been removed from the preview layer
 - the editor still contains fence-based code insertion and fenced inactive-line styling
-- a first-class code snippet replacement is planned in `PLAN.MD`
+- a first-class code snippet replacement remains future backlog work
 
 ## v0.1.0-rc1
 

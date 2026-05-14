@@ -70,7 +70,7 @@ Agents must preserve these constraints:
 - Deletions must use tombstone semantics before any final purge.
 - Missing remote files must be treated cautiously because absence is ambiguous.
 - Remote folder layout must stay app-owned and deterministic.
-- `PLAN.MD` is the reviewed source for the backend migration direction. Do not drift from it silently.
+- These architecture and data-safety rules are the reviewed source for backend direction. Do not drift from them silently.
 
 ## 5. Data Safety Rules
 
@@ -234,8 +234,8 @@ Avoid adding a large Nextcloud-specific SDK unless the capability gap is real an
 
 When making meaningful architectural changes:
 - update the relevant docs
-- keep implementation aligned with `PLAN.MD`
-- call out any divergence between the codebase and the migration plan
+- keep implementation aligned with these architecture and data-safety rules
+- call out any divergence between the codebase and the documented backend direction
 
 When replacing Google-era code:
 - remove obsolete vocabulary when practical
