@@ -3152,12 +3152,11 @@ class _SignedInFakeAuthService implements AuthService {
 class _FakeFolderRepository implements FolderRepository {
   _FakeFolderRepository({
     List<Folder> initialFolders = const <Folder>[],
-    this.deleteResult = DeleteFolderResult.deleted,
     this.deleteImpact,
   }) : _folders = List<Folder>.from(initialFolders);
 
   final List<Folder> _folders;
-  final DeleteFolderResult deleteResult;
+  final DeleteFolderResult deleteResult = DeleteFolderResult.deleted;
   final FolderDeleteImpact? deleteImpact;
   final List<String> createdPaths = <String>[];
   final List<String> deletedPaths = <String>[];

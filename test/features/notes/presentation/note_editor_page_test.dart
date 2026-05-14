@@ -273,7 +273,8 @@ void main() {
     final controller = bodyField.controller!;
     expect(controller.text, content);
 
-    controller.selection = TextSelection.collapsed(offset: content.length);
+    controller.selection =
+        const TextSelection.collapsed(offset: content.length);
     await tester.pumpWidget(
       _buildEditor(
         repository: repository,
@@ -753,14 +754,14 @@ void main() {
     final updatedBodyField = tester.widget<TextField>(_bodyField());
     updatedBodyField.controller!.value =
         updatedBodyField.controller!.value.copyWith(
-      text: '${imageLine}\nX\nNext line',
+      text: '$imageLine\nX\nNext line',
       selection: const TextSelection.collapsed(offset: 38),
     );
     await tester.pump();
 
     expect(
       tester.widget<TextField>(_bodyField()).controller!.text,
-      '${imageLine}\nX\nNext line',
+      '$imageLine\nX\nNext line',
     );
     expect(tester.widget<TextField>(_bodyField()).focusNode!.hasFocus, isTrue);
     expect(find.byType(AttachmentImagePreview), findsOneWidget);
@@ -1249,7 +1250,7 @@ void main() {
     final repository = _StubNoteRepository();
     const firstImageLine = '![One](attachment://first.png)';
     const secondImageLine = '![Two](attachment://second.png)';
-    final content = '$firstImageLine\n\n$secondImageLine\n\nNext line';
+    const content = '$firstImageLine\n\n$secondImageLine\n\nNext line';
     final note = Note(
       id: 'note-attachment-first-click-no-other-markdown',
       title: 'Attachment note',
@@ -1282,7 +1283,7 @@ void main() {
     final repository = _StubNoteRepository();
     const firstImageLine = '![One](attachment://first.png)';
     const secondImageLine = '![Two](attachment://second.png)';
-    final content = '$firstImageLine\n$secondImageLine';
+    const content = '$firstImageLine\n$secondImageLine';
     final note = Note(
       id: 'note-attachment-adjacent-images-safe-caret',
       title: 'Attachment note',
@@ -1461,8 +1462,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final bodyField = tester.widget<TextField>(_bodyField());
-    final nextLineOffset = imageLine.length + 1;
-    bodyField.controller!.selection = TextSelection.collapsed(
+    const nextLineOffset = imageLine.length + 1;
+    bodyField.controller!.selection = const TextSelection.collapsed(
       offset: nextLineOffset,
     );
     await tester.pumpAndSettle();
@@ -1473,7 +1474,7 @@ void main() {
     final editableState =
         tester.state<EditableTextState>(find.byType(EditableText).last);
     final nextLineCaretRect = editableState.renderEditable.getLocalRectForCaret(
-      TextPosition(offset: nextLineOffset),
+      const TextPosition(offset: nextLineOffset),
     );
     final nextLineCaretTop = editableState.renderEditable
         .localToGlobal(nextLineCaretRect.topLeft)
@@ -1937,9 +1938,9 @@ void main() {
       id: 'note-2',
       title: 'Code note',
       content: 'Intro\n\n```dart\nfinal value = 42;\n```',
-      documentJson: NoteDocument(
+      documentJson: const NoteDocument(
         version: 1,
-        blocks: const <NoteBlock>[
+        blocks: <NoteBlock>[
           ParagraphBlock(id: 'p1', text: 'Intro'),
           CodeBlock(id: 'c1', language: 'dart', code: 'final value = 42;'),
         ],

@@ -8,7 +8,6 @@ import 'package:proper_notes/features/notes/application/create_note.dart';
 import 'package:proper_notes/features/notes/application/update_note.dart';
 import 'package:proper_notes/features/notes/domain/note.dart';
 import 'package:proper_notes/features/notes/domain/note_repository.dart';
-import 'package:proper_notes/features/notes/domain/sync_status.dart';
 import 'package:proper_notes/features/notes/presentation/note_editor_page.dart';
 import 'package:proper_notes/features/sync/domain/remote_note.dart';
 
@@ -198,11 +197,10 @@ Widget _buildEditor({
 class _RecordingNoteRepository implements NoteRepository {
   _RecordingNoteRepository({
     this.createDelay = Duration.zero,
-    this.updateDelay = Duration.zero,
   });
 
   final Duration createDelay;
-  final Duration updateDelay;
+  final Duration updateDelay = Duration.zero;
   final List<Note> createdNotes = <Note>[];
   final List<Note> updatedNotes = <Note>[];
   final List<Note> _activeNotes = <Note>[];

@@ -22,7 +22,8 @@ Proper Notes is now centered on the v1 backend direction:
   editor
 - manual sync results shown after successful foreground sync without implying
   automatic conflict resolution
-- clean `flutter analyze` output
+- conflict resolution sheet compares original notes with preserved conflict
+  copies using metadata and a small line-based diff
 
 Google Drive is not an active v1 backend. Legacy Google-era database fields may
 remain only to preserve upgrade safety for existing local databases.
@@ -90,7 +91,7 @@ migration plan proving old local databases upgrade safely.
 
 ### 2. Keep Sync Regression Coverage Current
 
-Sync coverage is current for the exnd isting backebehavior. When sync behavior
+Sync coverage is current for the existing backend behavior. When sync behavior
 changes, add or update tests for the exact safety property.
 
 Covered priority cases include:
@@ -104,7 +105,7 @@ Covered priority cases include:
 - missing or unstable ETags
 - attachment retry behavior
 
-### 3. Finish Conflict UX Release Polish
+### 3. Keep Conflict UX Release Polish Stable
 
 Conflict and sync-status basics are now in place:
 
@@ -112,16 +113,31 @@ Conflict and sync-status basics are now in place:
 - note/editor badges distinguish pending upload, pending delete, and conflict
 - successful manual sync results are visible and dismissible
 - conflict counts are described as preserved conflicts, not resolved conflicts
-
-Remaining release-polish work should stay narrow:
-
-- make the conflict resolution sheet clearer about which note is original and
-  which note is the preserved conflict copy
-- show enough note metadata in conflict resolution to compare versions without
-  opening both notes first
+- conflict resolution shows the original note and preserved conflict copy with
+  title, folder, updated time, and a capped line-based diff
 - keep the resolution flow explicit: deleting or keeping a version must remain a
   user action
-- add focused widget coverage for the conflict resolution choices
+- focused widget coverage protects the conflict resolution display and choices
+
+Further conflict UX work should stay narrow and must not change reconciliation,
+schema, or conflict-copy preservation semantics unless the sync plan is updated
+and reviewed first.
+
+### 4. Restore Analyzer Cleanliness
+
+The next stabilization gap is analyzer cleanliness. `flutter test` is clean, but
+`flutter analyze` still reports existing warnings and lints, mostly in the note
+editor and notes home presentation files.
+
+Analyzer cleanup should:
+
+- remove unused private helpers, imports, parameters, locals, and fields when
+  they are genuinely dead
+- replace deprecated APIs only when the behavior remains equivalent
+- keep editor behavior covered by existing widget tests
+- avoid feature work while cleaning lints
+- run `flutter analyze` and `flutter test` before considering the milestone
+  ready for new product surface
 
 ## Out Of Scope For This Milestone
 
@@ -137,11 +153,11 @@ Remaining release-polish work should stay narrow:
 
 ## Next Step
 
-The next implementation step is to improve the conflict resolution sheet. It
-should display both candidate versions with title, folder, updated time, and a
-short content preview, then keep the existing explicit actions for opening or
-choosing a version. This is product-facing polish only; it should not change
-sync reconciliation, schema, or conflict-copy preservation semantics.
+The next implementation step is analyzer cleanup for v0.1 stabilization. Start
+with the existing presentation-layer warnings in `note_editor_page.dart` and
+`notes_home_page.dart`, then address remaining test and script lints. This is
+maintenance work only; it should not add product features, change sync behavior,
+or alter database schema.
 
 ## Definition Of Done
 

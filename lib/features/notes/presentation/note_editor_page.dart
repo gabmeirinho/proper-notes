@@ -516,8 +516,17 @@ class NoteEditorPageState extends State<NoteEditorPage>
       return content;
     }
 
-    return WillPopScope(
-      onWillPop: _handleWillPop,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) {
+          return;
+        }
+        final savedSuccessfully = await _handleWillPop();
+        if (savedSuccessfully && context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
       child: Scaffold(
         backgroundColor: Theme.of(context).colorScheme.surface,
         body: SafeArea(
@@ -2177,18 +2186,9 @@ class _RedoEditIntent extends Intent {
   const _RedoEditIntent();
 }
 
-class _SelectAllDocumentIntent extends Intent {
-  const _SelectAllDocumentIntent();
-}
-
-class _ClearSelectedDocumentIntent extends Intent {
-  const _ClearSelectedDocumentIntent();
-}
-
 class _MarkdownEditingController extends TextEditingController {
   _MarkdownEditingController({
     super.text,
-    this.onToggleTaskCheckbox,
   });
 
   ValueChanged<int>? onToggleTaskCheckbox;
@@ -2548,13 +2548,12 @@ class _MarkdownEditingController extends TextEditingController {
   }
 
   InlineSpan _buildTaskCheckboxSpan({
-    required _TaskListLineMatch taskMatch,
+    required TaskListLineMatch taskMatch,
     required TextStyle baseStyle,
     required int lineIndex,
     required int checkedCharacterOffset,
   }) {
-    final checkboxSize =
-        (((baseStyle.fontSize ?? 16) * 0.95).clamp(16.0, 18.0)) as double;
+    final checkboxSize = ((baseStyle.fontSize ?? 16) * 0.95).clamp(16.0, 18.0);
     final markerPrefix = taskMatch.markerText.substring(0, 3);
     final markerSuffix = taskMatch.markerText.substring(4);
 
@@ -2660,10 +2659,7 @@ String _attachmentPlaceholderText({
   final lineBreakCount = math.min(targetLineCount - 1, maxLineBreaks);
   final fillerCount = rawLength - lineBreakCount - 2;
 
-  return ' ' +
-      ('\n' * lineBreakCount) +
-      ' ' +
-      ('\u200B' * math.max(0, fillerCount));
+  return ' ${'\n' * lineBreakCount} ${'\u200B' * math.max(0, fillerCount)}';
 }
 
 Size _attachmentDisplaySize(
@@ -2675,7 +2671,7 @@ Size _attachmentDisplaySize(
   final intrinsic = attachmentImageSizes[attachmentUri];
   final safeMaxWidth = math.max(1.0, maxWidth);
   final safeMaxHeight = math.max(1.0, maxHeight);
-  final fallback = const Size(
+  const fallback = Size(
     _UnifiedMarkdownEditorState._imagePreviewFallbackWidth,
     _UnifiedMarkdownEditorState._imagePreviewFallbackHeight,
   );
@@ -2699,7 +2695,7 @@ List<InlineSpan> buildInactiveMarkdownLineSpans(
   bool isCodeSnippetOpeningTag = false,
   bool isCodeSnippetClosingTag = false,
   String codeSnippetLanguage = '',
-  InlineSpan Function(_TaskListLineMatch taskMatch)? taskCheckboxBuilder,
+  InlineSpan Function(TaskListLineMatch taskMatch)? taskCheckboxBuilder,
   InlineSpan Function(AttachmentImageMarkdown image)? attachmentImageBuilder,
 }) {
   if (isCodeSnippetOpeningTag ||
@@ -3057,8 +3053,8 @@ TextStyle _hiddenMarkdownMarkerWidthPreservingStyle(TextStyle baseStyle) {
   return baseStyle.copyWith(color: Colors.transparent);
 }
 
-class _TaskListLineMatch {
-  const _TaskListLineMatch({
+class TaskListLineMatch {
+  const TaskListLineMatch({
     required this.indent,
     required this.checked,
     required this.markerText,
@@ -3075,13 +3071,13 @@ class _TaskListLineMatch {
   final int checkedCharacterIndex;
 }
 
-_TaskListLineMatch? _parseTaskListLine(String line) {
+TaskListLineMatch? _parseTaskListLine(String line) {
   final match = RegExp(r'^(\s*)- \[( |x|X)\](?:\s|$)').firstMatch(line);
   if (match == null) {
     return null;
   }
 
-  return _TaskListLineMatch(
+  return TaskListLineMatch(
     indent: match.group(1)!,
     checked: (match.group(2) ?? '').toLowerCase() == 'x',
     markerText: line.substring(match.group(1)!.length, match.end),
@@ -3142,10 +3138,6 @@ class _FencedCodeSnippet {
   bool containsOffset(int offset) {
     return offset >= startOffset && offset <= endOffset;
   }
-}
-
-bool _isCodeSnippetClosingTag(String line) {
-  return _isFencedCodeSnippetDelimiter(line);
 }
 
 String? _codeSnippetLanguage(String line) {
@@ -3314,7 +3306,6 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
   final Set<String> _loadingAttachmentImageSizes = <String>{};
   _SelectedAttachmentImage? _selectedAttachmentImage;
   TextSelection? _pendingAttachmentTapSelection;
-  TextSelection? _lastStableEditorSelection;
   bool _suppressNextEditorTap = false;
 
   @override
@@ -3385,7 +3376,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
 
   Future<void> _deleteSnippet(_FencedCodeSnippet snippet) async {
     final text = widget.controller.text;
-    final deletionRange = snippetDeletionRange(text, snippet);
+    final deletionRange = _snippetDeletionRange(text, snippet);
     final updatedText =
         text.replaceRange(deletionRange.start, deletionRange.end, '');
     final nextOffset = deletionRange.start.clamp(0, updatedText.length);
@@ -3428,7 +3419,6 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     }
     _ensureAttachmentImageSizes();
     _syncSelectedAttachmentImageWithText();
-    _rememberStableEditorSelection();
     if (_keepCaretOutOfSelectedAttachmentImage()) {
       return;
     }
@@ -3467,29 +3457,6 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     }
 
     return widget.controller._activeLineIndex;
-  }
-
-  void _rememberStableEditorSelection() {
-    if (_pendingAttachmentTapSelection != null) {
-      return;
-    }
-
-    final selection = widget.controller.selection;
-    if (!selection.isValid) {
-      return;
-    }
-
-    final selectedImage = _selectedAttachmentImage;
-    if (selectedImage != null && selection.isCollapsed) {
-      final offset =
-          selection.extentOffset.clamp(0, widget.controller.text.length);
-      if (offset >= selectedImage.deleteStart &&
-          offset < selectedImage.deleteEnd) {
-        return;
-      }
-    }
-
-    _lastStableEditorSelection = selection;
   }
 
   bool _keepCaretOutOfSelectedAttachmentImage() {
@@ -4511,7 +4478,6 @@ List<_AttachmentImageOverlayGeometry> _buildAttachmentImageOverlayGeometry(
         );
         if (boxes.isNotEmpty) {
           final firstBox = boxes.first;
-          final lastBox = boxes.last;
           final displaySize = _attachmentDisplaySize(
             imageMatch.attachmentUri,
             attachmentImageSizes: attachmentImageSizes,
@@ -4647,8 +4613,7 @@ double snippetOverlayBottomForClosingFence({
       bottomInset;
 }
 
-@visibleForTesting
-TextRange snippetDeletionRange(String text, _FencedCodeSnippet snippet) {
+TextRange _snippetDeletionRange(String text, _FencedCodeSnippet snippet) {
   var start = snippet.startOffset.clamp(0, text.length);
   var end = snippet.endOffset.clamp(start, text.length);
 
@@ -4810,7 +4775,6 @@ class _TaskCheckboxInline extends StatelessWidget {
 
 class _DocumentBlocksEditor extends StatefulWidget {
   const _DocumentBlocksEditor({
-    super.key,
     required this.controller,
     required this.focusNode,
     required this.embedded,
@@ -5209,7 +5173,6 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
         activeIndex != -1 &&
         !_blocks[activeIndex].isCode) {
       final block = _blocks[activeIndex];
-      final selection = block.controller.selection;
       final previousIsCode = activeIndex > 0 && _blocks[activeIndex - 1].isCode;
       final nextIsCode =
           activeIndex < _blocks.length - 1 && _blocks[activeIndex + 1].isCode;
@@ -6324,14 +6287,6 @@ class _DocumentEditorBlock {
           focusNode: focusNode,
           isCode: false,
         ),
-    };
-  }
-
-  static String signatureForNoteBlock(NoteBlock block) {
-    return switch (block) {
-      ParagraphBlock(:final text) => 'paragraph|$text',
-      CodeBlock(:final language, :final code) => 'code|$language|$code',
-      UnknownBlock(:final type) => 'unknown|$type',
     };
   }
 

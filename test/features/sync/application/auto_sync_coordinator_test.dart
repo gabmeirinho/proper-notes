@@ -170,11 +170,10 @@ class _FakeAuthService implements AuthService {
 class _FakeNoteRepository implements NoteRepository {
   _FakeNoteRepository({
     this.activeNotes = const <Note>[],
-    this.deletedNotes = const <Note>[],
   });
 
   final List<Note> activeNotes;
-  final List<Note> deletedNotes;
+  final List<Note> deletedNotes = const <Note>[];
 
   @override
   Future<void> applyRemoteDeletion(RemoteNote remoteNote) async {}
