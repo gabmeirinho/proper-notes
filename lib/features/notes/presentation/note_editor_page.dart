@@ -3363,6 +3363,7 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
 
   String _lastRenderedText = '';
   String? _lastRenderedSlashQuery;
+  int _lastRenderedActiveLineIndex = -1;
 
   void _handleScrollChanged() {
     if (mounted) {
@@ -3436,12 +3437,15 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
         ? 0
         : _selectedSlashCommandIndex.clamp(0, commands.length - 1);
     final nextSlashQuery = _slashCommandQuery;
+    final nextActiveLineIndex = _renderedActiveLineIndex;
     final shouldRebuild = widget.controller.text != _lastRenderedText ||
         nextSlashQuery != _lastRenderedSlashQuery ||
+        nextActiveLineIndex != _lastRenderedActiveLineIndex ||
         nextIndex != _selectedSlashCommandIndex;
 
     _lastRenderedText = widget.controller.text;
     _lastRenderedSlashQuery = nextSlashQuery;
+    _lastRenderedActiveLineIndex = nextActiveLineIndex;
     if (!shouldRebuild) {
       return;
     }
@@ -3455,6 +3459,14 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     if (mounted) {
       setState(() {});
     }
+  }
+
+  int get _renderedActiveLineIndex {
+    if (!widget.focusNode.hasFocus || _selectedAttachmentImage != null) {
+      return -1;
+    }
+
+    return widget.controller._activeLineIndex;
   }
 
   void _rememberStableEditorSelection() {
@@ -3941,6 +3953,35 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     return true;
   }
 
+  bool _handleSelectedAttachmentArrowKey(KeyEvent event) {
+    final selectedImage = _selectedAttachmentImage;
+    if (selectedImage == null ||
+        (event.logicalKey != LogicalKeyboardKey.arrowLeft &&
+            event.logicalKey != LogicalKeyboardKey.arrowRight &&
+            event.logicalKey != LogicalKeyboardKey.arrowUp &&
+            event.logicalKey != LogicalKeyboardKey.arrowDown)) {
+      return false;
+    }
+
+    final textLength = widget.controller.text.length;
+    final nextOffset = switch (event.logicalKey) {
+      LogicalKeyboardKey.arrowLeft ||
+      LogicalKeyboardKey.arrowUp =>
+        selectedImage.deleteStart.clamp(0, textLength),
+      LogicalKeyboardKey.arrowRight ||
+      LogicalKeyboardKey.arrowDown =>
+        selectedImage.focusOffset.clamp(0, textLength),
+      _ => widget.controller.selection.extentOffset.clamp(0, textLength),
+    };
+
+    setState(() {
+      _selectedAttachmentImage = null;
+      _lastRenderedActiveLineIndex = -1;
+    });
+    widget.controller.selection = TextSelection.collapsed(offset: nextOffset);
+    return true;
+  }
+
   KeyEventResult _handleKeyEvent(KeyEvent event) {
     if (event is! KeyDownEvent) {
       return KeyEventResult.ignored;
@@ -3972,6 +4013,10 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
     }
 
     if (_handleCodeFenceWordJump(event)) {
+      return KeyEventResult.handled;
+    }
+
+    if (_handleSelectedAttachmentArrowKey(event)) {
       return KeyEventResult.handled;
     }
 
