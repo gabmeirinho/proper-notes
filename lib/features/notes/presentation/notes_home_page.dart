@@ -944,6 +944,7 @@ class NotesHomePageState extends State<NotesHomePage> {
     final action = await showModalBottomSheet<_ConflictResolutionAction>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (context) {
         return _ConflictResolutionSheet(
           conflictNote: conflictNote,
@@ -4425,68 +4426,304 @@ class _ConflictResolutionSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final originalNote = this.originalNote;
+
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: Text(
-                'Resolve conflict',
-                style: Theme.of(context).textTheme.titleLarge,
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: Text(
+                  'Resolve conflict',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: Text(
-                originalNote == null
-                    ? 'This conflict copy can be converted back into a normal note.'
-                    : 'Choose which version to keep. The other one will be moved to trash.',
-                style: Theme.of(context).textTheme.bodyMedium,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: Text(
+                  originalNote == null
+                      ? 'Original note not found. This conflict copy can be converted back into a normal note.'
+                      : 'Choose which version to keep. The other one will be moved to trash.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
               ),
-            ),
-            _MobileActionTile(
-              icon: Icons.open_in_new,
-              label: 'Open conflict copy',
-              onTap: () => Navigator.of(context).pop(
-                _ConflictResolutionAction.openConflictCopy,
+              if (originalNote != null)
+                _ConflictVersionSummary(
+                  label: 'Original',
+                  note: originalNote,
+                ),
+              _ConflictVersionSummary(
+                label: 'Preserved conflict copy',
+                note: conflictNote,
               ),
-            ),
-            if (originalNote != null)
+              if (originalNote != null)
+                _ConflictChangesView(
+                  originalNote: originalNote,
+                  conflictNote: conflictNote,
+                )
+              else
+                _ConflictPreview(note: conflictNote),
+              const SizedBox(height: 8),
               _MobileActionTile(
-                icon: Icons.article_outlined,
-                label: 'Open original',
-                onTap: () => Navigator.of(context)
-                    .pop(_ConflictResolutionAction.openOriginal),
+                icon: Icons.open_in_new,
+                label: 'Open conflict copy',
+                onTap: () => Navigator.of(context).pop(
+                  _ConflictResolutionAction.openConflictCopy,
+                ),
               ),
-            if (originalNote != null)
+              if (originalNote != null)
+                _MobileActionTile(
+                  icon: Icons.article_outlined,
+                  label: 'Open original',
+                  onTap: () => Navigator.of(context)
+                      .pop(_ConflictResolutionAction.openOriginal),
+                ),
+              if (originalNote != null)
+                _MobileActionTile(
+                  icon: Icons.check_circle_outline,
+                  label: 'Keep original',
+                  onTap: () => Navigator.of(context)
+                      .pop(_ConflictResolutionAction.keepOriginal),
+                ),
               _MobileActionTile(
-                icon: Icons.check_circle_outline,
-                label: 'Keep original',
-                onTap: () => Navigator.of(context)
-                    .pop(_ConflictResolutionAction.keepOriginal),
+                icon: Icons.check_circle,
+                label: originalNote == null
+                    ? 'Convert to normal note'
+                    : 'Keep conflict copy',
+                onTap: () => Navigator.of(context).pop(
+                  _ConflictResolutionAction.keepConflictCopy,
+                ),
               ),
-            _MobileActionTile(
-              icon: Icons.check_circle,
-              label: originalNote == null
-                  ? 'Convert to normal note'
-                  : 'Keep conflict copy',
-              onTap: () => Navigator.of(context).pop(
-                _ConflictResolutionAction.keepConflictCopy,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: Text(
+                  'Resolved title: $baseTitle',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: Text(
-                'Resolved title: $baseTitle',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+class _ConflictVersionSummary extends StatelessWidget {
+  const _ConflictVersionSummary({
+    required this.label,
+    required this.note,
+  });
+
+  final String label;
+  final Note note;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.8),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: colorScheme.primary,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 8),
+          _ConflictMetadataLine(label: 'Title', value: _noteTitle(note)),
+          _ConflictMetadataLine(
+            label: 'Folder',
+            value: _conflictFolderLabel(note.folderPath),
+          ),
+          _ConflictMetadataLine(
+            label: 'Updated',
+            value: _formatDateTime(note.updatedAt),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConflictMetadataLine extends StatelessWidget {
+  const _ConflictMetadataLine({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Text(
+        '$label: $value',
+        style: textTheme.bodySmall?.copyWith(
+          color: colorScheme.onSurfaceVariant,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _ConflictChangesView extends StatelessWidget {
+  const _ConflictChangesView({
+    required this.originalNote,
+    required this.conflictNote,
+  });
+
+  final Note originalNote;
+  final Note conflictNote;
+
+  @override
+  Widget build(BuildContext context) {
+    final diff = _buildConflictLineDiff(
+      originalNote.content,
+      conflictNote.content,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Changes',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 8),
+          if (diff.entries.isEmpty)
+            Text(
+              'No text changes found between these versions.',
+              style: Theme.of(context).textTheme.bodySmall,
+            )
+          else
+            _ConflictDiffLines(diff: diff),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConflictDiffLines extends StatelessWidget {
+  const _ConflictDiffLines({
+    required this.diff,
+  });
+
+  final _ConflictLineDiff diff;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final entry in diff.entries) _ConflictDiffLine(entry: entry),
+        if (diff.hiddenChangeCount > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              '${diff.hiddenChangeCount} more changed '
+              'line${diff.hiddenChangeCount == 1 ? '' : 's'} not shown.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ConflictDiffLine extends StatelessWidget {
+  const _ConflictDiffLine({
+    required this.entry,
+  });
+
+  final _ConflictLineDiffEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isAddition = entry.type == _ConflictLineDiffEntryType.added;
+    final color = isAddition ? Colors.green.shade700 : colorScheme.error;
+    final prefix = isAddition ? '+ ' : '- ';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            prefix,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          Expanded(
+            child: Text(
+              entry.text.isEmpty ? '(empty line)' : entry.text,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: color,
+                    fontFamily: 'JetBrainsMono',
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConflictPreview extends StatelessWidget {
+  const _ConflictPreview({
+    required this.note,
+  });
+
+  final Note note;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Preview',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _conflictContentPreview(note.content),
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
       ),
     );
   }
@@ -4591,6 +4828,158 @@ class _TextEntryDialogState extends State<_TextEntryDialog> {
       ],
     );
   }
+}
+
+String _noteTitle(Note note) {
+  return note.title.trim().isEmpty ? 'Untitled note' : note.title.trim();
+}
+
+String _conflictFolderLabel(String? folderPath) {
+  final path = folderPath?.trim();
+  return path == null || path.isEmpty ? 'All notes' : path;
+}
+
+String _conflictContentPreview(String content) {
+  final preview = content
+      .split('\n')
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .join(' ');
+  return preview.isEmpty ? 'Empty note' : preview;
+}
+
+_ConflictLineDiff _buildConflictLineDiff(
+  String originalContent,
+  String conflictContent, {
+  int maxEntries = 12,
+}) {
+  final originalLines = originalContent.split('\n');
+  final conflictLines = conflictContent.split('\n');
+  final commonSubsequence = _longestCommonLineSubsequence(
+    originalLines,
+    conflictLines,
+  );
+  final entries = <_ConflictLineDiffEntry>[];
+  var originalIndex = 0;
+  var conflictIndex = 0;
+  var totalChangeCount = 0;
+
+  void addEntry(_ConflictLineDiffEntry entry) {
+    totalChangeCount += 1;
+    if (entries.length < maxEntries) {
+      entries.add(entry);
+    }
+  }
+
+  for (final commonLine in commonSubsequence) {
+    while (originalIndex < originalLines.length &&
+        originalLines[originalIndex] != commonLine) {
+      addEntry(_ConflictLineDiffEntry.removed(originalLines[originalIndex]));
+      originalIndex += 1;
+    }
+
+    while (conflictIndex < conflictLines.length &&
+        conflictLines[conflictIndex] != commonLine) {
+      addEntry(_ConflictLineDiffEntry.added(conflictLines[conflictIndex]));
+      conflictIndex += 1;
+    }
+
+    originalIndex += 1;
+    conflictIndex += 1;
+  }
+
+  while (originalIndex < originalLines.length) {
+    addEntry(_ConflictLineDiffEntry.removed(originalLines[originalIndex]));
+    originalIndex += 1;
+  }
+
+  while (conflictIndex < conflictLines.length) {
+    addEntry(_ConflictLineDiffEntry.added(conflictLines[conflictIndex]));
+    conflictIndex += 1;
+  }
+
+  return _ConflictLineDiff(
+    entries: entries,
+    hiddenChangeCount: totalChangeCount - entries.length,
+  );
+}
+
+List<String> _longestCommonLineSubsequence(
+  List<String> originalLines,
+  List<String> conflictLines,
+) {
+  final lengths = List<List<int>>.generate(
+    originalLines.length + 1,
+    (_) => List<int>.filled(conflictLines.length + 1, 0),
+  );
+
+  for (var i = originalLines.length - 1; i >= 0; i--) {
+    for (var j = conflictLines.length - 1; j >= 0; j--) {
+      if (originalLines[i] == conflictLines[j]) {
+        lengths[i][j] = lengths[i + 1][j + 1] + 1;
+      } else {
+        lengths[i][j] = lengths[i + 1][j] >= lengths[i][j + 1]
+            ? lengths[i + 1][j]
+            : lengths[i][j + 1];
+      }
+    }
+  }
+
+  final sequence = <String>[];
+  var i = 0;
+  var j = 0;
+  while (i < originalLines.length && j < conflictLines.length) {
+    if (originalLines[i] == conflictLines[j]) {
+      sequence.add(originalLines[i]);
+      i += 1;
+      j += 1;
+    } else if (lengths[i + 1][j] >= lengths[i][j + 1]) {
+      i += 1;
+    } else {
+      j += 1;
+    }
+  }
+
+  return sequence;
+}
+
+class _ConflictLineDiff {
+  const _ConflictLineDiff({
+    required this.entries,
+    required this.hiddenChangeCount,
+  });
+
+  final List<_ConflictLineDiffEntry> entries;
+  final int hiddenChangeCount;
+}
+
+class _ConflictLineDiffEntry {
+  const _ConflictLineDiffEntry._({
+    required this.type,
+    required this.text,
+  });
+
+  factory _ConflictLineDiffEntry.added(String text) {
+    return _ConflictLineDiffEntry._(
+      type: _ConflictLineDiffEntryType.added,
+      text: text,
+    );
+  }
+
+  factory _ConflictLineDiffEntry.removed(String text) {
+    return _ConflictLineDiffEntry._(
+      type: _ConflictLineDiffEntryType.removed,
+      text: text,
+    );
+  }
+
+  final _ConflictLineDiffEntryType type;
+  final String text;
+}
+
+enum _ConflictLineDiffEntryType {
+  added,
+  removed,
 }
 
 String _formatTimestamp(Note note) {
