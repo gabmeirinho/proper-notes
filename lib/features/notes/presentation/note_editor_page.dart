@@ -31,6 +31,7 @@ class NoteEditorPage extends StatefulWidget {
     this.editingLocked = false,
     this.onClose,
     this.onPersisted,
+    this.onEditingActivity,
     this.onStatusChanged,
     super.key,
   });
@@ -46,6 +47,7 @@ class NoteEditorPage extends StatefulWidget {
   final bool editingLocked;
   final VoidCallback? onClose;
   final ValueChanged<Note>? onPersisted;
+  final VoidCallback? onEditingActivity;
   final ValueChanged<NoteEditorStatusSnapshot>? onStatusChanged;
 
   bool get isEditing => note != null;
@@ -211,6 +213,8 @@ class NoteEditorPageState extends State<NoteEditorPage>
       _restoreSuspendedContentSelectionIfNeeded();
       return;
     }
+
+    widget.onEditingActivity?.call();
 
     if (!_isAppLifecycleSuspended && _contentController.selection.isValid) {
       _lastKnownContentSelection = _contentController.selection;

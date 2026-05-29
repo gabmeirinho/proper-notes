@@ -57,6 +57,7 @@ class NotesHomePage extends StatefulWidget {
     this.themeMode = ThemeMode.system,
     this.onThemeModeChanged,
     this.onLocalChangePersisted,
+    this.onEditingActivity,
     super.key,
   });
 
@@ -77,6 +78,7 @@ class NotesHomePage extends StatefulWidget {
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
   final VoidCallback? onLocalChangePersisted;
+  final VoidCallback? onEditingActivity;
 
   @override
   State<NotesHomePage> createState() => NotesHomePageState();
@@ -1943,8 +1945,8 @@ class NotesHomePageState extends State<NotesHomePage> {
       embedded: true,
       showInlineStatus: false,
       mobileTextScale: _mobileNoteTextScale,
-      editingLocked: note != null && widget.syncController.isSyncing,
       onPersisted: _handleDesktopEditorPersisted,
+      onEditingActivity: widget.onEditingActivity,
       onStatusChanged: _handleDesktopEditorStatusChanged,
       onClose: _closeDesktopEditor,
     );

@@ -11,7 +11,8 @@ class AutoSyncCoordinator {
     required NoteRepository noteRepository,
     required AuthController authController,
     required SyncController syncController,
-    this.localChangeDebounce = const Duration(seconds: 10),
+    this.localChangeDebounce = const Duration(seconds: 45),
+    this.editorIdleDuration = const Duration(seconds: 45),
     this.idleSyncInterval = const Duration(seconds: 30),
     this.resumeSyncInterval = const Duration(seconds: 30),
     this.failureCooldown = const Duration(seconds: 20),
@@ -27,21 +28,29 @@ class AutoSyncCoordinator {
   final AuthController _authController;
   final SyncController _syncController;
   final Duration localChangeDebounce;
+  final Duration editorIdleDuration;
   final Duration idleSyncInterval;
   final Duration resumeSyncInterval;
   final Duration failureCooldown;
 
   Timer? _debounceTimer;
+  Timer? _editorIdleTimer;
   Timer? _idleSyncTimer;
   Future<void>? _activeSyncFuture;
   bool _syncQueued = false;
   bool _wasSignedIn;
   DateTime? _lastAutoSyncFailureAt;
+  DateTime? _lastEditorActivityAt;
 
   void dispose() {
     _debounceTimer?.cancel();
+    _editorIdleTimer?.cancel();
     _idleSyncTimer?.cancel();
     _authController.removeListener(_handleAuthControllerChanged);
+  }
+
+  void notifyEditorActivity() {
+    _lastEditorActivityAt = DateTime.now().toUtc();
   }
 
   void notifyLocalChangePersisted() {
@@ -75,6 +84,7 @@ class AutoSyncCoordinator {
     return _requestAutoSync(
       requirePendingChanges: false,
       ignoreFailureCooldown: true,
+      respectEditorIdle: false,
     );
   }
 
@@ -91,6 +101,7 @@ class AutoSyncCoordinator {
       requirePendingChanges: false,
       timeout: timeout,
       ignoreFailureCooldown: true,
+      respectEditorIdle: false,
     );
   }
 
@@ -144,6 +155,7 @@ class AutoSyncCoordinator {
     required bool requirePendingChanges,
     Duration? timeout,
     bool ignoreFailureCooldown = false,
+    bool respectEditorIdle = true,
   }) async {
     if (!_authController.isSignedIn) {
       return;
@@ -153,6 +165,11 @@ class AutoSyncCoordinator {
     if (!ignoreFailureCooldown &&
         _lastAutoSyncFailureAt != null &&
         now.difference(_lastAutoSyncFailureAt!) < failureCooldown) {
+      return;
+    }
+
+    if (respectEditorIdle && _isEditorRecentlyActive(now)) {
+      _scheduleAfterEditorIdle(requirePendingChanges: requirePendingChanges);
       return;
     }
 
@@ -218,5 +235,34 @@ class AutoSyncCoordinator {
   bool _isPendingSync(Note note) {
     return note.syncStatus == SyncStatus.pendingUpload ||
         note.syncStatus == SyncStatus.pendingDelete;
+  }
+
+  bool _isEditorRecentlyActive(DateTime now) {
+    final lastEditorActivityAt = _lastEditorActivityAt;
+    if (lastEditorActivityAt == null || editorIdleDuration <= Duration.zero) {
+      return false;
+    }
+
+    return now.difference(lastEditorActivityAt) < editorIdleDuration;
+  }
+
+  void _scheduleAfterEditorIdle({
+    required bool requirePendingChanges,
+  }) {
+    final lastEditorActivityAt = _lastEditorActivityAt;
+    if (lastEditorActivityAt == null) {
+      return;
+    }
+
+    final elapsed = DateTime.now().toUtc().difference(lastEditorActivityAt);
+    final remaining = editorIdleDuration - elapsed;
+    final delay = remaining.isNegative ? Duration.zero : remaining;
+
+    _editorIdleTimer?.cancel();
+    _editorIdleTimer = Timer(delay, () {
+      unawaited(
+        _requestAutoSync(requirePendingChanges: requirePendingChanges),
+      );
+    });
   }
 }
