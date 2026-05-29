@@ -114,6 +114,82 @@ void main() {
     coordinator.dispose();
   });
 
+  test('idle sync waits until recent editor activity is idle', () async {
+    final noteRepository = _FakeNoteRepository(
+      activeNotes: [
+        _note(syncStatus: SyncStatus.synced),
+      ],
+    );
+    final authController = AuthController(
+      authService: _FakeAuthService(
+        restoredSession: const AuthSession(
+          email: 'signed@example.com',
+          displayName: 'Signed In',
+        ),
+      ),
+    );
+    await authController.restore();
+
+    final runManualSync = _RecordingRunManualSync();
+    final syncController = SyncController(runManualSync: runManualSync);
+    final coordinator = AutoSyncCoordinator(
+      noteRepository: noteRepository,
+      authController: authController,
+      syncController: syncController,
+      idleSyncInterval: const Duration(milliseconds: 20),
+      editorIdleDuration: const Duration(milliseconds: 80),
+    );
+
+    coordinator.notifyEditorActivity();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(runManualSync.callCount, 0);
+
+    await Future<void>.delayed(const Duration(milliseconds: 70));
+
+    expect(runManualSync.callCount, greaterThan(0));
+    coordinator.dispose();
+  });
+
+  test('local persisted change sync waits until editor is idle', () async {
+    final noteRepository = _FakeNoteRepository(
+      activeNotes: [
+        _note(syncStatus: SyncStatus.pendingUpload),
+      ],
+    );
+    final authController = AuthController(
+      authService: _FakeAuthService(
+        restoredSession: const AuthSession(
+          email: 'signed@example.com',
+          displayName: 'Signed In',
+        ),
+      ),
+    );
+    await authController.restore();
+
+    final runManualSync = _RecordingRunManualSync();
+    final syncController = SyncController(runManualSync: runManualSync);
+    final coordinator = AutoSyncCoordinator(
+      noteRepository: noteRepository,
+      authController: authController,
+      syncController: syncController,
+      localChangeDebounce: const Duration(milliseconds: 20),
+      editorIdleDuration: const Duration(milliseconds: 80),
+      idleSyncInterval: Duration.zero,
+    );
+
+    coordinator.notifyEditorActivity();
+    coordinator.notifyLocalChangePersisted();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(runManualSync.callCount, 0);
+
+    await Future<void>.delayed(const Duration(milliseconds: 70));
+
+    expect(runManualSync.callCount, 1);
+    coordinator.dispose();
+  });
+
   test('background sync runs even without pending local changes', () async {
     final noteRepository = _FakeNoteRepository(
       activeNotes: [
@@ -170,11 +246,10 @@ class _FakeAuthService implements AuthService {
 class _FakeNoteRepository implements NoteRepository {
   _FakeNoteRepository({
     this.activeNotes = const <Note>[],
-    this.deletedNotes = const <Note>[],
   });
 
   final List<Note> activeNotes;
-  final List<Note> deletedNotes;
+  final List<Note> deletedNotes = const <Note>[];
 
   @override
   Future<void> applyRemoteDeletion(RemoteNote remoteNote) async {}

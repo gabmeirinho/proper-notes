@@ -132,12 +132,9 @@ class RunManualSync {
           remoteNote: remoteNote,
         );
         if (remoteChangedSinceBase) {
-          await _createAndSyncConflictCopy(
-            title: _conflictTitleFor(remoteNote.title, localNote.title),
-            content: remoteNote.content,
-            updatedAt: remoteNote.updatedAt,
-            contentHash: remoteNote.contentHash,
-            deviceId: remoteNote.deviceId,
+          await _createAndSyncRemoteConflictCopy(
+            remoteNote: remoteNote,
+            fallbackTitle: localNote.title,
           );
           final uploaded = await _syncGateway.upsertNote(localNote);
           await _markSynced(localNote: localNote, remoteNote: uploaded);
@@ -161,13 +158,7 @@ class RunManualSync {
             await _markSynced(localNote: localNote, remoteNote: uploaded);
             uploadedCount += 1;
           } else {
-            await _createAndSyncConflictCopy(
-              title: _conflictTitleFor(localNote.title, localNote.title),
-              content: localNote.content,
-              updatedAt: localNote.updatedAt,
-              contentHash: localNote.contentHash,
-              deviceId: localNote.deviceId,
-            );
+            await _createAndSyncLocalConflictCopy(localNote);
             await _noteRepository.applyRemoteDeletion(remoteNote);
             downloadedCount += 1;
             conflictCount += 1;
@@ -179,13 +170,7 @@ class RunManualSync {
         final localChanged =
             baseHash == null || localNote.contentHash != baseHash;
         if (localChanged) {
-          await _createAndSyncConflictCopy(
-            title: _conflictTitleFor(localNote.title, localNote.title),
-            content: localNote.content,
-            updatedAt: localNote.updatedAt,
-            contentHash: localNote.contentHash,
-            deviceId: localNote.deviceId,
-          );
+          await _createAndSyncLocalConflictCopy(localNote);
           await _noteRepository.applyRemoteDeletion(remoteNote);
           downloadedCount += 1;
           conflictCount += 1;
@@ -221,6 +206,13 @@ class RunManualSync {
 
       if (localNote.contentHash == remoteNote.contentHash) {
         if (localNote.syncStatus == SyncStatus.pendingUpload) {
+          if (_hasMetadataDifference(localNote, remoteNote)) {
+            await _createAndSyncRemoteConflictCopy(
+              remoteNote: remoteNote,
+              fallbackTitle: localNote.title,
+            );
+            conflictCount += 1;
+          }
           final uploaded = await _syncGateway.upsertNote(localNote);
           await _markSynced(localNote: localNote, remoteNote: uploaded);
           uploadedCount += 1;
@@ -236,6 +228,21 @@ class RunManualSync {
         localNote: localNote,
         remoteNote: remoteNote,
       );
+
+      if (localNote.syncStatus == SyncStatus.pendingUpload &&
+          !localChanged &&
+          remoteChanged &&
+          _hasMetadataDifference(localNote, remoteNote)) {
+        await _createAndSyncRemoteConflictCopy(
+          remoteNote: remoteNote,
+          fallbackTitle: localNote.title,
+        );
+        final uploaded = await _syncGateway.upsertNote(localNote);
+        await _markSynced(localNote: localNote, remoteNote: uploaded);
+        uploadedCount += 1;
+        conflictCount += 1;
+        continue;
+      }
 
       if (localChanged && !remoteChanged) {
         final uploaded = await _syncGateway.upsertNote(localNote);
@@ -259,12 +266,9 @@ class RunManualSync {
         continue;
       }
 
-      await _createAndSyncConflictCopy(
-        title: _conflictTitleFor(remoteNote.title, localNote.title),
-        content: remoteNote.content,
-        updatedAt: remoteNote.updatedAt,
-        contentHash: remoteNote.contentHash,
-        deviceId: remoteNote.deviceId,
+      await _createAndSyncRemoteConflictCopy(
+        remoteNote: remoteNote,
+        fallbackTitle: localNote.title,
       );
       final uploaded = await _syncGateway.upsertNote(localNote);
       await _markSynced(localNote: localNote, remoteNote: uploaded);
@@ -351,8 +355,15 @@ class RunManualSync {
   bool _isNoteEquivalent(Note localNote, RemoteNote remoteNote) {
     return localNote.contentHash == remoteNote.contentHash &&
         localNote.title == remoteNote.title &&
+        localNote.documentJson == remoteNote.documentJson &&
         localNote.folderPath == remoteNote.folderPath &&
         localNote.deletedAt == remoteNote.deletedAt;
+  }
+
+  bool _hasMetadataDifference(Note localNote, RemoteNote remoteNote) {
+    return localNote.title != remoteNote.title ||
+        localNote.documentJson != remoteNote.documentJson ||
+        localNote.folderPath != remoteNote.folderPath;
   }
 
   bool _hasOnlyTrailingWhitespaceContentDifference(
@@ -398,25 +409,59 @@ class RunManualSync {
     );
   }
 
+  Future<void> _createAndSyncRemoteConflictCopy({
+    required RemoteNote remoteNote,
+    required String fallbackTitle,
+  }) {
+    return _createAndSyncConflictCopy(
+      title: _conflictTitleFor(remoteNote.title, fallbackTitle),
+      content: remoteNote.content,
+      documentJson: remoteNote.documentJson,
+      createdAt: remoteNote.createdAt,
+      updatedAt: remoteNote.updatedAt,
+      contentHash: remoteNote.contentHash,
+      deviceId: remoteNote.deviceId,
+      folderPath: remoteNote.folderPath,
+    );
+  }
+
+  Future<void> _createAndSyncLocalConflictCopy(Note localNote) {
+    return _createAndSyncConflictCopy(
+      title: _conflictTitleFor(localNote.title, localNote.title),
+      content: localNote.content,
+      documentJson: localNote.documentJson,
+      createdAt: localNote.createdAt,
+      updatedAt: localNote.updatedAt,
+      contentHash: localNote.contentHash,
+      deviceId: localNote.deviceId,
+      folderPath: localNote.folderPath,
+    );
+  }
+
   Future<void> _createAndSyncConflictCopy({
     required String title,
     required String content,
+    required String documentJson,
+    required DateTime createdAt,
     required DateTime updatedAt,
     required String contentHash,
     required String deviceId,
+    required String? folderPath,
   }) async {
     final now = DateTime.now().toUtc();
     final conflictCopy = Note(
       id: _uuid.v4(),
       title: title,
       content: content,
-      createdAt: now,
+      documentJson: documentJson,
+      createdAt: createdAt,
       updatedAt: updatedAt,
       lastSyncedAt: now,
       syncStatus: SyncStatus.conflicted,
       contentHash: contentHash,
       baseContentHash: contentHash,
       deviceId: deviceId,
+      folderPath: folderPath,
     );
 
     await _noteRepository.create(conflictCopy);

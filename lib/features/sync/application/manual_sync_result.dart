@@ -31,27 +31,9 @@ class ManualSyncResult {
     ];
 
     if (parts.isEmpty) {
-      return 'Sync complete in ${_formatDuration(totalDuration)}. '
-          'Nothing changed. '
-          'Local ${_formatDuration(localLoadDuration)}, '
-          'remote ${_formatDuration(remoteFetchDuration)}, '
-          'apply ${_formatDuration(reconciliationDuration)}.';
+      return 'Sync complete. Nothing changed.';
     }
 
-    return 'Sync complete in ${_formatDuration(totalDuration)}. '
-        '${parts.join(', ')}. '
-        'Local ${_formatDuration(localLoadDuration)}, '
-        'remote ${_formatDuration(remoteFetchDuration)}, '
-        'apply ${_formatDuration(reconciliationDuration)}.';
-  }
-
-  String _formatDuration(Duration duration) {
-    final milliseconds = duration.inMilliseconds;
-    if (milliseconds < 1000) {
-      return '${milliseconds}ms';
-    }
-
-    final seconds = duration.inMilliseconds / 1000;
-    return '${seconds.toStringAsFixed(seconds >= 10 ? 0 : 1)}s';
+    return 'Sync complete. ${parts.join(', ')}.';
   }
 }

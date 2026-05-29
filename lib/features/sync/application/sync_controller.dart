@@ -55,7 +55,6 @@ class SyncController extends ChangeNotifier {
       final result = await _runManualSync();
       _lastResult = result;
       _lastMessage = result.summary();
-      debugPrint('[Sync] ${result.summary()}');
       _lastCompletedAt = result.completedAt;
       return result;
     } catch (error) {

@@ -273,7 +273,8 @@ void main() {
     final controller = bodyField.controller!;
     expect(controller.text, content);
 
-    controller.selection = TextSelection.collapsed(offset: content.length);
+    controller.selection =
+        const TextSelection.collapsed(offset: content.length);
     await tester.pumpWidget(
       _buildEditor(
         repository: repository,
@@ -753,14 +754,14 @@ void main() {
     final updatedBodyField = tester.widget<TextField>(_bodyField());
     updatedBodyField.controller!.value =
         updatedBodyField.controller!.value.copyWith(
-      text: '${imageLine}\nX\nNext line',
+      text: '$imageLine\nX\nNext line',
       selection: const TextSelection.collapsed(offset: 38),
     );
     await tester.pump();
 
     expect(
       tester.widget<TextField>(_bodyField()).controller!.text,
-      '${imageLine}\nX\nNext line',
+      '$imageLine\nX\nNext line',
     );
     expect(tester.widget<TextField>(_bodyField()).focusNode!.hasFocus, isTrue);
     expect(find.byType(AttachmentImagePreview), findsOneWidget);
@@ -955,6 +956,81 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
 
+    expect(
+      tester
+          .widget<AttachmentImagePreview>(find.byType(AttachmentImagePreview))
+          .selected,
+      isFalse,
+    );
+  });
+
+  testWidgets('arrow left from selected attachment reveals raw markdown',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-arrow-left',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.controller!.selection.baseOffset, 0);
+    expect(bodyField.controller!.text.startsWith(imageLine), isTrue);
+    expect(find.byType(AttachmentImagePreview), findsNothing);
+  });
+
+  testWidgets('arrow right from selected attachment keeps caret after image',
+      (tester) async {
+    final repository = _StubNoteRepository();
+    const imageLine = '![Diagram](attachment://preview.png)';
+    final note = Note(
+      id: 'note-attachment-arrow-right',
+      title: 'Attachment note',
+      content: '$imageLine\n\nNext line',
+      documentJson:
+          paragraphDocumentFromEditableText('$imageLine\n\nNext line'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+    );
+
+    await tester.pumpWidget(_buildEditor(repository: repository, note: note));
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(
+      tester
+          .getCenter(find.byKey(const ValueKey('attachment-image-overlay-0'))),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    expect(bodyField.controller!.selection.baseOffset, 37);
+    expect(find.byType(AttachmentImagePreview), findsOneWidget);
     expect(
       tester
           .widget<AttachmentImagePreview>(find.byType(AttachmentImagePreview))
@@ -1174,7 +1250,7 @@ void main() {
     final repository = _StubNoteRepository();
     const firstImageLine = '![One](attachment://first.png)';
     const secondImageLine = '![Two](attachment://second.png)';
-    final content = '$firstImageLine\n\n$secondImageLine\n\nNext line';
+    const content = '$firstImageLine\n\n$secondImageLine\n\nNext line';
     final note = Note(
       id: 'note-attachment-first-click-no-other-markdown',
       title: 'Attachment note',
@@ -1207,7 +1283,7 @@ void main() {
     final repository = _StubNoteRepository();
     const firstImageLine = '![One](attachment://first.png)';
     const secondImageLine = '![Two](attachment://second.png)';
-    final content = '$firstImageLine\n$secondImageLine';
+    const content = '$firstImageLine\n$secondImageLine';
     final note = Note(
       id: 'note-attachment-adjacent-images-safe-caret',
       title: 'Attachment note',
@@ -1386,8 +1462,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final bodyField = tester.widget<TextField>(_bodyField());
-    final nextLineOffset = imageLine.length + 1;
-    bodyField.controller!.selection = TextSelection.collapsed(
+    const nextLineOffset = imageLine.length + 1;
+    bodyField.controller!.selection = const TextSelection.collapsed(
       offset: nextLineOffset,
     );
     await tester.pumpAndSettle();
@@ -1398,7 +1474,7 @@ void main() {
     final editableState =
         tester.state<EditableTextState>(find.byType(EditableText).last);
     final nextLineCaretRect = editableState.renderEditable.getLocalRectForCaret(
-      TextPosition(offset: nextLineOffset),
+      const TextPosition(offset: nextLineOffset),
     );
     final nextLineCaretTop = editableState.renderEditable
         .localToGlobal(nextLineCaretRect.topLeft)
@@ -1862,9 +1938,9 @@ void main() {
       id: 'note-2',
       title: 'Code note',
       content: 'Intro\n\n```dart\nfinal value = 42;\n```',
-      documentJson: NoteDocument(
+      documentJson: const NoteDocument(
         version: 1,
-        blocks: const <NoteBlock>[
+        blocks: <NoteBlock>[
           ParagraphBlock(id: 'p1', text: 'Intro'),
           CodeBlock(id: 'c1', language: 'dart', code: 'final value = 42;'),
         ],
@@ -2286,12 +2362,85 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('locks existing note editing while sync is checking',
+      (tester) async {
+    final repository = _RecordingNoteRepository();
+    final note = Note(
+      id: 'note-sync-lock',
+      title: 'Sync lock',
+      content: 'Local content',
+      createdAt: DateTime.utc(2026),
+      updatedAt: DateTime.utc(2026),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'hash',
+      deviceId: 'device-1',
+      baseContentHash: 'hash',
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(
+        repository: repository,
+        note: note,
+        editingLocked: true,
+      ),
+    );
+
+    expect(find.text('Checking'), findsOneWidget);
+    expect(tester.widget<TextField>(_bodyField()).readOnly, isTrue);
+    expect(
+      tester.widget<TextField>(find.byType(TextField).first).readOnly,
+      isTrue,
+    );
+  });
+
+  testWidgets('blocks autosave when sync updates the open note under an edit',
+      (tester) async {
+    final repository = _RecordingNoteRepository();
+    final originalNote = Note(
+      id: 'note-sync-race',
+      title: 'Race',
+      content: 'Old local content',
+      createdAt: DateTime.utc(2026),
+      updatedAt: DateTime.utc(2026),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'old-hash',
+      deviceId: 'device-1',
+      baseContentHash: 'old-hash',
+    );
+    final syncedNote = originalNote.copyWith(
+      content: 'Downloaded remote content',
+      updatedAt: DateTime.utc(2026, 1, 2),
+      contentHash: 'remote-hash',
+      baseContentHash: 'remote-hash',
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(repository: repository, note: originalNote),
+    );
+
+    await tester.tap(_bodyField());
+    await tester.enterText(_bodyField(), 'User typed on stale content');
+    await tester.pump();
+
+    await tester.pumpWidget(
+      _buildEditor(repository: repository, note: syncedNote),
+    );
+    await tester.pump(const Duration(milliseconds: 900));
+
+    expect(repository.updatedNotes, isEmpty);
+    expect(
+      find.text('Reopen needed'),
+      findsOneWidget,
+    );
+  });
 }
 
 Widget _buildEditor({
   required NoteRepository repository,
   Note? note,
   bool embedded = false,
+  bool editingLocked = false,
 }) {
   return MaterialApp(
     home: Scaffold(
@@ -2307,6 +2456,7 @@ Widget _buildEditor({
         noteRepository: repository,
         note: note,
         embedded: embedded,
+        editingLocked: editingLocked,
         onClose: embedded ? () {} : null,
       ),
     ),

@@ -300,8 +300,7 @@ void main() {
     expect(repository.upsertedRemoteIds, ['same']);
   });
 
-  test('uploads local metadata-only changes when content hash is unchanged',
-      () async {
+  test('preserves remote metadata when local metadata also changed', () async {
     const content = 'same content';
     final repository = _FakeNoteRepository(
       localNotes: [
@@ -342,8 +341,75 @@ void main() {
     final result = await useCase();
 
     expect(result.uploadedCount, 1);
-    expect(gateway.uploadedNoteIds, ['renamed-note']);
+    expect(result.conflictCount, 1);
+    expect(gateway.uploadedNoteIds.last, 'renamed-note');
+    expect(gateway.uploadedNoteIds, hasLength(2));
+    expect(repository.createdConflictCopies, hasLength(1));
+    expect(
+      repository.createdConflictCopies.single.title,
+      'Remote title (Conflict Copy)',
+    );
     expect(repository.syncedIds, ['renamed-note']);
+  });
+
+  test('conflict copies preserve remote folder and document data', () async {
+    const localContent = 'local content';
+    const remoteContent = 'remote content';
+    const remoteDocumentJson = '{"type":"doc","blocks":[{"text":"remote"}]}';
+    final repository = _FakeNoteRepository(
+      localNotes: [
+        Note(
+          id: 'metadata-conflict',
+          title: 'Local title',
+          content: localContent,
+          documentJson: '{"type":"doc","blocks":[{"text":"local"}]}',
+          createdAt: DateTime.utc(2026, 3, 24, 10),
+          updatedAt: DateTime.utc(2026, 3, 24, 11),
+          syncStatus: SyncStatus.pendingUpload,
+          contentHash: computeContentHash(localContent),
+          baseContentHash: computeContentHash('base'),
+          deviceId: 'device-a',
+          folderPath: 'Local',
+          remoteFileId: 'remote-metadata-conflict',
+        ),
+      ],
+    );
+    final gateway = _FakeSyncGateway(
+      remoteNotes: [
+        RemoteNote(
+          id: 'metadata-conflict',
+          title: 'Remote title',
+          content: remoteContent,
+          documentJson: remoteDocumentJson,
+          createdAt: DateTime.utc(2026, 3, 20, 9),
+          updatedAt: DateTime.utc(2026, 3, 24, 12),
+          contentHash: computeContentHash(remoteContent),
+          deviceId: 'device-b',
+          folderPath: 'Remote/Nested',
+          remoteFileId: 'remote-metadata-conflict',
+        ),
+      ],
+    );
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: _FakeSyncStateRepository(initialToken: 'token-1'),
+      uuid: const _FixedUuid('metadata-conflict-copy'),
+    );
+
+    final result = await useCase();
+
+    expect(result.conflictCount, 1);
+    expect(repository.createdConflictCopies, hasLength(1));
+    final conflictCopy = repository.createdConflictCopies.single;
+    expect(conflictCopy.id, 'metadata-conflict-copy');
+    expect(conflictCopy.title, 'Remote title (Conflict Copy)');
+    expect(conflictCopy.content, remoteContent);
+    expect(conflictCopy.documentJson, remoteDocumentJson);
+    expect(conflictCopy.createdAt, DateTime.utc(2026, 3, 20, 9));
+    expect(conflictCopy.updatedAt, DateTime.utc(2026, 3, 24, 12));
+    expect(conflictCopy.folderPath, 'Remote/Nested');
+    expect(conflictCopy.deviceId, 'device-b');
   });
 
   test('does not rewrite already-synced unchanged notes', () async {

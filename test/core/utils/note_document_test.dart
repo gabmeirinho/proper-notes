@@ -43,9 +43,9 @@ void main() {
   });
 
   test('editable text joins paragraph blocks with blank lines', () {
-    final document = NoteDocument(
+    const document = NoteDocument(
       version: 1,
-      blocks: const <NoteBlock>[
+      blocks: <NoteBlock>[
         ParagraphBlock(id: 'p1', text: 'First'),
         ParagraphBlock(id: 'p2', text: 'Second'),
       ],
@@ -80,9 +80,9 @@ void main() {
   });
 
   test('editable text round-trips code blocks back to snippet syntax', () {
-    final document = NoteDocument(
+    const document = NoteDocument(
       version: 1,
-      blocks: const <NoteBlock>[
+      blocks: <NoteBlock>[
         ParagraphBlock(id: 'p1', text: 'Intro'),
         CodeBlock(id: 'c1', language: 'dart', code: 'print("hi");'),
       ],

@@ -177,9 +177,9 @@ final value = '**still markdown**';
   testWidgets('renders paragraph blocks from a note document', (tester) async {
     await tester.pumpWidget(
       buildDocumentPreview(
-        NoteDocument(
+        const NoteDocument(
           version: 1,
-          blocks: const <NoteBlock>[
+          blocks: <NoteBlock>[
             ParagraphBlock(
               id: 'blk-1',
               text: '# Title\n\nParagraph body',
@@ -197,9 +197,9 @@ final value = '**still markdown**';
       (tester) async {
     await tester.pumpWidget(
       buildDocumentPreview(
-        NoteDocument(
+        const NoteDocument(
           version: 1,
-          blocks: const <NoteBlock>[
+          blocks: <NoteBlock>[
             UnknownBlock(
               id: 'blk-code',
               type: 'code',

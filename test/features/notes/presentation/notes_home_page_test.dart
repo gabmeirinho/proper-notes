@@ -449,6 +449,203 @@ void main() {
     expect(find.text('Pending delete'), findsOneWidget);
   });
 
+  testWidgets('conflict resolution sheet shows version metadata and line diff',
+      (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'original-note',
+          title: 'Roadmap',
+          content: 'Keep intro\nMeeting moved to Thursday\nBudget: 200',
+          createdAt: DateTime(2026, 1, 1, 8),
+          updatedAt: DateTime(2026, 1, 1, 9, 15),
+          syncStatus: SyncStatus.synced,
+          contentHash: 'original-hash',
+          deviceId: 'device-1',
+        ),
+        Note(
+          id: 'conflict-note',
+          title: 'Roadmap (Conflict Copy)',
+          content:
+              'Keep intro\nMeeting moved to Friday\nBudget: 250\nNew action item',
+          createdAt: DateTime(2026, 1, 1, 8),
+          updatedAt: DateTime(2026, 1, 2, 10, 30),
+          syncStatus: SyncStatus.conflicted,
+          contentHash: 'conflict-hash',
+          deviceId: 'device-2',
+        ),
+      ],
+    );
+
+    await _pumpNotesHome(tester, noteRepository: noteRepository);
+    await tester.longPress(
+      find.byKey(const ValueKey('sidebar-note-conflict-note')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Resolve conflict'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Original'), findsOneWidget);
+    expect(find.text('Preserved conflict copy'), findsOneWidget);
+    expect(find.text('Changes'), findsOneWidget);
+    expect(find.text('Meeting moved to Thursday'), findsOneWidget);
+    expect(find.text('Meeting moved to Friday'), findsOneWidget);
+    expect(find.text('Budget: 200'), findsOneWidget);
+    expect(find.text('Budget: 250'), findsOneWidget);
+    expect(find.text('New action item'), findsOneWidget);
+    expect(find.textContaining('Jan 01, 09:15'), findsOneWidget);
+    expect(find.textContaining('Jan 02, 10:30'), findsOneWidget);
+  });
+
+  testWidgets('conflict resolution keep original moves conflict copy to trash',
+      (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'original-note',
+          title: 'Roadmap',
+          content: 'Original body',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 1),
+          syncStatus: SyncStatus.synced,
+          contentHash: 'original-hash',
+          deviceId: 'device-1',
+        ),
+        Note(
+          id: 'conflict-note',
+          title: 'Roadmap (Conflict Copy)',
+          content: 'Conflict body',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.conflicted,
+          contentHash: 'conflict-hash',
+          deviceId: 'device-2',
+        ),
+      ],
+    );
+
+    await _pumpNotesHome(tester, noteRepository: noteRepository);
+    await tester.longPress(
+      find.byKey(const ValueKey('sidebar-note-conflict-note')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Resolve conflict'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Keep original'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Keep original'));
+    await tester.pumpAndSettle();
+
+    final original = await noteRepository.getById('original-note');
+    final conflict = await noteRepository.getById('conflict-note');
+    expect(original?.deletedAt, isNull);
+    expect(conflict?.deletedAt, isNotNull);
+    expect(find.text('Conflict copy deleted. Original note kept.'),
+        findsOneWidget);
+  });
+
+  testWidgets(
+      'conflict resolution keep copy normalizes copy and trashes original',
+      (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'original-note',
+          title: 'Roadmap',
+          content: 'Original body',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 1),
+          syncStatus: SyncStatus.synced,
+          contentHash: 'original-hash',
+          deviceId: 'device-1',
+        ),
+        Note(
+          id: 'conflict-note',
+          title: 'Roadmap (Conflict Copy)',
+          content: 'Conflict body',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.conflicted,
+          contentHash: 'conflict-hash',
+          deviceId: 'device-2',
+        ),
+      ],
+    );
+
+    await _pumpNotesHome(tester, noteRepository: noteRepository);
+    await tester.longPress(
+      find.byKey(const ValueKey('sidebar-note-conflict-note')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Resolve conflict'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Keep conflict copy'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Keep conflict copy'));
+    await tester.pumpAndSettle();
+
+    final original = await noteRepository.getById('original-note');
+    expect(original?.deletedAt, isNotNull);
+    expect(noteRepository.updatedNotes, hasLength(1));
+    expect(noteRepository.updatedNotes.single.id, 'conflict-note');
+    expect(noteRepository.updatedNotes.single.title, 'Roadmap');
+    expect(noteRepository.updatedNotes.single.content, 'Conflict body');
+    expect(noteRepository.updatedNotes.single.syncStatus,
+        SyncStatus.pendingUpload);
+    expect(
+      find.text('Conflict copy kept. Original note moved to trash.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('conflict resolution without original shows convert flow',
+      (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'conflict-note',
+          title: 'Roadmap (Conflict Copy)',
+          content: 'Only preserved conflict content',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.conflicted,
+          contentHash: 'conflict-hash',
+          deviceId: 'device-2',
+        ),
+      ],
+    );
+
+    await _pumpNotesHome(tester, noteRepository: noteRepository);
+    await tester.longPress(
+      find.byKey(const ValueKey('sidebar-note-conflict-note')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Resolve conflict'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Original note not found'), findsOneWidget);
+    expect(find.text('Preview'), findsOneWidget);
+    expect(find.text('Only preserved conflict content'), findsOneWidget);
+    expect(find.text('Keep original'), findsNothing);
+    expect(find.text('Convert to normal note'), findsOneWidget);
+  });
+
   testWidgets(
       'mobile editor keeps the app-bar sync status visible while editing',
       (tester) async {
@@ -2560,7 +2757,7 @@ void main() {
   );
 
   testWidgets(
-    'successful sync shows a dismissible sync result notice',
+    'successful sync without conflicts does not show a result notice',
     (tester) async {
       final noteRepository = _FakeNoteRepository();
       final folderRepository = _FakeFolderRepository();
@@ -2608,13 +2805,8 @@ void main() {
       await syncController.syncNow();
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Sync complete'), findsOneWidget);
-      expect(find.byTooltip('Dismiss sync notice'), findsOneWidget);
-
-      await tester.tap(find.byTooltip('Dismiss sync notice'));
-      await tester.pumpAndSettle();
-
       expect(find.textContaining('Sync complete'), findsNothing);
+      expect(find.byTooltip('Dismiss sync notice'), findsNothing);
     },
   );
 
@@ -2878,6 +3070,52 @@ void main() {
   );
 }
 
+Future<void> _pumpNotesHome(
+  WidgetTester tester, {
+  required _FakeNoteRepository noteRepository,
+  _FakeFolderRepository? folderRepository,
+}) async {
+  final resolvedFolderRepository = folderRepository ?? _FakeFolderRepository();
+
+  await tester.pumpWidget(
+    MaterialApp(
+      home: NotesHomePage(
+        createNote: CreateNote(
+          repository: noteRepository,
+          deviceId: 'device-1',
+        ),
+        createFolder: CreateFolder(repository: resolvedFolderRepository),
+        deleteFolder: DeleteFolder(repository: resolvedFolderRepository),
+        renameFolder: RenameFolder(repository: resolvedFolderRepository),
+        moveNote: MoveNote(
+          repository: noteRepository,
+          deviceId: 'device-1',
+        ),
+        updateNote: UpdateNote(
+          repository: noteRepository,
+          deviceId: 'device-1',
+        ),
+        deleteNote: DeleteNote(repository: noteRepository),
+        restoreNote: RestoreNote(repository: noteRepository),
+        searchNotes: SearchNotes(repository: noteRepository),
+        folderRepository: resolvedFolderRepository,
+        noteRepository: noteRepository,
+        authController: AuthController(authService: _FakeAuthService()),
+        syncController: SyncController(
+          runManualSync: RunManualSync(
+            noteRepository: noteRepository,
+            syncGateway: _FakeSyncGateway(),
+            syncStateRepository: _FakeSyncStateRepository(),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 200));
+}
+
 class _FakeAuthService implements AuthService {
   @override
   Future<AuthSession?> restoreSession() async => null;
@@ -2914,12 +3152,11 @@ class _SignedInFakeAuthService implements AuthService {
 class _FakeFolderRepository implements FolderRepository {
   _FakeFolderRepository({
     List<Folder> initialFolders = const <Folder>[],
-    this.deleteResult = DeleteFolderResult.deleted,
     this.deleteImpact,
   }) : _folders = List<Folder>.from(initialFolders);
 
   final List<Folder> _folders;
-  final DeleteFolderResult deleteResult;
+  final DeleteFolderResult deleteResult = DeleteFolderResult.deleted;
   final FolderDeleteImpact? deleteImpact;
   final List<String> createdPaths = <String>[];
   final List<String> deletedPaths = <String>[];
@@ -3055,10 +3292,12 @@ class _FakeNoteRepository implements NoteRepository {
   }
 
   @override
-  Future<List<Note>> getActiveNotesForSync() async => const <Note>[];
+  Future<List<Note>> getActiveNotesForSync() async =>
+      List<Note>.unmodifiable(_activeNotes);
 
   @override
-  Future<List<Note>> getDeletedNotesForSync() async => const <Note>[];
+  Future<List<Note>> getDeletedNotesForSync() async =>
+      List<Note>.unmodifiable(_deletedNotes);
 
   @override
   Future<List<Note>> getPendingNotesForSync() async => const <Note>[];

@@ -200,6 +200,7 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
         themeMode: _themeMode,
         onThemeModeChanged: _setThemeMode,
         onLocalChangePersisted: _autoSyncCoordinator.notifyLocalChangePersisted,
+        onEditingActivity: _autoSyncCoordinator.notifyEditorActivity,
       ),
     );
   }

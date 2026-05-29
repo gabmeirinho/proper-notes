@@ -64,7 +64,7 @@ Future<void> main(List<String> args) async {
         return;
       }
 
-      final uuid = const Uuid();
+      const uuid = Uuid();
       final deviceId = _getOrCreateDeviceId(database, uuid);
       database.execute('BEGIN IMMEDIATE');
       try {
@@ -121,7 +121,7 @@ Future<void> main(List<String> args) async {
         'Imported ${resolved.notesToImport.length} notes into ${dbFile.path}',
       );
     } finally {
-      database.dispose();
+      database.close();
     }
   } on _UsageError catch (error) {
     stderr.writeln(error.message);
@@ -165,7 +165,7 @@ _ImportOptions _parseArgs(List<String> args) {
   }
 
   if (!showHelp && (vaultPath == null || vaultPath.trim().isEmpty)) {
-    throw _UsageError('Missing required --vault /path/to/obsidian-vault');
+    throw const _UsageError('Missing required --vault /path/to/obsidian-vault');
   }
 
   return _ImportOptions(
@@ -433,7 +433,7 @@ String _defaultLinuxDbPath() {
   final baseDir = xdgDataHome ??
       (home == null || home.isEmpty ? null : p.join(home, '.local', 'share'));
   if (baseDir == null) {
-    throw _UsageError(
+    throw const _UsageError(
       'Could not infer a default database path. Pass --db /absolute/path/to/proper_notes.sqlite',
     );
   }
