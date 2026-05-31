@@ -7,6 +7,7 @@ import 'package:proper_notes/core/utils/attachments.dart';
 import 'package:proper_notes/core/utils/note_document.dart';
 import 'package:proper_notes/features/notes/application/create_note.dart';
 import 'package:proper_notes/features/notes/application/update_note.dart';
+import 'package:proper_notes/features/ai/domain/note_ai_service.dart';
 import 'package:proper_notes/features/notes/domain/note.dart';
 import 'package:proper_notes/features/notes/domain/note_repository.dart';
 import 'package:proper_notes/features/notes/domain/sync_status.dart';
@@ -169,6 +170,50 @@ void main() {
     expect((codeLineSpans.single as TextSpan).text, 'print("hi");');
     expect((codeLineSpans.single as TextSpan).style?.fontFamily,
         isNot('monospace'));
+  });
+
+  test('builds voice note markdown with audio as the durable source', () {
+    final markdown = buildVoiceNoteMarkdown(
+      attachmentUri: 'attachment://recording.m4a',
+      result: const AiNoteResult(
+        summary: 'Discussed the release checklist.',
+        transcript: 'We discussed the release checklist in detail.',
+      ),
+    );
+
+    expect(
+      markdown,
+      contains('## Voice note\n\n**Audio:** '
+          '[Audio recording](attachment://recording.m4a)'),
+    );
+    expect(
+      markdown,
+      contains(
+        '**Status:** Recording saved. Summary generated from saved audio.',
+      ),
+    );
+    expect(markdown, contains('### Summary'));
+    expect(markdown, contains('Discussed the release checklist.'));
+    expect(markdown, contains('### Transcript'));
+    expect(markdown, contains('We discussed the release checklist in detail.'));
+  });
+
+  test('builds voice note markdown that preserves failed recordings', () {
+    final markdown = buildVoiceNoteMarkdown(
+      attachmentUri: 'attachment://recording.wav',
+      status: 'Recording saved. Transcript and summary were not generated.',
+    );
+
+    expect(
+      markdown,
+      contains('[Audio recording](attachment://recording.wav)'),
+    );
+    expect(
+      markdown,
+      contains('Transcript and summary were not generated.'),
+    );
+    expect(markdown, isNot(contains('### Summary')));
+    expect(markdown, isNot(contains('### Transcript')));
   });
 
   test('snippet overlay bottom covers the full closing fence line', () {

@@ -1657,36 +1657,21 @@ class NoteEditorPageState extends State<NoteEditorPage>
     required String attachmentUri,
     required AiNoteResult result,
   }) {
-    final audioLink = buildAttachmentLinkMarkdown(
-      attachmentUri,
-      label: 'Audio recording',
+    _appendSectionToNote(
+      buildVoiceNoteMarkdown(
+        attachmentUri: attachmentUri,
+        result: result,
+      ),
     );
-    final section = '''
-## Recording
-
-$audioLink
-
-## AI Summary
-
-${result.summary}
-
-## Transcript
-
-${result.transcript}
-''';
-    _appendSectionToNote(section);
   }
 
   void _appendRecordingOnly(String attachmentUri) {
-    final audioLink = buildAttachmentLinkMarkdown(
-      attachmentUri,
-      label: 'Audio recording',
+    _appendSectionToNote(
+      buildVoiceNoteMarkdown(
+        attachmentUri: attachmentUri,
+        status: 'Recording saved. Transcript and summary were not generated.',
+      ),
     );
-    _appendSectionToNote('''
-## Recording
-
-$audioLink
-''');
   }
 
   void _appendSectionToNote(String section) {
@@ -2286,8 +2271,8 @@ class _RecordingStatusOverlay extends StatelessWidget {
         .surfaceContainerHighest
         .withValues(alpha: 0.96);
     final label = isProcessing
-        ? 'Transcribing recording...'
-        : 'Recording... press Stop to transcribe';
+        ? 'Recording saved. Transcribing...'
+        : 'Recording... press Stop to save';
 
     return Align(
       alignment: Alignment.topCenter,
@@ -3360,6 +3345,41 @@ StrutStyle editorStrutStyleForTextStyle(TextStyle style) {
     height: style.height,
     leading: 0,
   );
+}
+
+@visibleForTesting
+String buildVoiceNoteMarkdown({
+  required String attachmentUri,
+  AiNoteResult? result,
+  String? status,
+}) {
+  final audioLink = buildAttachmentLinkMarkdown(
+    attachmentUri,
+    label: 'Audio recording',
+  );
+  final resolvedStatus = status ??
+      (result == null
+          ? 'Recording saved.'
+          : 'Recording saved. Summary generated from saved audio.');
+  final buffer = StringBuffer()
+    ..writeln('## Voice note')
+    ..writeln()
+    ..writeln('**Audio:** $audioLink')
+    ..writeln('**Status:** $resolvedStatus');
+
+  if (result != null) {
+    buffer
+      ..writeln()
+      ..writeln('### Summary')
+      ..writeln()
+      ..writeln(result.summary.trim())
+      ..writeln()
+      ..writeln('### Transcript')
+      ..writeln()
+      ..writeln(result.transcript.trim());
+  }
+
+  return buffer.toString().trim();
 }
 
 Color _codeSnippetBackgroundColor() {

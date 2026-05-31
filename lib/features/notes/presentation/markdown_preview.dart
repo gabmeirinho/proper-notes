@@ -119,6 +119,20 @@ class _ImageBlock extends _MarkdownBlock {
   final String attachmentUri;
 }
 
+class _VoiceNoteBlock extends _MarkdownBlock {
+  const _VoiceNoteBlock({
+    required this.attachmentUri,
+    required this.status,
+    required this.summary,
+    required this.transcript,
+  });
+
+  final String attachmentUri;
+  final String status;
+  final String summary;
+  final String transcript;
+}
+
 class _DividerBlock extends _MarkdownBlock {
   const _DividerBlock();
 }
@@ -316,11 +330,143 @@ class _MarkdownBlockView extends StatelessWidget {
           maxWidth: compact ? 220 : 420,
           maxHeight: compact ? 160 : 260,
         ),
+      _VoiceNoteBlock(
+        :final attachmentUri,
+        :final status,
+        :final summary,
+        :final transcript
+      ) =>
+        _VoiceNotePreviewCard(
+          attachmentUri: attachmentUri,
+          status: status,
+          summary: summary,
+          transcript: transcript,
+          compact: compact,
+        ),
       _DividerBlock() => Divider(
           height: compact ? 8 : 16,
           color: colorScheme.outlineVariant,
         ),
     };
+  }
+}
+
+class _VoiceNotePreviewCard extends StatelessWidget {
+  const _VoiceNotePreviewCard({
+    required this.attachmentUri,
+    required this.status,
+    required this.summary,
+    required this.transcript,
+    required this.compact,
+  });
+
+  final String attachmentUri;
+  final String status;
+  final String summary;
+  final String transcript;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final fileName = attachmentFileNameFromUri(attachmentUri) ?? 'Audio';
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(compact ? 12 : 14),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.graphic_eq_rounded,
+                size: compact ? 18 : 20,
+                color: colorScheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Voice note',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            fileName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            status,
+            maxLines: compact ? 2 : null,
+            overflow: compact ? TextOverflow.ellipsis : TextOverflow.clip,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (summary.trim().isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Summary',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colorScheme.onSurface,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              summary.trim(),
+              maxLines: compact ? 3 : null,
+              overflow: compact ? TextOverflow.ellipsis : TextOverflow.clip,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurface,
+                height: compact ? 1.35 : 1.5,
+              ),
+            ),
+          ],
+          if (!compact && transcript.trim().isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Transcript',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colorScheme.onSurface,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              transcript.trim(),
+              maxLines: 6,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 
@@ -405,6 +551,13 @@ List<_MarkdownBlock> _parseMarkdownBlocks(String content) {
         ),
       );
       index++;
+      continue;
+    }
+
+    final voiceNote = _parseVoiceNoteBlock(lines, index);
+    if (voiceNote != null) {
+      blocks.add(voiceNote.block);
+      index = voiceNote.nextIndex;
       continue;
     }
 
@@ -514,6 +667,84 @@ List<_MarkdownBlock> _parseMarkdownBlocks(String content) {
   }
 
   return blocks;
+}
+
+({_VoiceNoteBlock block, int nextIndex})? _parseVoiceNoteBlock(
+  List<String> lines,
+  int startIndex,
+) {
+  if (lines[startIndex].trim().toLowerCase() != '## voice note') {
+    return null;
+  }
+
+  var index = startIndex + 1;
+  String? attachmentUri;
+  var status = 'Recording saved.';
+  final summaryLines = <String>[];
+  final transcriptLines = <String>[];
+  var section = '';
+
+  while (index < lines.length) {
+    final rawLine = lines[index];
+    final trimmed = rawLine.trim();
+
+    if (index > startIndex + 1 &&
+        RegExp(r'^##\s+').hasMatch(trimmed) &&
+        trimmed.toLowerCase() != '## voice note') {
+      break;
+    }
+
+    if (trimmed.startsWith('**Audio:**')) {
+      attachmentUri = _extractAttachmentUri(trimmed);
+      index++;
+      continue;
+    }
+
+    if (trimmed.startsWith('**Status:**')) {
+      status = trimmed.substring('**Status:**'.length).trim();
+      index++;
+      continue;
+    }
+
+    if (trimmed.toLowerCase() == '### summary') {
+      section = 'summary';
+      index++;
+      continue;
+    }
+
+    if (trimmed.toLowerCase() == '### transcript') {
+      section = 'transcript';
+      index++;
+      continue;
+    }
+
+    if (trimmed.isNotEmpty) {
+      if (section == 'summary') {
+        summaryLines.add(trimmed);
+      } else if (section == 'transcript') {
+        transcriptLines.add(trimmed);
+      }
+    }
+    index++;
+  }
+
+  if (attachmentUri == null) {
+    return null;
+  }
+
+  return (
+    block: _VoiceNoteBlock(
+      attachmentUri: attachmentUri,
+      status: status,
+      summary: summaryLines.join('\n'),
+      transcript: transcriptLines.join('\n'),
+    ),
+    nextIndex: index,
+  );
+}
+
+String? _extractAttachmentUri(String text) {
+  return RegExp(r'attachment://[^)\s]+').firstMatch(text)?.group(0);
 }
 
 List<_MarkdownBlock> _parseDocumentBlocks(NoteDocument document) {
