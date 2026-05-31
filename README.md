@@ -74,6 +74,7 @@ dart run scripts/import_obsidian.dart \
 * Dart SDK
 * Android Studio & Android SDK (for Android builds)
 * JDK 17 (for Android/Gradle)
+* Linux audio tools for recording: `pulseaudio-utils` and `ffmpeg`
 
 **Common Commands:**
 ```bash

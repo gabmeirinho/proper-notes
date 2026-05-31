@@ -24,6 +24,8 @@ import '../features/notes/presentation/notes_home_page.dart';
 import '../features/sync/application/auto_sync_coordinator.dart';
 import '../features/sync/application/run_manual_sync.dart';
 import '../features/sync/application/sync_controller.dart';
+import '../infrastructure/ai/openai_note_ai_service.dart';
+import '../infrastructure/auth/secret_store.dart';
 import '../infrastructure/auth/webdav_account_store.dart';
 import '../infrastructure/auth/webdav_auth_service.dart';
 import '../infrastructure/database/app_database.dart';
@@ -51,6 +53,7 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
   late final AuthController _authController;
   late final SyncController _syncController;
   late final AutoSyncCoordinator _autoSyncCoordinator;
+  late final OpenAiNoteAiService _noteAiService;
   late final WebDavAccountStore _accountStore;
   late final DriftSyncStateRepository _syncStateRepository;
   late final FolderRepository _folderRepository;
@@ -66,6 +69,9 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
   void initState() {
     super.initState();
     _accountStore = WebDavAccountStore();
+    _noteAiService = OpenAiNoteAiService(
+      secretStore: FlutterSecureSecretStore(),
+    );
     _syncStateRepository = DriftSyncStateRepository(widget.database);
     _folderRepository = DriftFolderRepository(widget.database);
     _authController = AuthController(
@@ -195,6 +201,7 @@ class _ProperNotesAppState extends State<ProperNotesApp> {
         searchNotes: SearchNotes(repository: widget.noteRepository),
         folderRepository: _folderRepository,
         noteRepository: widget.noteRepository,
+        noteAiService: _noteAiService,
         authController: _authController,
         syncController: _syncController,
         themeMode: _themeMode,

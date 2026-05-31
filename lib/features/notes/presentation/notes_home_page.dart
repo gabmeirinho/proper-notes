@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/utils/attachments.dart';
+import '../../ai/domain/note_ai_service.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/presentation/account_sheet.dart';
 import '../../sync/application/sync_controller.dart';
@@ -54,6 +55,7 @@ class NotesHomePage extends StatefulWidget {
     required this.noteRepository,
     required this.authController,
     required this.syncController,
+    this.noteAiService,
     this.themeMode = ThemeMode.system,
     this.onThemeModeChanged,
     this.onLocalChangePersisted,
@@ -73,6 +75,7 @@ class NotesHomePage extends StatefulWidget {
   final SearchNotes searchNotes;
   final FolderRepository folderRepository;
   final NoteRepository noteRepository;
+  final NoteAiService? noteAiService;
   final AuthController authController;
   final SyncController syncController;
   final ThemeMode themeMode;
@@ -1940,6 +1943,7 @@ class NotesHomePageState extends State<NotesHomePage> {
       createNote: widget.createNote,
       updateNote: widget.updateNote,
       noteRepository: widget.noteRepository,
+      noteAiService: widget.noteAiService,
       note: note,
       initialFolderPath: session.initialFolderPath,
       embedded: true,

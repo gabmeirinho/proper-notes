@@ -107,6 +107,36 @@ Standalone paragraph
     expect(find.text('Architecture'), findsOneWidget);
   });
 
+  testWidgets('renders voice note blocks as durable audio cards',
+      (tester) async {
+    await tester.pumpWidget(
+      buildPreview('''
+## Voice note
+
+**Audio:** [Audio recording](attachment://meeting.m4a)
+**Status:** Recording saved. Summary generated from saved audio.
+
+### Summary
+
+Discussed the release checklist.
+
+### Transcript
+
+We discussed the release checklist in detail.
+'''),
+    );
+
+    expect(find.text('Voice note'), findsOneWidget);
+    expect(find.text('meeting.m4a'), findsOneWidget);
+    expect(
+      find.text('Recording saved. Summary generated from saved audio.'),
+      findsOneWidget,
+    );
+    expect(find.text('Summary'), findsOneWidget);
+    expect(find.text('Discussed the release checklist.'), findsOneWidget);
+    expect(find.text('Transcript'), findsOneWidget);
+  });
+
   testWidgets('renders fenced code blocks as isolated snippet blocks',
       (tester) async {
     await tester.pumpWidget(

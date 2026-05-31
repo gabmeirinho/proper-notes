@@ -36,6 +36,18 @@ class SavedAttachmentImage {
   final File file;
 }
 
+class PreparedAttachmentFile {
+  const PreparedAttachmentFile({
+    required this.fileName,
+    required this.attachmentUri,
+    required this.file,
+  });
+
+  final String fileName;
+  final String attachmentUri;
+  final File file;
+}
+
 class DeleteAttachmentFileResult {
   const DeleteAttachmentFileResult({
     required this.fileName,
@@ -225,6 +237,29 @@ Future<SavedAttachmentImage> saveAttachmentImageBytes(
   );
 }
 
+Future<PreparedAttachmentFile> prepareAttachmentFile({
+  required String extension,
+}) async {
+  final safeExtension = _sanitizeFileExtension(extension);
+  final directory = await getAttachmentsDirectory();
+  final fileName = '${const Uuid().v4()}.$safeExtension';
+  final file = File(p.join(directory.path, fileName));
+
+  return PreparedAttachmentFile(
+    fileName: fileName,
+    attachmentUri: '$kAttachmentUriScheme://$fileName',
+    file: file,
+  );
+}
+
+String buildAttachmentLinkMarkdown(
+  String attachmentUri, {
+  required String label,
+}) {
+  final safeLabel = label.trim().isEmpty ? 'Attachment' : label.trim();
+  return '[$safeLabel]($attachmentUri)';
+}
+
 String _sanitizeImageExtension(String extension) {
   final normalized = extension.toLowerCase().replaceAll('.', '').trim();
   return switch (normalized) {
@@ -234,4 +269,12 @@ String _sanitizeImageExtension(String extension) {
     'gif' => 'gif',
     _ => 'png',
   };
+}
+
+String _sanitizeFileExtension(String extension) {
+  final normalized = extension.toLowerCase().replaceAll('.', '').trim();
+  if (RegExp(r'^[a-z0-9]{1,8}$').hasMatch(normalized)) {
+    return normalized;
+  }
+  return 'bin';
 }

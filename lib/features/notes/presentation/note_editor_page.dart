@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:file_selector/file_selector.dart';
@@ -6,11 +7,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:record/record.dart';
 
 import '../../../core/services/clipboard_image_service.dart';
 import '../../../core/utils/attachments.dart';
 import '../../../core/utils/markdown_title.dart';
 import '../../../core/utils/note_document.dart';
+import '../../ai/domain/note_ai_service.dart';
 import 'attachment_image_preview.dart';
 import '../application/create_note.dart';
 import '../application/update_note.dart';
@@ -24,6 +27,7 @@ class NoteEditorPage extends StatefulWidget {
     required this.updateNote,
     required this.noteRepository,
     this.note,
+    this.noteAiService,
     this.initialFolderPath,
     this.embedded = false,
     this.showInlineStatus = true,
@@ -39,6 +43,7 @@ class NoteEditorPage extends StatefulWidget {
   final CreateNote createNote;
   final UpdateNote updateNote;
   final NoteRepository noteRepository;
+  final NoteAiService? noteAiService;
   final Note? note;
   final String? initialFolderPath;
   final bool embedded;
@@ -64,6 +69,7 @@ class NoteEditorPageState extends State<NoteEditorPage>
       GlobalKey<_DocumentBlocksEditorState>();
   late final TextEditingController _titleController;
   late final _MarkdownEditingController _contentController;
+  late final AudioRecorder _audioRecorder;
   late final FocusNode _titleFocusNode;
   late final FocusNode _contentFocusNode;
   Note? _persistedNote;
@@ -72,6 +78,8 @@ class NoteEditorPageState extends State<NoteEditorPage>
   bool _isSaving = false;
   bool _saveQueued = false;
   bool _isClosing = false;
+  bool _isRecordingAudio = false;
+  bool _isProcessingAudio = false;
   bool _isApplyingExternalNoteUpdate = false;
   Note? _blockedExternalNoteUpdate;
   String? _saveErrorMessage;
@@ -82,12 +90,14 @@ class NoteEditorPageState extends State<NoteEditorPage>
   bool _isAppLifecycleSuspended = false;
   bool _isRestoringSuspendedContentSelection = false;
   bool _didAutofocusNewNoteTitle = false;
+  PreparedAttachmentFile? _activeRecordingFile;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _titleController = TextEditingController(text: widget.note?.title ?? '');
+    _audioRecorder = AudioRecorder();
     final initialContent =
         widget.note == null ? '' : _editableContentForNote(widget.note!);
     _contentController = _MarkdownEditingController(
@@ -128,6 +138,7 @@ class NoteEditorPageState extends State<NoteEditorPage>
     _contentController.dispose();
     _titleFocusNode.dispose();
     _contentFocusNode.dispose();
+    _audioRecorder.dispose();
     super.dispose();
   }
 
@@ -510,6 +521,9 @@ class NoteEditorPageState extends State<NoteEditorPage>
           toggleQuote: _toggleQuote,
           insertCodeSnippet: _insertCodeSnippet,
           attachImage: _attachImageFromFile,
+          recordAudio: _toggleAudioRecording,
+          isRecordingAudio: _isRecordingAudio,
+          isProcessingAudio: _isProcessingAudio,
           deleteAttachmentFile: _deleteAttachmentFileWithConfirmation,
           onContentTap: _handleContentTap,
         ),
@@ -1358,6 +1372,328 @@ class NoteEditorPageState extends State<NoteEditorPage>
     }
   }
 
+  Future<void> _toggleAudioRecording() async {
+    if (_editingBlocked || _isProcessingAudio) {
+      return;
+    }
+    if (widget.noteAiService == null) {
+      _showEditorSnackBar('AI transcription is not configured.');
+      return;
+    }
+
+    if (_isRecordingAudio) {
+      await _stopAudioRecording();
+      return;
+    }
+
+    await _startAudioRecording();
+  }
+
+  Future<void> _startAudioRecording() async {
+    if (!await _ensureAiApiKeys()) {
+      return;
+    }
+    if (!await _ensureLinuxAudioTools()) {
+      return;
+    }
+
+    try {
+      final hasPermission = await _audioRecorder.hasPermission();
+      if (!hasPermission) {
+        _showEditorSnackBar('Microphone permission was not granted.');
+        return;
+      }
+
+      final recordingFormat = _recordingAudioFormat();
+      final recordingFile = await prepareAttachmentFile(
+        extension: recordingFormat.extension,
+      );
+      await _audioRecorder.start(
+        RecordConfig(
+          encoder: recordingFormat.encoder,
+          bitRate: 64000,
+          sampleRate: 44100,
+          numChannels: 1,
+        ),
+        path: recordingFile.file.path,
+      );
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _activeRecordingFile = recordingFile;
+        _isRecordingAudio = true;
+      });
+    } catch (_) {
+      _showEditorSnackBar(
+        defaultTargetPlatform == TargetPlatform.linux
+            ? 'Could not start recording. Check that parecord, pactl, and ffmpeg are installed.'
+            : 'Could not start recording.',
+      );
+    }
+  }
+
+  Future<bool> _ensureLinuxAudioTools() async {
+    if (defaultTargetPlatform != TargetPlatform.linux) {
+      return true;
+    }
+
+    final missingTools = <String>[];
+    for (final tool in const <String>['parecord', 'pactl', 'ffmpeg']) {
+      if (!await _isCommandAvailable(tool)) {
+        missingTools.add(tool);
+      }
+    }
+
+    if (missingTools.isEmpty) {
+      return true;
+    }
+
+    _showEditorSnackBar(
+      'Could not start recording. Missing: ${missingTools.join(', ')}.',
+    );
+    return false;
+  }
+
+  Future<bool> _isCommandAvailable(String command) async {
+    try {
+      final result = await Process.run(
+        'which',
+        <String>[command],
+      );
+      return result.exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _stopAudioRecording() async {
+    final recordingFile = _activeRecordingFile;
+    if (recordingFile == null) {
+      setState(() {
+        _isRecordingAudio = false;
+      });
+      return;
+    }
+
+    String? recordedPath;
+    try {
+      recordedPath = await _audioRecorder.stop();
+    } catch (_) {
+      _showEditorSnackBar('Could not stop recording.');
+    }
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isRecordingAudio = false;
+      _isProcessingAudio = true;
+    });
+
+    late final File audioFile;
+    try {
+      final savedAudioFile = await _saveRecordedAudioFile(
+        recordedPath: recordedPath,
+        recordingFile: recordingFile.file,
+      );
+      if (savedAudioFile == null) {
+        _showEditorSnackBar('Recording failed; no audio file was saved.');
+        return;
+      }
+      audioFile = savedAudioFile;
+    } catch (_) {
+      _showEditorSnackBar('Recording failed; no audio file was saved.');
+      return;
+    }
+
+    try {
+      final aiService = widget.noteAiService;
+      if (aiService == null) {
+        throw Exception('AI transcription is not configured.');
+      }
+      final aiResult = await aiService.transcribeAndSummarize(
+        audioFile,
+      );
+      _appendAudioAiResult(
+        attachmentUri: recordingFile.attachmentUri,
+        result: aiResult,
+      );
+      await _flushPendingChanges();
+    } catch (_) {
+      _appendRecordingOnly(recordingFile.attachmentUri);
+      await _flushPendingChanges();
+      _showEditorSnackBar(
+        'Recording saved, but transcription failed.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _activeRecordingFile = null;
+          _isProcessingAudio = false;
+        });
+      }
+    }
+  }
+
+  Future<File?> _saveRecordedAudioFile({
+    required String? recordedPath,
+    required File recordingFile,
+  }) async {
+    final recordedFile = File(recordedPath ?? recordingFile.path);
+    if (!await recordedFile.exists() || await recordedFile.length() == 0) {
+      return null;
+    }
+
+    if (recordedFile.path != recordingFile.path) {
+      await recordingFile.parent.create(recursive: true);
+      await recordedFile.copy(recordingFile.path);
+    }
+
+    if (!await recordingFile.exists() || await recordingFile.length() == 0) {
+      return null;
+    }
+    return recordingFile;
+  }
+
+  ({AudioEncoder encoder, String extension}) _recordingAudioFormat() {
+    if (defaultTargetPlatform == TargetPlatform.linux) {
+      return (encoder: AudioEncoder.wav, extension: 'wav');
+    }
+
+    return (encoder: AudioEncoder.aacLc, extension: 'm4a');
+  }
+
+  Future<bool> _ensureAiApiKeys() async {
+    final aiService = widget.noteAiService;
+    if (aiService == null) {
+      _showEditorSnackBar('AI transcription is not configured.');
+      return false;
+    }
+
+    if (!await aiService.hasTranscriptionApiKey()) {
+      final saved = await _promptAndSaveAiApiKey(
+        title: 'OpenAI API key',
+        label: 'OpenAI API key',
+        save: aiService.saveTranscriptionApiKey,
+      );
+      if (!saved) {
+        return false;
+      }
+    }
+
+    if (!await aiService.hasSummaryApiKey()) {
+      final saved = await _promptAndSaveAiApiKey(
+        title: 'DeepSeek API key',
+        label: 'DeepSeek API key',
+        save: aiService.saveSummaryApiKey,
+      );
+      if (!saved) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  Future<bool> _promptAndSaveAiApiKey({
+    required String title,
+    required String label,
+    required Future<void> Function(String apiKey) save,
+  }) async {
+    if (!mounted) {
+      return false;
+    }
+
+    final controller = TextEditingController();
+    try {
+      final apiKey = await showDialog<String>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text(title),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: label,
+                border: const OutlineInputBorder(),
+              ),
+              textInputAction: TextInputAction.done,
+              onSubmitted: (value) => Navigator.of(context).pop(value),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(controller.text),
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      );
+
+      final trimmed = apiKey?.trim();
+      if (trimmed == null || trimmed.isEmpty) {
+        return false;
+      }
+
+      await save(trimmed);
+      return true;
+    } catch (_) {
+      _showEditorSnackBar('Could not save $label.');
+      return false;
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  void _appendAudioAiResult({
+    required String attachmentUri,
+    required AiNoteResult result,
+  }) {
+    _appendSectionToNote(
+      buildVoiceNoteMarkdown(
+        attachmentUri: attachmentUri,
+        result: result,
+      ),
+    );
+  }
+
+  void _appendRecordingOnly(String attachmentUri) {
+    _appendSectionToNote(
+      buildVoiceNoteMarkdown(
+        attachmentUri: attachmentUri,
+        status: 'Recording saved. Transcript and summary were not generated.',
+      ),
+    );
+  }
+
+  void _appendSectionToNote(String section) {
+    final currentText = _contentController.text.trimRight();
+    final separator = currentText.isEmpty ? '' : '\n\n';
+    final updatedText = '$currentText$separator${section.trim()}\n';
+    _contentController.value = TextEditingValue(
+      text: updatedText,
+      selection: TextSelection.collapsed(offset: updatedText.length),
+    );
+    _contentFocusNode.requestFocus();
+  }
+
+  void _showEditorSnackBar(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   String _normalizeImageInsertion(String markdown) {
     final text = _contentController.text;
     final selection = _contentController.selection;
@@ -1519,6 +1855,9 @@ class _NoteEditorContent extends StatelessWidget {
     required this.toggleQuote,
     required this.insertCodeSnippet,
     required this.attachImage,
+    required this.recordAudio,
+    required this.isRecordingAudio,
+    required this.isProcessingAudio,
     required this.deleteAttachmentFile,
     required this.onContentTap,
   });
@@ -1552,6 +1891,9 @@ class _NoteEditorContent extends StatelessWidget {
   final VoidCallback toggleQuote;
   final VoidCallback insertCodeSnippet;
   final Future<void> Function() attachImage;
+  final Future<void> Function() recordAudio;
+  final bool isRecordingAudio;
+  final bool isProcessingAudio;
   final Future<bool> Function(String attachmentUri) deleteAttachmentFile;
   final VoidCallback onContentTap;
 
@@ -1694,6 +2036,9 @@ class _NoteEditorContent extends StatelessWidget {
               mobileTextScale: mobileTextScale,
               mobileBodyStyle: mobileBodyStyle,
               editingLocked: editingLocked,
+              recordAudio: recordAudio,
+              isRecordingAudio: isRecordingAudio,
+              isProcessingAudio: isProcessingAudio,
               deleteAttachmentFile: deleteAttachmentFile,
               onTap: onContentTap,
             ),
@@ -1717,6 +2062,8 @@ class _NoteEditorContent extends StatelessWidget {
                     toggleQuote: toggleQuote,
                     insertCodeSnippet: insertCodeSnippet,
                     attachImage: attachImage,
+                    recordAudio: recordAudio,
+                    isRecordingAudio: isRecordingAudio,
                     editingLocked: editingLocked,
                   )
                 : const SizedBox.shrink(
@@ -1741,6 +2088,8 @@ class _MobileEditorToolbar extends StatelessWidget {
     required this.toggleQuote,
     required this.insertCodeSnippet,
     required this.attachImage,
+    required this.recordAudio,
+    required this.isRecordingAudio,
     required this.editingLocked,
   });
 
@@ -1753,6 +2102,8 @@ class _MobileEditorToolbar extends StatelessWidget {
   final VoidCallback toggleQuote;
   final VoidCallback insertCodeSnippet;
   final Future<void> Function() attachImage;
+  final Future<void> Function() recordAudio;
+  final bool isRecordingAudio;
   final bool editingLocked;
 
   @override
@@ -1833,6 +2184,17 @@ class _MobileEditorToolbar extends StatelessWidget {
                           attachImage();
                         },
                 ),
+                _MobileToolbarButton(
+                  tooltip: isRecordingAudio ? 'Stop recording' : 'Record audio',
+                  icon: isRecordingAudio
+                      ? Icons.stop_circle_outlined
+                      : Icons.mic_none_rounded,
+                  onPressed: editingLocked
+                      ? null
+                      : () {
+                          recordAudio();
+                        },
+                ),
               ],
             ),
           ),
@@ -1884,6 +2246,82 @@ class _EditorStatusStrip extends StatelessWidget {
             child: const Text('Retry'),
           ),
       ],
+    );
+  }
+}
+
+class _RecordingStatusOverlay extends StatelessWidget {
+  const _RecordingStatusOverlay({
+    required this.isRecording,
+    required this.isProcessing,
+    required this.onStop,
+  });
+
+  final bool isRecording;
+  final bool isProcessing;
+  final Future<void> Function()? onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final foreground =
+        isRecording ? colorScheme.error : colorScheme.onSurfaceVariant;
+    final background = Theme.of(context)
+        .colorScheme
+        .surfaceContainerHighest
+        .withValues(alpha: 0.96);
+    final label = isProcessing
+        ? 'Recording saved. Transcribing...'
+        : 'Recording... press Stop to save';
+
+    return Align(
+      alignment: Alignment.topCenter,
+      child: Material(
+        color: background,
+        elevation: 3,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isProcessing
+                    ? Icons.graphic_eq_rounded
+                    : Icons.fiber_manual_record_rounded,
+                size: 16,
+                color: foreground,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurface,
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ),
+              if (isRecording) ...[
+                const SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: onStop,
+                  icon: const Icon(Icons.stop_rounded, size: 16),
+                  label: const Text('Stop'),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    foregroundColor: colorScheme.error,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2909,6 +3347,41 @@ StrutStyle editorStrutStyleForTextStyle(TextStyle style) {
   );
 }
 
+@visibleForTesting
+String buildVoiceNoteMarkdown({
+  required String attachmentUri,
+  AiNoteResult? result,
+  String? status,
+}) {
+  final audioLink = buildAttachmentLinkMarkdown(
+    attachmentUri,
+    label: 'Audio recording',
+  );
+  final resolvedStatus = status ??
+      (result == null
+          ? 'Recording saved.'
+          : 'Recording saved. Summary generated from saved audio.');
+  final buffer = StringBuffer()
+    ..writeln('## Voice note')
+    ..writeln()
+    ..writeln('**Audio:** $audioLink')
+    ..writeln('**Status:** $resolvedStatus');
+
+  if (result != null) {
+    buffer
+      ..writeln()
+      ..writeln('### Summary')
+      ..writeln()
+      ..writeln(result.summary.trim())
+      ..writeln()
+      ..writeln('### Transcript')
+      ..writeln()
+      ..writeln(result.transcript.trim());
+  }
+
+  return buffer.toString().trim();
+}
+
 Color _codeSnippetBackgroundColor() {
   return const Color(0xFF1E222B);
 }
@@ -3229,6 +3702,9 @@ class _MarkdownEditorPane extends StatelessWidget {
     required this.mobileTextScale,
     required this.mobileBodyStyle,
     required this.editingLocked,
+    required this.recordAudio,
+    required this.isRecordingAudio,
+    required this.isProcessingAudio,
     required this.deleteAttachmentFile,
     required this.onTap,
   });
@@ -3241,6 +3717,9 @@ class _MarkdownEditorPane extends StatelessWidget {
   final double mobileTextScale;
   final TextStyle? mobileBodyStyle;
   final bool editingLocked;
+  final Future<void> Function() recordAudio;
+  final bool isRecordingAudio;
+  final bool isProcessingAudio;
   final Future<bool> Function(String attachmentUri) deleteAttachmentFile;
   final VoidCallback onTap;
 
@@ -3263,6 +3742,9 @@ class _MarkdownEditorPane extends StatelessWidget {
         mobileTextScale: mobileTextScale,
         mobileBodyStyle: mobileBodyStyle,
         editingLocked: editingLocked,
+        recordAudio: recordAudio,
+        isRecordingAudio: isRecordingAudio,
+        isProcessingAudio: isProcessingAudio,
         deleteAttachmentFile: deleteAttachmentFile,
         onTap: onTap,
       ),
@@ -3279,6 +3761,9 @@ class _UnifiedMarkdownEditor extends StatefulWidget {
     required this.mobileTextScale,
     required this.mobileBodyStyle,
     required this.editingLocked,
+    required this.recordAudio,
+    required this.isRecordingAudio,
+    required this.isProcessingAudio,
     required this.deleteAttachmentFile,
     required this.onTap,
   });
@@ -3289,6 +3774,9 @@ class _UnifiedMarkdownEditor extends StatefulWidget {
   final double mobileTextScale;
   final TextStyle? mobileBodyStyle;
   final bool editingLocked;
+  final Future<void> Function() recordAudio;
+  final bool isRecordingAudio;
+  final bool isProcessingAudio;
   final Future<bool> Function(String attachmentUri) deleteAttachmentFile;
   final VoidCallback onTap;
 
@@ -3538,9 +4026,9 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
 
     return _slashCommands
         .where((command) =>
-            query.isEmpty ||
-            command.label.toLowerCase().contains(query) ||
-            command.aliases.any((alias) => alias.contains(query)))
+            command.type != _SlashCommandType.record ||
+            !widget.isProcessingAudio)
+        .where((command) => _slashCommandMatches(command, query))
         .toList(growable: false);
   }
 
@@ -3575,6 +4063,18 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
         );
         _selectedSlashCommandIndex = 0;
         _focusEditorAt(checklistOffset);
+      case _SlashCommandType.record:
+        final text = widget.controller.text;
+        final updatedText =
+            text.replaceRange(lineRange.start, lineRange.end, '');
+        final nextOffset = lineRange.start.clamp(0, updatedText.length);
+        widget.controller.value = TextEditingValue(
+          text: updatedText,
+          selection: TextSelection.collapsed(offset: nextOffset),
+        );
+        _selectedSlashCommandIndex = 0;
+        _focusEditorAt(nextOffset);
+        unawaited(widget.recordAudio());
     }
   }
 
@@ -4187,6 +4687,21 @@ class _UnifiedMarkdownEditorState extends State<_UnifiedMarkdownEditor> {
                       ),
                     ),
                   ),
+                  if (widget.isRecordingAudio || widget.isProcessingAudio)
+                    Positioned(
+                      left: 12,
+                      right: 12,
+                      top: 12,
+                      child: _RecordingStatusOverlay(
+                        isRecording: widget.isRecordingAudio,
+                        isProcessing: widget.isProcessingAudio,
+                        onStop: widget.editingLocked ||
+                                !widget.isRecordingAudio ||
+                                widget.isProcessingAudio
+                            ? null
+                            : widget.recordAudio,
+                      ),
+                    ),
                   for (final overlay in imageOverlays)
                     Positioned(
                       left: overlay.left,
@@ -5887,6 +6402,8 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
         _convertSelectionLineToCode(index, ensureTrailingParagraph: true);
       case _SlashCommandType.checklist:
         _replaceSelectionLineWithChecklist(index);
+      case _SlashCommandType.record:
+        break;
     }
   }
 
@@ -6169,10 +6686,8 @@ class _DocumentBlocksEditorState extends State<_DocumentBlocksEditor> {
       return const <_SlashCommand>[];
     }
     return _slashCommands
-        .where((command) =>
-            query.isEmpty ||
-            command.label.toLowerCase().contains(query) ||
-            command.aliases.any((alias) => alias.contains(query)))
+        .where((command) => command.type != _SlashCommandType.record)
+        .where((command) => _slashCommandMatches(command, query))
         .toList(growable: false);
   }
 
@@ -6221,11 +6736,18 @@ const List<_SlashCommand> _slashCommands = <_SlashCommand>[
     description: 'Insert a checklist item',
     aliases: <String>['checklist', 'task', 'todo'],
   ),
+  _SlashCommand(
+    type: _SlashCommandType.record,
+    label: 'Record audio',
+    description: 'Start or stop an audio recording',
+    aliases: <String>['record', 'audio', 'voice', 'transcribe'],
+  ),
 ];
 
 enum _SlashCommandType {
   code,
   checklist,
+  record,
 }
 
 class _SlashCommand {
@@ -6240,6 +6762,21 @@ class _SlashCommand {
   final String label;
   final String description;
   final List<String> aliases;
+}
+
+bool _slashCommandMatches(_SlashCommand command, String query) {
+  if (query.isEmpty) {
+    return true;
+  }
+
+  final label = command.label.toLowerCase();
+  if (command.type == _SlashCommandType.record) {
+    return label.startsWith(query) ||
+        command.aliases.any((alias) => alias.startsWith(query));
+  }
+
+  return label.contains(query) ||
+      command.aliases.any((alias) => alias.contains(query));
 }
 
 class _LineRange {
