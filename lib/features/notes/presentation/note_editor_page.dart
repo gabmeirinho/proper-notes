@@ -1393,6 +1393,9 @@ class NoteEditorPageState extends State<NoteEditorPage>
     if (!await _ensureAiApiKeys()) {
       return;
     }
+    if (!await _ensureLinuxAudioTools()) {
+      return;
+    }
 
     try {
       final hasPermission = await _audioRecorder.hasPermission();
@@ -1428,6 +1431,40 @@ class NoteEditorPageState extends State<NoteEditorPage>
             ? 'Could not start recording. Check that parecord, pactl, and ffmpeg are installed.'
             : 'Could not start recording.',
       );
+    }
+  }
+
+  Future<bool> _ensureLinuxAudioTools() async {
+    if (defaultTargetPlatform != TargetPlatform.linux) {
+      return true;
+    }
+
+    final missingTools = <String>[];
+    for (final tool in const <String>['parecord', 'pactl', 'ffmpeg']) {
+      if (!await _isCommandAvailable(tool)) {
+        missingTools.add(tool);
+      }
+    }
+
+    if (missingTools.isEmpty) {
+      return true;
+    }
+
+    _showEditorSnackBar(
+      'Could not start recording. Missing: ${missingTools.join(', ')}.',
+    );
+    return false;
+  }
+
+  Future<bool> _isCommandAvailable(String command) async {
+    try {
+      final result = await Process.run(
+        'which',
+        <String>[command],
+      );
+      return result.exitCode == 0;
+    } catch (_) {
+      return false;
     }
   }
 
