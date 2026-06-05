@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proper_notes/core/utils/attachments.dart';
+import 'package:proper_notes/features/ai/domain/note_ai_service.dart';
 import 'package:proper_notes/features/auth/application/auth_controller.dart';
 import 'package:proper_notes/features/auth/domain/auth_service.dart';
 import 'package:proper_notes/features/auth/domain/auth_session.dart';
@@ -174,7 +176,9 @@ void main() {
 
       expect(find.text('Proper Notes'), findsNothing);
       expect(
-          find.byKey(const ValueKey('mobile-folder-path-title')), findsNothing);
+        find.byKey(const ValueKey('mobile-folder-path-title')),
+        findsNothing,
+      );
       expect(find.textContaining('Shortcuts:'), findsNothing);
       expect(find.text('Sync ready'), findsNothing);
       expect(find.text('Folder: Projects'), findsNothing);
@@ -194,107 +198,108 @@ void main() {
     },
   );
 
-  testWidgets('mobile sync status indicator reflects whether notes are synced',
-      (tester) async {
-    tester.view.physicalSize = const Size(430, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
+  testWidgets(
+    'mobile sync status indicator reflects whether notes are synced',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
 
-    final pendingRepository = _FakeNoteRepository(
-      initialActiveNotes: [
-        Note(
-          id: 'pending-note',
-          title: 'Pending',
-          content: 'Body',
-          createdAt: DateTime(2026, 1, 1),
-          updatedAt: DateTime(2026, 1, 1),
-          syncStatus: SyncStatus.pendingUpload,
-          contentHash: 'hash-1',
-          deviceId: 'device-1',
-        ),
-      ],
-    );
-    final syncedRepository = _FakeNoteRepository(
-      initialActiveNotes: [
-        Note(
-          id: 'synced-note',
-          title: 'Synced',
-          content: 'Body',
-          createdAt: DateTime(2026, 1, 1),
-          updatedAt: DateTime(2026, 1, 1),
-          syncStatus: SyncStatus.synced,
-          contentHash: 'hash-2',
-          deviceId: 'device-1',
-        ),
-      ],
-    );
-    final folderRepository = _FakeFolderRepository();
+      final pendingRepository = _FakeNoteRepository(
+        initialActiveNotes: [
+          Note(
+            id: 'pending-note',
+            title: 'Pending',
+            content: 'Body',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 1),
+            syncStatus: SyncStatus.pendingUpload,
+            contentHash: 'hash-1',
+            deviceId: 'device-1',
+          ),
+        ],
+      );
+      final syncedRepository = _FakeNoteRepository(
+        initialActiveNotes: [
+          Note(
+            id: 'synced-note',
+            title: 'Synced',
+            content: 'Body',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 1),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'hash-2',
+            deviceId: 'device-1',
+          ),
+        ],
+      );
+      final folderRepository = _FakeFolderRepository();
 
-    Future<void> pumpHome(_FakeNoteRepository repository) async {
-      final authController =
-          AuthController(authService: _SignedInFakeAuthService());
-      await authController.restore();
+      Future<void> pumpHome(_FakeNoteRepository repository) async {
+        final authController = AuthController(
+          authService: _SignedInFakeAuthService(),
+        );
+        await authController.restore();
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: NotesHomePage(
-            createNote: CreateNote(
-              repository: repository,
-              deviceId: 'device-1',
-            ),
-            createFolder: CreateFolder(repository: folderRepository),
-            deleteFolder: DeleteFolder(repository: folderRepository),
-            renameFolder: RenameFolder(repository: folderRepository),
-            moveNote: MoveNote(
-              repository: repository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: repository,
-              deviceId: 'device-1',
-            ),
-            deleteNote: DeleteNote(repository: repository),
-            restoreNote: RestoreNote(repository: repository),
-            searchNotes: SearchNotes(repository: repository),
-            folderRepository: folderRepository,
-            noteRepository: repository,
-            authController: authController,
-            syncController: SyncController(
-              runManualSync: RunManualSync(
-                noteRepository: repository,
-                syncGateway: _FakeSyncGateway(),
-                syncStateRepository: _FakeSyncStateRepository(),
+        await tester.pumpWidget(
+          MaterialApp(
+            home: NotesHomePage(
+              createNote: CreateNote(
+                repository: repository,
+                deviceId: 'device-1',
+              ),
+              createFolder: CreateFolder(repository: folderRepository),
+              deleteFolder: DeleteFolder(repository: folderRepository),
+              renameFolder: RenameFolder(repository: folderRepository),
+              moveNote: MoveNote(repository: repository, deviceId: 'device-1'),
+              updateNote: UpdateNote(
+                repository: repository,
+                deviceId: 'device-1',
+              ),
+              deleteNote: DeleteNote(repository: repository),
+              restoreNote: RestoreNote(repository: repository),
+              searchNotes: SearchNotes(repository: repository),
+              folderRepository: folderRepository,
+              noteRepository: repository,
+              authController: authController,
+              syncController: SyncController(
+                runManualSync: RunManualSync(
+                  noteRepository: repository,
+                  syncGateway: _FakeSyncGateway(),
+                  syncStateRepository: _FakeSyncStateRepository(),
+                ),
               ),
             ),
           ),
+        );
+
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+
+      await pumpHome(pendingRepository);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('compact-app-sync-status-indicator')),
+          matching: find.text('Not synced'),
         ),
+        findsOneWidget,
       );
 
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
-    }
+      await pumpHome(syncedRepository);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('compact-app-sync-status-indicator')),
+          matching: find.text('Synced'),
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 
-    await pumpHome(pendingRepository);
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('compact-app-sync-status-indicator')),
-        matching: find.text('Not synced'),
-      ),
-      findsOneWidget,
-    );
-
-    await pumpHome(syncedRepository);
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('compact-app-sync-status-indicator')),
-        matching: find.text('Synced'),
-      ),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('mobile sync status indicator calls out conflict copies',
-      (tester) async {
+  testWidgets('mobile sync status indicator calls out conflict copies', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(430, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -314,8 +319,9 @@ void main() {
       ],
     );
     final folderRepository = _FakeFolderRepository();
-    final authController =
-        AuthController(authService: _SignedInFakeAuthService());
+    final authController = AuthController(
+      authService: _SignedInFakeAuthService(),
+    );
     await authController.restore();
 
     await tester.pumpWidget(
@@ -328,10 +334,7 @@ void main() {
           createFolder: CreateFolder(repository: folderRepository),
           deleteFolder: DeleteFolder(repository: folderRepository),
           renameFolder: RenameFolder(repository: folderRepository),
-          moveNote: MoveNote(
-            repository: noteRepository,
-            deviceId: 'device-1',
-          ),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
           updateNote: UpdateNote(
             repository: noteRepository,
             deviceId: 'device-1',
@@ -365,8 +368,9 @@ void main() {
     );
   });
 
-  testWidgets('trashed conflict notes do not show conflict warnings',
-      (tester) async {
+  testWidgets('trashed conflict notes do not show conflict warnings', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1400, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -387,8 +391,9 @@ void main() {
       ],
     );
     final folderRepository = _FakeFolderRepository();
-    final authController =
-        AuthController(authService: _SignedInFakeAuthService());
+    final authController = AuthController(
+      authService: _SignedInFakeAuthService(),
+    );
     await authController.restore();
 
     await tester.pumpWidget(
@@ -401,10 +406,7 @@ void main() {
           createFolder: CreateFolder(repository: folderRepository),
           deleteFolder: DeleteFolder(repository: folderRepository),
           renameFolder: RenameFolder(repository: folderRepository),
-          moveNote: MoveNote(
-            repository: noteRepository,
-            deviceId: 'device-1',
-          ),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
           updateNote: UpdateNote(
             repository: noteRepository,
             deviceId: 'device-1',
@@ -443,14 +445,17 @@ void main() {
     expect(find.text('Conflict copy preserved during sync.'), findsNothing);
     expect(
       find.text(
-          'Conflict copy preserved during sync. Review before editing further.'),
+        'Conflict copy preserved during sync. Review before editing further.',
+      ),
       findsNothing,
     );
     expect(find.text('Pending delete'), findsOneWidget);
   });
 
   testWidgets('conflict resolution sheet shows version metadata and line diff',
-      (tester) async {
+      (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1400, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -501,117 +506,125 @@ void main() {
     expect(find.textContaining('Jan 02, 10:30'), findsOneWidget);
   });
 
-  testWidgets('conflict resolution keep original moves conflict copy to trash',
-      (tester) async {
-    tester.view.physicalSize = const Size(1400, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
+  testWidgets(
+    'conflict resolution keep original moves conflict copy to trash',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
 
-    final noteRepository = _FakeNoteRepository(
-      initialActiveNotes: [
-        Note(
-          id: 'original-note',
-          title: 'Roadmap',
-          content: 'Original body',
-          createdAt: DateTime(2026, 1, 1),
-          updatedAt: DateTime(2026, 1, 1),
-          syncStatus: SyncStatus.synced,
-          contentHash: 'original-hash',
-          deviceId: 'device-1',
-        ),
-        Note(
-          id: 'conflict-note',
-          title: 'Roadmap (Conflict Copy)',
-          content: 'Conflict body',
-          createdAt: DateTime(2026, 1, 1),
-          updatedAt: DateTime(2026, 1, 2),
-          syncStatus: SyncStatus.conflicted,
-          contentHash: 'conflict-hash',
-          deviceId: 'device-2',
-        ),
-      ],
-    );
+      final noteRepository = _FakeNoteRepository(
+        initialActiveNotes: [
+          Note(
+            id: 'original-note',
+            title: 'Roadmap',
+            content: 'Original body',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 1),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'original-hash',
+            deviceId: 'device-1',
+          ),
+          Note(
+            id: 'conflict-note',
+            title: 'Roadmap (Conflict Copy)',
+            content: 'Conflict body',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 2),
+            syncStatus: SyncStatus.conflicted,
+            contentHash: 'conflict-hash',
+            deviceId: 'device-2',
+          ),
+        ],
+      );
 
-    await _pumpNotesHome(tester, noteRepository: noteRepository);
-    await tester.longPress(
-      find.byKey(const ValueKey('sidebar-note-conflict-note')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Resolve conflict'));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Keep original'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Keep original'));
-    await tester.pumpAndSettle();
+      await _pumpNotesHome(tester, noteRepository: noteRepository);
+      await tester.longPress(
+        find.byKey(const ValueKey('sidebar-note-conflict-note')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Resolve conflict'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Keep original'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Keep original'));
+      await tester.pumpAndSettle();
 
-    final original = await noteRepository.getById('original-note');
-    final conflict = await noteRepository.getById('conflict-note');
-    expect(original?.deletedAt, isNull);
-    expect(conflict?.deletedAt, isNotNull);
-    expect(find.text('Conflict copy deleted. Original note kept.'),
-        findsOneWidget);
-  });
+      final original = await noteRepository.getById('original-note');
+      final conflict = await noteRepository.getById('conflict-note');
+      expect(original?.deletedAt, isNull);
+      expect(conflict?.deletedAt, isNotNull);
+      expect(
+        find.text('Conflict copy deleted. Original note kept.'),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets(
-      'conflict resolution keep copy normalizes copy and trashes original',
-      (tester) async {
-    tester.view.physicalSize = const Size(1400, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
+    'conflict resolution keep copy normalizes copy and trashes original',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
 
-    final noteRepository = _FakeNoteRepository(
-      initialActiveNotes: [
-        Note(
-          id: 'original-note',
-          title: 'Roadmap',
-          content: 'Original body',
-          createdAt: DateTime(2026, 1, 1),
-          updatedAt: DateTime(2026, 1, 1),
-          syncStatus: SyncStatus.synced,
-          contentHash: 'original-hash',
-          deviceId: 'device-1',
-        ),
-        Note(
-          id: 'conflict-note',
-          title: 'Roadmap (Conflict Copy)',
-          content: 'Conflict body',
-          createdAt: DateTime(2026, 1, 1),
-          updatedAt: DateTime(2026, 1, 2),
-          syncStatus: SyncStatus.conflicted,
-          contentHash: 'conflict-hash',
-          deviceId: 'device-2',
-        ),
-      ],
-    );
+      final noteRepository = _FakeNoteRepository(
+        initialActiveNotes: [
+          Note(
+            id: 'original-note',
+            title: 'Roadmap',
+            content: 'Original body',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 1),
+            syncStatus: SyncStatus.synced,
+            contentHash: 'original-hash',
+            deviceId: 'device-1',
+          ),
+          Note(
+            id: 'conflict-note',
+            title: 'Roadmap (Conflict Copy)',
+            content: 'Conflict body',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 2),
+            syncStatus: SyncStatus.conflicted,
+            contentHash: 'conflict-hash',
+            deviceId: 'device-2',
+          ),
+        ],
+      );
 
-    await _pumpNotesHome(tester, noteRepository: noteRepository);
-    await tester.longPress(
-      find.byKey(const ValueKey('sidebar-note-conflict-note')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Resolve conflict'));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Keep conflict copy'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Keep conflict copy'));
-    await tester.pumpAndSettle();
+      await _pumpNotesHome(tester, noteRepository: noteRepository);
+      await tester.longPress(
+        find.byKey(const ValueKey('sidebar-note-conflict-note')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Resolve conflict'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Keep conflict copy'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Keep conflict copy'));
+      await tester.pumpAndSettle();
 
-    final original = await noteRepository.getById('original-note');
-    expect(original?.deletedAt, isNotNull);
-    expect(noteRepository.updatedNotes, hasLength(1));
-    expect(noteRepository.updatedNotes.single.id, 'conflict-note');
-    expect(noteRepository.updatedNotes.single.title, 'Roadmap');
-    expect(noteRepository.updatedNotes.single.content, 'Conflict body');
-    expect(noteRepository.updatedNotes.single.syncStatus,
-        SyncStatus.pendingUpload);
-    expect(
-      find.text('Conflict copy kept. Original note moved to trash.'),
-      findsOneWidget,
-    );
-  });
+      final original = await noteRepository.getById('original-note');
+      expect(original?.deletedAt, isNotNull);
+      expect(noteRepository.updatedNotes, hasLength(1));
+      expect(noteRepository.updatedNotes.single.id, 'conflict-note');
+      expect(noteRepository.updatedNotes.single.title, 'Roadmap');
+      expect(noteRepository.updatedNotes.single.content, 'Conflict body');
+      expect(
+        noteRepository.updatedNotes.single.syncStatus,
+        SyncStatus.pendingUpload,
+      );
+      expect(
+        find.text('Conflict copy kept. Original note moved to trash.'),
+        findsOneWidget,
+      );
+    },
+  );
 
-  testWidgets('conflict resolution without original shows convert flow',
-      (tester) async {
+  testWidgets('conflict resolution without original shows convert flow', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1400, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -647,130 +660,31 @@ void main() {
   });
 
   testWidgets(
-      'mobile editor keeps the app-bar sync status visible while editing',
-      (tester) async {
-    tester.view.physicalSize = const Size(430, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-
-    final noteRepository = _FakeNoteRepository(
-      initialActiveNotes: [
-        Note(
-          id: 'note-1',
-          title: 'Roadmap',
-          content: 'Body',
-          createdAt: DateTime(2026, 1, 1),
-          updatedAt: DateTime(2026, 1, 1),
-          syncStatus: SyncStatus.synced,
-          contentHash: 'hash-1',
-          deviceId: 'device-1',
-        ),
-      ],
-    );
-    final folderRepository = _FakeFolderRepository();
-    final authController =
-        AuthController(authService: _SignedInFakeAuthService());
-    await authController.restore();
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: NotesHomePage(
-          createNote: CreateNote(
-            repository: noteRepository,
-            deviceId: 'device-1',
-          ),
-          createFolder: CreateFolder(repository: folderRepository),
-          deleteFolder: DeleteFolder(repository: folderRepository),
-          renameFolder: RenameFolder(repository: folderRepository),
-          moveNote: MoveNote(
-            repository: noteRepository,
-            deviceId: 'device-1',
-          ),
-          updateNote: UpdateNote(
-            repository: noteRepository,
-            deviceId: 'device-1',
-          ),
-          deleteNote: DeleteNote(repository: noteRepository),
-          restoreNote: RestoreNote(repository: noteRepository),
-          searchNotes: SearchNotes(repository: noteRepository),
-          folderRepository: folderRepository,
-          noteRepository: noteRepository,
-          authController: authController,
-          syncController: SyncController(
-            runManualSync: RunManualSync(
-              noteRepository: noteRepository,
-              syncGateway: _FakeSyncGateway(),
-              syncStateRepository: _FakeSyncStateRepository(),
-            ),
-          ),
-        ),
-      ),
-    );
-
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 200));
-
-    expect(
-      find.byKey(const ValueKey('compact-app-sync-status-indicator')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('compact-app-sync-status-indicator')),
-        matching: find.text('Synced'),
-      ),
-      findsOneWidget,
-    );
-
-    await tester.tap(find.byTooltip('Folders'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('sidebar-note-note-1')));
-    await tester.pumpAndSettle();
-
-    expect(
-      find.byKey(const ValueKey('compact-app-sync-status-indicator')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('compact-app-sync-status-indicator')),
-        matching: find.text('Synced'),
-      ),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets(
-    'mobile drawer shows folder tree notes for navigation',
+    'mobile editor keeps the app-bar sync status visible while editing',
     (tester) async {
       tester.view.physicalSize = const Size(430, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
 
-      final folderRepository = _FakeFolderRepository(
-        initialFolders: [
-          Folder(
-            path: 'Projects',
-            parentPath: null,
-            createdAt: DateTime(2026, 1, 1),
-          ),
-        ],
-      );
       final noteRepository = _FakeNoteRepository(
         initialActiveNotes: [
           Note(
-            id: 'note-projects',
+            id: 'note-1',
             title: 'Roadmap',
-            content: 'Plan',
+            content: 'Body',
             createdAt: DateTime(2026, 1, 1),
-            updatedAt: DateTime(2026, 1, 2),
+            updatedAt: DateTime(2026, 1, 1),
             syncStatus: SyncStatus.synced,
             contentHash: 'hash-1',
             deviceId: 'device-1',
-            folderPath: 'Projects',
           ),
         ],
       );
+      final folderRepository = _FakeFolderRepository();
+      final authController = AuthController(
+        authService: _SignedInFakeAuthService(),
+      );
+      await authController.restore();
 
       await tester.pumpWidget(
         MaterialApp(
@@ -795,7 +709,7 @@ void main() {
             searchNotes: SearchNotes(repository: noteRepository),
             folderRepository: folderRepository,
             noteRepository: noteRepository,
-            authController: AuthController(authService: _FakeAuthService()),
+            authController: authController,
             syncController: SyncController(
               runManualSync: RunManualSync(
                 noteRepository: noteRepository,
@@ -810,21 +724,123 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
+      expect(
+        find.byKey(const ValueKey('compact-app-sync-status-indicator')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('compact-app-sync-status-indicator')),
+          matching: find.text('Synced'),
+        ),
+        findsOneWidget,
+      );
+
       await tester.tap(find.byTooltip('Folders'));
       await tester.pumpAndSettle();
-
-      expect(find.text('Files'), findsOneWidget);
-      expect(find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
-          findsOneWidget);
-
-      await tester
-          .tap(find.byKey(const ValueKey('sidebar-folder-tile-Projects')));
+      await tester.tap(find.byKey(const ValueKey('sidebar-note-note-1')));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('sidebar-note-note-projects')),
-          findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('compact-app-sync-status-indicator')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('compact-app-sync-status-indicator')),
+          matching: find.text('Synced'),
+        ),
+        findsOneWidget,
+      );
     },
   );
+
+  testWidgets('mobile drawer shows folder tree notes for navigation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final folderRepository = _FakeFolderRepository(
+      initialFolders: [
+        Folder(
+          path: 'Projects',
+          parentPath: null,
+          createdAt: DateTime(2026, 1, 1),
+        ),
+      ],
+    );
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'note-projects',
+          title: 'Roadmap',
+          content: 'Plan',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.synced,
+          contentHash: 'hash-1',
+          deviceId: 'device-1',
+          folderPath: 'Projects',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    await tester.tap(find.byTooltip('Folders'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Files'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('sidebar-note-note-projects')),
+      findsOneWidget,
+    );
+  });
 
   testWidgets(
     'wide layout keeps the folder sidebar visible when opening the editor',
@@ -887,7 +903,9 @@ void main() {
       expect(find.text('Workspace'), findsOneWidget);
       expect(find.byKey(const ValueKey('desktop-workspace')), findsOneWidget);
       expect(
-          find.widgetWithText(FloatingActionButton, 'New note'), findsNothing);
+        find.widgetWithText(FloatingActionButton, 'New note'),
+        findsNothing,
+      );
       expect(
         find.byKey(const ValueKey('desktop-editor-placeholder')),
         findsNothing,
@@ -897,8 +915,9 @@ void main() {
     },
   );
 
-  testWidgets('mobile drawer does not show an All notes button',
-      (tester) async {
+  testWidgets('mobile drawer does not show an All notes button', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(430, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -916,10 +935,7 @@ void main() {
           createFolder: CreateFolder(repository: folderRepository),
           deleteFolder: DeleteFolder(repository: folderRepository),
           renameFolder: RenameFolder(repository: folderRepository),
-          moveNote: MoveNote(
-            repository: noteRepository,
-            deviceId: 'device-1',
-          ),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
           updateNote: UpdateNote(
             repository: noteRepository,
             deviceId: 'device-1',
@@ -950,8 +966,9 @@ void main() {
     expect(find.widgetWithText(ListTile, 'All notes'), findsNothing);
   });
 
-  testWidgets('opening a note highlights it in the desktop sidebar',
-      (tester) async {
+  testWidgets('opening a note highlights it in the desktop sidebar', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1400, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -982,10 +999,7 @@ void main() {
           createFolder: CreateFolder(repository: folderRepository),
           deleteFolder: DeleteFolder(repository: folderRepository),
           renameFolder: RenameFolder(repository: folderRepository),
-          moveNote: MoveNote(
-            repository: noteRepository,
-            deviceId: 'device-1',
-          ),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
           updateNote: UpdateNote(
             repository: noteRepository,
             deviceId: 'device-1',
@@ -1019,100 +1033,93 @@ void main() {
     expect(surface.color, isNot(Colors.transparent));
   });
 
-  testWidgets(
-    'desktop sidebar folder toggle icon collapses note visibility',
-    (tester) async {
-      tester.view.physicalSize = const Size(1400, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
+  testWidgets('desktop sidebar folder toggle icon collapses note visibility', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
 
-      final folderRepository = _FakeFolderRepository(
-        initialFolders: [
-          Folder(
-            path: 'Projects',
-            parentPath: null,
-            createdAt: DateTime(2026, 1, 1),
-          ),
-        ],
-        deleteImpact: const FolderDeleteImpact(
-          noteCount: 1,
-          childFolderCount: 0,
+    final folderRepository = _FakeFolderRepository(
+      initialFolders: [
+        Folder(
+          path: 'Projects',
+          parentPath: null,
+          createdAt: DateTime(2026, 1, 1),
         ),
-      );
-      final noteRepository = _FakeNoteRepository(
-        initialActiveNotes: [
-          Note(
-            id: 'note-1',
-            title: 'Roadmap',
-            content: 'Plan the next release',
-            createdAt: DateTime(2026, 1, 1),
-            updatedAt: DateTime(2026, 1, 2),
-            syncStatus: SyncStatus.synced,
-            contentHash: 'hash-1',
+      ],
+      deleteImpact: const FolderDeleteImpact(noteCount: 1, childFolderCount: 0),
+    );
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'note-1',
+          title: 'Roadmap',
+          content: 'Plan the next release',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.synced,
+          contentHash: 'hash-1',
+          deviceId: 'device-1',
+          folderPath: 'Projects',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
             deviceId: 'device-1',
-            folderPath: 'Projects',
           ),
-        ],
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: NotesHomePage(
-            createNote: CreateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            createFolder: CreateFolder(repository: folderRepository),
-            deleteFolder: DeleteFolder(repository: folderRepository),
-            renameFolder: RenameFolder(repository: folderRepository),
-            moveNote: MoveNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            deleteNote: DeleteNote(repository: noteRepository),
-            restoreNote: RestoreNote(repository: noteRepository),
-            searchNotes: SearchNotes(repository: noteRepository),
-            folderRepository: folderRepository,
-            noteRepository: noteRepository,
-            authController: AuthController(authService: _FakeAuthService()),
-            syncController: SyncController(
-              runManualSync: RunManualSync(
-                noteRepository: noteRepository,
-                syncGateway: _FakeSyncGateway(),
-                syncStateRepository: _FakeSyncStateRepository(),
-              ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
             ),
           ),
         ),
-      );
+      ),
+    );
 
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
 
-      expect(find.text('Projects'), findsOneWidget);
-      expect(find.text('Roadmap'), findsNothing);
+    expect(find.text('Projects'), findsOneWidget);
+    expect(find.text('Roadmap'), findsNothing);
 
-      await tester.tap(
-        find.byKey(const ValueKey('sidebar-folder-toggle-Projects')),
-      );
-      await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('sidebar-folder-toggle-Projects')),
+    );
+    await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('sidebar-note-note-1')), findsOneWidget);
-      expect(find.text('Roadmap'), findsOneWidget);
+    expect(find.byKey(const ValueKey('sidebar-note-note-1')), findsOneWidget);
+    expect(find.text('Roadmap'), findsOneWidget);
 
-      await tester.tap(
-        find.byKey(const ValueKey('sidebar-folder-toggle-Projects')),
-      );
-      await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('sidebar-folder-toggle-Projects')),
+    );
+    await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('sidebar-note-note-1')), findsNothing);
-      expect(find.text('Roadmap'), findsNothing);
-    },
-  );
+    expect(find.byKey(const ValueKey('sidebar-note-note-1')), findsNothing);
+    expect(find.text('Roadmap'), findsNothing);
+  });
 
   testWidgets(
     'desktop sidebar folder row collapses an expanded unselected folder',
@@ -1378,93 +1385,93 @@ void main() {
 
       final bodyField = tester.widget<TextField>(find.byType(TextField).last);
       expect(bodyField.controller!.text, 'Second note');
-      expect(noteRepository.updatedNotes.where((note) => note.id == 'note-1'),
-          hasLength(1));
-      expect(noteRepository.updatedNotes.where((note) => note.id == 'note-2'),
-          isEmpty);
+      expect(
+        noteRepository.updatedNotes.where((note) => note.id == 'note-1'),
+        hasLength(1),
+      );
+      expect(
+        noteRepository.updatedNotes.where((note) => note.id == 'note-2'),
+        isEmpty,
+      );
     },
   );
 
-  testWidgets(
-    'desktop sidebar shows root folders before root notes',
-    (tester) async {
-      tester.view.physicalSize = const Size(1400, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
+  testWidgets('desktop sidebar shows root folders before root notes', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
 
-      final folderRepository = _FakeFolderRepository(
-        initialFolders: [
-          Folder(
-            path: 'Projects',
-            parentPath: null,
-            createdAt: DateTime(2026, 1, 1),
-          ),
-        ],
-      );
-      final noteRepository = _FakeNoteRepository(
-        initialActiveNotes: [
-          Note(
-            id: 'note-1',
-            title: 'Roadmap',
-            content: 'Plan the next release',
-            createdAt: DateTime(2026, 1, 1),
-            updatedAt: DateTime(2026, 1, 2),
-            syncStatus: SyncStatus.synced,
-            contentHash: 'hash-1',
+    final folderRepository = _FakeFolderRepository(
+      initialFolders: [
+        Folder(
+          path: 'Projects',
+          parentPath: null,
+          createdAt: DateTime(2026, 1, 1),
+        ),
+      ],
+    );
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'note-1',
+          title: 'Roadmap',
+          content: 'Plan the next release',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.synced,
+          contentHash: 'hash-1',
+          deviceId: 'device-1',
+          folderPath: null,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
             deviceId: 'device-1',
-            folderPath: null,
           ),
-        ],
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: NotesHomePage(
-            createNote: CreateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            createFolder: CreateFolder(repository: folderRepository),
-            deleteFolder: DeleteFolder(repository: folderRepository),
-            renameFolder: RenameFolder(repository: folderRepository),
-            moveNote: MoveNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            deleteNote: DeleteNote(repository: noteRepository),
-            restoreNote: RestoreNote(repository: noteRepository),
-            searchNotes: SearchNotes(repository: noteRepository),
-            folderRepository: folderRepository,
-            noteRepository: noteRepository,
-            authController: AuthController(authService: _FakeAuthService()),
-            syncController: SyncController(
-              runManualSync: RunManualSync(
-                noteRepository: noteRepository,
-                syncGateway: _FakeSyncGateway(),
-                syncStateRepository: _FakeSyncStateRepository(),
-              ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
             ),
           ),
         ),
-      );
+      ),
+    );
 
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
 
-      final folderTop = tester.getTopLeft(
-        find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
-      );
-      final noteTop = tester.getTopLeft(
-        find.byKey(const ValueKey('sidebar-note-note-1')),
-      );
+    final folderTop = tester.getTopLeft(
+      find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+    );
+    final noteTop = tester.getTopLeft(
+      find.byKey(const ValueKey('sidebar-note-note-1')),
+    );
 
-      expect(folderTop.dy, lessThan(noteTop.dy));
-    },
-  );
+    expect(folderTop.dy, lessThan(noteTop.dy));
+  });
 
   testWidgets(
     'desktop sidebar shows child folders before notes inside an expanded folder',
@@ -1648,100 +1655,92 @@ void main() {
     },
   );
 
-  testWidgets(
-    'desktop sidebar shows branch guides for nested items only',
-    (tester) async {
-      tester.view.physicalSize = const Size(1400, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
+  testWidgets('desktop sidebar shows branch guides for nested items only', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
 
-      final folderRepository = _FakeFolderRepository(
-        initialFolders: [
-          Folder(
-            path: 'Job',
-            parentPath: null,
-            createdAt: DateTime(2026, 1, 1),
-          ),
-        ],
-      );
-      final noteRepository = _FakeNoteRepository(
-        initialActiveNotes: [
-          Note(
-            id: 'note-job',
-            title: 'Roadmap',
-            content: 'Nested note',
-            createdAt: DateTime(2026, 1, 1),
-            updatedAt: DateTime(2026, 1, 2),
-            syncStatus: SyncStatus.synced,
-            contentHash: 'hash-job',
-            deviceId: 'device-1',
-            folderPath: 'Job',
-          ),
-          Note(
-            id: 'note-root',
-            title: 'Android',
-            content: 'Root note',
-            createdAt: DateTime(2026, 1, 1),
-            updatedAt: DateTime(2026, 1, 2),
-            syncStatus: SyncStatus.synced,
-            contentHash: 'hash-root',
-            deviceId: 'device-1',
-            folderPath: null,
-          ),
-        ],
-      );
+    final folderRepository = _FakeFolderRepository(
+      initialFolders: [
+        Folder(path: 'Job', parentPath: null, createdAt: DateTime(2026, 1, 1)),
+      ],
+    );
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'note-job',
+          title: 'Roadmap',
+          content: 'Nested note',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.synced,
+          contentHash: 'hash-job',
+          deviceId: 'device-1',
+          folderPath: 'Job',
+        ),
+        Note(
+          id: 'note-root',
+          title: 'Android',
+          content: 'Root note',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.synced,
+          contentHash: 'hash-root',
+          deviceId: 'device-1',
+          folderPath: null,
+        ),
+      ],
+    );
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: NotesHomePage(
-            createNote: CreateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            createFolder: CreateFolder(repository: folderRepository),
-            deleteFolder: DeleteFolder(repository: folderRepository),
-            renameFolder: RenameFolder(repository: folderRepository),
-            moveNote: MoveNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            deleteNote: DeleteNote(repository: noteRepository),
-            restoreNote: RestoreNote(repository: noteRepository),
-            searchNotes: SearchNotes(repository: noteRepository),
-            folderRepository: folderRepository,
-            noteRepository: noteRepository,
-            authController: AuthController(authService: _FakeAuthService()),
-            syncController: SyncController(
-              runManualSync: RunManualSync(
-                noteRepository: noteRepository,
-                syncGateway: _FakeSyncGateway(),
-                syncStateRepository: _FakeSyncStateRepository(),
-              ),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
             ),
           ),
         ),
-      );
+      ),
+    );
 
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
 
-      await tester.tap(find.byKey(const ValueKey('sidebar-folder-tile-Job')));
-      await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('sidebar-folder-tile-Job')));
+    await tester.pump();
 
-      expect(
-        find.byKey(const ValueKey('sidebar-tree-guide-note-note-job')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('sidebar-tree-guide-note-note-root')),
-        findsNothing,
-      );
-    },
-  );
+    expect(
+      find.byKey(const ValueKey('sidebar-tree-guide-note-note-job')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('sidebar-tree-guide-note-note-root')),
+      findsNothing,
+    );
+  });
 
   testWidgets(
     'desktop folder menu offers new note and opens the editor in that folder',
@@ -1882,84 +1881,78 @@ void main() {
     },
   );
 
-  testWidgets(
-    'sidebar note row shows sync status indicator',
-    (tester) async {
-      tester.view.physicalSize = const Size(1400, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
+  testWidgets('sidebar note row shows sync status indicator', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
 
-      final folderRepository = _FakeFolderRepository(
-        initialFolders: [
-          Folder(
-            path: 'Projects',
-            parentPath: null,
-            createdAt: DateTime(2026, 1, 1),
-          ),
-        ],
-      );
-      final noteRepository = _FakeNoteRepository(
-        initialActiveNotes: [
-          Note(
-            id: 'note-1',
-            title: 'Roadmap',
-            content: 'Plan the next release',
-            createdAt: DateTime(2026, 1, 1),
-            updatedAt: DateTime(2026, 1, 2),
-            syncStatus: SyncStatus.pendingUpload,
-            contentHash: 'hash-1',
+    final folderRepository = _FakeFolderRepository(
+      initialFolders: [
+        Folder(
+          path: 'Projects',
+          parentPath: null,
+          createdAt: DateTime(2026, 1, 1),
+        ),
+      ],
+    );
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'note-1',
+          title: 'Roadmap',
+          content: 'Plan the next release',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.pendingUpload,
+          contentHash: 'hash-1',
+          deviceId: 'device-1',
+          folderPath: 'Projects',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
             deviceId: 'device-1',
-            folderPath: 'Projects',
           ),
-        ],
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: NotesHomePage(
-            createNote: CreateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            createFolder: CreateFolder(repository: folderRepository),
-            deleteFolder: DeleteFolder(repository: folderRepository),
-            renameFolder: RenameFolder(repository: folderRepository),
-            moveNote: MoveNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            deleteNote: DeleteNote(repository: noteRepository),
-            restoreNote: RestoreNote(repository: noteRepository),
-            searchNotes: SearchNotes(repository: noteRepository),
-            folderRepository: folderRepository,
-            noteRepository: noteRepository,
-            authController: AuthController(authService: _FakeAuthService()),
-            syncController: SyncController(
-              runManualSync: RunManualSync(
-                noteRepository: noteRepository,
-                syncGateway: _FakeSyncGateway(),
-                syncStateRepository: _FakeSyncStateRepository(),
-              ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
             ),
           ),
         ),
-      );
+      ),
+    );
 
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
 
-      await tester.tap(
-        find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
-      );
-      await tester.pump();
+    await tester.tap(
+      find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+    );
+    await tester.pump();
 
-      expect(find.byTooltip('Pending sync'), findsOneWidget);
-    },
-  );
+    expect(find.byTooltip('Pending sync'), findsOneWidget);
+  });
 
   testWidgets(
     'mobile note long press opens move sheet and updates the note folder',
@@ -2034,258 +2027,15 @@ void main() {
 
       await tester.tap(find.byTooltip('Folders'));
       await tester.pumpAndSettle();
-      await tester
-          .tap(find.byKey(const ValueKey('sidebar-folder-toggle-Projects')));
-      await tester.pumpAndSettle();
-      await tester.longPress(find.byKey(const ValueKey('sidebar-note-note-1')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Move to folder'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const ValueKey('move-note-folder-Archive')));
-      await tester.pumpAndSettle();
-
-      expect(noteRepository.updatedNotes, hasLength(1));
-      expect(noteRepository.updatedNotes.single.folderPath, 'Archive');
-    },
-  );
-
-  testWidgets(
-    'folder menu offers rename and updates folder path state',
-    (tester) async {
-      tester.view.physicalSize = const Size(1400, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-
-      final folderRepository = _FakeFolderRepository(
-        initialFolders: [
-          Folder(
-            path: 'Projects',
-            parentPath: null,
-            createdAt: DateTime(2026, 1, 1),
-          ),
-        ],
-      );
-      final noteRepository = _FakeNoteRepository();
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: NotesHomePage(
-            createNote: CreateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            createFolder: CreateFolder(repository: folderRepository),
-            deleteFolder: DeleteFolder(repository: folderRepository),
-            renameFolder: RenameFolder(repository: folderRepository),
-            moveNote: MoveNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            deleteNote: DeleteNote(repository: noteRepository),
-            restoreNote: RestoreNote(repository: noteRepository),
-            searchNotes: SearchNotes(repository: noteRepository),
-            folderRepository: folderRepository,
-            noteRepository: noteRepository,
-            authController: AuthController(authService: _FakeAuthService()),
-            syncController: SyncController(
-              runManualSync: RunManualSync(
-                noteRepository: noteRepository,
-                syncGateway: _FakeSyncGateway(),
-                syncStateRepository: _FakeSyncStateRepository(),
-              ),
-            ),
-          ),
-        ),
-      );
-
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
-
-      await tester.tap(find.byTooltip('Folder actions'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Rename').last);
-      await tester.pumpAndSettle();
-
-      await tester.enterText(find.byType(TextFormField).last, 'Archive');
-      await tester.tap(find.text('Rename').last);
-      await tester.pumpAndSettle();
-
-      expect(folderRepository.renamedPaths, [('Projects', 'Archive')]);
-    },
-  );
-
-  testWidgets(
-    'folder menu offers move',
-    (tester) async {
-      tester.view.physicalSize = const Size(1400, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-
-      final folderRepository = _FakeFolderRepository(
-        initialFolders: [
-          Folder(
-            path: 'Projects',
-            parentPath: null,
-            createdAt: DateTime(2026, 1, 1),
-          ),
-          Folder(
-            path: 'Archive',
-            parentPath: null,
-            createdAt: DateTime(2026, 1, 1),
-          ),
-        ],
-      );
-      final noteRepository = _FakeNoteRepository();
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: NotesHomePage(
-            createNote: CreateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            createFolder: CreateFolder(repository: folderRepository),
-            deleteFolder: DeleteFolder(repository: folderRepository),
-            renameFolder: RenameFolder(repository: folderRepository),
-            moveNote: MoveNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            deleteNote: DeleteNote(repository: noteRepository),
-            restoreNote: RestoreNote(repository: noteRepository),
-            searchNotes: SearchNotes(repository: noteRepository),
-            folderRepository: folderRepository,
-            noteRepository: noteRepository,
-            authController: AuthController(authService: _FakeAuthService()),
-            syncController: SyncController(
-              runManualSync: RunManualSync(
-                noteRepository: noteRepository,
-                syncGateway: _FakeSyncGateway(),
-                syncStateRepository: _FakeSyncStateRepository(),
-              ),
-            ),
-          ),
-        ),
-      );
-
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
-
-      await tester
-          .tap(find.byKey(const ValueKey('sidebar-folder-tile-Projects')));
-      await tester.pumpAndSettle();
-
       await tester.tap(
-        find.descendant(
-          of: find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
-          matching: find.byTooltip('Folder actions'),
-        ),
+        find.byKey(const ValueKey('sidebar-folder-toggle-Projects')),
       );
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Move').last);
-      await tester.pumpAndSettle();
-
-      expect(find.text('Move folder'), findsOneWidget);
-      expect(find.byType(TextFormField), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'mobile drawer note long press opens the mobile move flow',
-    (tester) async {
-      tester.view.physicalSize = const Size(430, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-
-      final folderRepository = _FakeFolderRepository(
-        initialFolders: [
-          Folder(
-            path: 'Projects',
-            parentPath: null,
-            createdAt: DateTime(2026, 1, 1),
-          ),
-          Folder(
-            path: 'Archive',
-            parentPath: null,
-            createdAt: DateTime(2026, 1, 1),
-          ),
-        ],
-      );
-      final noteRepository = _FakeNoteRepository(
-        initialActiveNotes: [
-          Note(
-            id: 'note-1',
-            title: 'Roadmap',
-            content: 'Plan the next release',
-            createdAt: DateTime(2026, 1, 1),
-            updatedAt: DateTime(2026, 1, 2),
-            syncStatus: SyncStatus.synced,
-            contentHash: 'hash-1',
-            deviceId: 'device-1',
-            folderPath: 'Projects',
-          ),
-        ],
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: NotesHomePage(
-            createNote: CreateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            createFolder: CreateFolder(repository: folderRepository),
-            deleteFolder: DeleteFolder(repository: folderRepository),
-            renameFolder: RenameFolder(repository: folderRepository),
-            moveNote: MoveNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            deleteNote: DeleteNote(repository: noteRepository),
-            restoreNote: RestoreNote(repository: noteRepository),
-            searchNotes: SearchNotes(repository: noteRepository),
-            folderRepository: folderRepository,
-            noteRepository: noteRepository,
-            authController: AuthController(authService: _FakeAuthService()),
-            syncController: SyncController(
-              runManualSync: RunManualSync(
-                noteRepository: noteRepository,
-                syncGateway: _FakeSyncGateway(),
-                syncStateRepository: _FakeSyncStateRepository(),
-              ),
-            ),
-          ),
-        ),
-      );
-
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
-
-      await tester.tap(find.byTooltip('Folders'));
-      await tester.pumpAndSettle();
-      await tester
-          .tap(find.byKey(const ValueKey('sidebar-folder-tile-Projects')));
       await tester.pumpAndSettle();
       await tester.longPress(find.byKey(const ValueKey('sidebar-note-note-1')));
       await tester.pumpAndSettle();
-
-      expect(find.text('Move to folder'), findsOneWidget);
-
       await tester.tap(find.text('Move to folder'));
       await tester.pumpAndSettle();
+
       await tester.tap(find.byKey(const ValueKey('move-note-folder-Archive')));
       await tester.pumpAndSettle();
 
@@ -2294,91 +2044,320 @@ void main() {
     },
   );
 
-  testWidgets(
-    'desktop sidebar supports dragging a note into a folder',
-    (tester) async {
-      tester.view.physicalSize = const Size(1400, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
+  testWidgets('folder menu offers rename and updates folder path state', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
 
-      final folderRepository = _FakeFolderRepository(
-        initialFolders: [
-          Folder(
-            path: 'Projects',
-            parentPath: null,
-            createdAt: DateTime(2026, 1, 1),
-          ),
-        ],
-      );
-      final noteRepository = _FakeNoteRepository(
-        initialActiveNotes: [
-          Note(
-            id: 'note-1',
-            title: 'Roadmap',
-            content: 'Plan the next release',
-            createdAt: DateTime(2026, 1, 1),
-            updatedAt: DateTime(2026, 1, 2),
-            syncStatus: SyncStatus.synced,
-            contentHash: 'hash-1',
+    final folderRepository = _FakeFolderRepository(
+      initialFolders: [
+        Folder(
+          path: 'Projects',
+          parentPath: null,
+          createdAt: DateTime(2026, 1, 1),
+        ),
+      ],
+    );
+    final noteRepository = _FakeNoteRepository();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
             deviceId: 'device-1',
           ),
-        ],
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: NotesHomePage(
-            createNote: CreateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            createFolder: CreateFolder(repository: folderRepository),
-            deleteFolder: DeleteFolder(repository: folderRepository),
-            renameFolder: RenameFolder(repository: folderRepository),
-            moveNote: MoveNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            deleteNote: DeleteNote(repository: noteRepository),
-            restoreNote: RestoreNote(repository: noteRepository),
-            searchNotes: SearchNotes(repository: noteRepository),
-            folderRepository: folderRepository,
-            noteRepository: noteRepository,
-            authController: AuthController(authService: _FakeAuthService()),
-            syncController: SyncController(
-              runManualSync: RunManualSync(
-                noteRepository: noteRepository,
-                syncGateway: _FakeSyncGateway(),
-                syncStateRepository: _FakeSyncStateRepository(),
-              ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
             ),
           ),
         ),
-      );
+      ),
+    );
 
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
 
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.byKey(const ValueKey('sidebar-note-note-1'))),
-        kind: PointerDeviceKind.mouse,
-      );
-      await gesture.moveTo(
-        tester.getCenter(
-            find.byKey(const ValueKey('sidebar-folder-tile-Projects'))),
-      );
-      await tester.pump();
-      await gesture.up();
-      await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Folder actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rename').last);
+    await tester.pumpAndSettle();
 
-      expect(noteRepository.updatedNotes, hasLength(1));
-      expect(noteRepository.updatedNotes.single.folderPath, 'Projects');
-    },
-  );
+    await tester.enterText(find.byType(TextFormField).last, 'Archive');
+    await tester.tap(find.text('Rename').last);
+    await tester.pumpAndSettle();
+
+    expect(folderRepository.renamedPaths, [('Projects', 'Archive')]);
+  });
+
+  testWidgets('folder menu offers move', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final folderRepository = _FakeFolderRepository(
+      initialFolders: [
+        Folder(
+          path: 'Projects',
+          parentPath: null,
+          createdAt: DateTime(2026, 1, 1),
+        ),
+        Folder(
+          path: 'Archive',
+          parentPath: null,
+          createdAt: DateTime(2026, 1, 1),
+        ),
+      ],
+    );
+    final noteRepository = _FakeNoteRepository();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    await tester.tap(
+      find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+        matching: find.byTooltip('Folder actions'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Move').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Move folder'), findsOneWidget);
+    expect(find.byType(TextFormField), findsOneWidget);
+  });
+
+  testWidgets('mobile drawer note long press opens the mobile move flow', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final folderRepository = _FakeFolderRepository(
+      initialFolders: [
+        Folder(
+          path: 'Projects',
+          parentPath: null,
+          createdAt: DateTime(2026, 1, 1),
+        ),
+        Folder(
+          path: 'Archive',
+          parentPath: null,
+          createdAt: DateTime(2026, 1, 1),
+        ),
+      ],
+    );
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'note-1',
+          title: 'Roadmap',
+          content: 'Plan the next release',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.synced,
+          contentHash: 'hash-1',
+          deviceId: 'device-1',
+          folderPath: 'Projects',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    await tester.tap(find.byTooltip('Folders'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+    );
+    await tester.pumpAndSettle();
+    await tester.longPress(find.byKey(const ValueKey('sidebar-note-note-1')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Move to folder'), findsOneWidget);
+
+    await tester.tap(find.text('Move to folder'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('move-note-folder-Archive')));
+    await tester.pumpAndSettle();
+
+    expect(noteRepository.updatedNotes, hasLength(1));
+    expect(noteRepository.updatedNotes.single.folderPath, 'Archive');
+  });
+
+  testWidgets('desktop sidebar supports dragging a note into a folder', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final folderRepository = _FakeFolderRepository(
+      initialFolders: [
+        Folder(
+          path: 'Projects',
+          parentPath: null,
+          createdAt: DateTime(2026, 1, 1),
+        ),
+      ],
+    );
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'note-1',
+          title: 'Roadmap',
+          content: 'Plan the next release',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.synced,
+          contentHash: 'hash-1',
+          deviceId: 'device-1',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('sidebar-note-note-1'))),
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveTo(
+      tester.getCenter(
+        find.byKey(const ValueKey('sidebar-folder-tile-Projects')),
+      ),
+    );
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(noteRepository.updatedNotes, hasLength(1));
+    expect(noteRepository.updatedNotes.single.folderPath, 'Projects');
+  });
 
   testWidgets(
     'desktop sidebar supports dragging a folder into another folder',
@@ -2443,12 +2422,14 @@ void main() {
 
       final gesture = await tester.startGesture(
         tester.getCenter(
-            find.byKey(const ValueKey('sidebar-folder-drag-Projects'))),
+          find.byKey(const ValueKey('sidebar-folder-drag-Projects')),
+        ),
         kind: PointerDeviceKind.mouse,
       );
       await gesture.moveTo(
         tester.getCenter(
-            find.byKey(const ValueKey('sidebar-folder-tile-Archive'))),
+          find.byKey(const ValueKey('sidebar-folder-tile-Archive')),
+        ),
       );
       await tester.pump();
       await gesture.up();
@@ -2526,235 +2507,217 @@ void main() {
     },
   );
 
-  testWidgets(
-    'folder deletion asks for confirmation before deleting',
-    (tester) async {
-      tester.view.physicalSize = const Size(1400, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
+  testWidgets('folder deletion asks for confirmation before deleting', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
 
-      final folderRepository = _FakeFolderRepository(
-        initialFolders: [
-          Folder(
-            path: 'Projects',
-            parentPath: null,
-            createdAt: DateTime(2026, 1, 1),
-          ),
-        ],
-        deleteImpact: const FolderDeleteImpact(
-          noteCount: 1,
-          childFolderCount: 0,
+    final folderRepository = _FakeFolderRepository(
+      initialFolders: [
+        Folder(
+          path: 'Projects',
+          parentPath: null,
+          createdAt: DateTime(2026, 1, 1),
         ),
-      );
-      final noteRepository = _FakeNoteRepository();
+      ],
+      deleteImpact: const FolderDeleteImpact(noteCount: 1, childFolderCount: 0),
+    );
+    final noteRepository = _FakeNoteRepository();
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: NotesHomePage(
-            createNote: CreateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            createFolder: CreateFolder(repository: folderRepository),
-            deleteFolder: DeleteFolder(repository: folderRepository),
-            renameFolder: RenameFolder(repository: folderRepository),
-            moveNote: MoveNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            deleteNote: DeleteNote(repository: noteRepository),
-            restoreNote: RestoreNote(repository: noteRepository),
-            searchNotes: SearchNotes(repository: noteRepository),
-            folderRepository: folderRepository,
-            noteRepository: noteRepository,
-            authController: AuthController(authService: _FakeAuthService()),
-            syncController: SyncController(
-              runManualSync: RunManualSync(
-                noteRepository: noteRepository,
-                syncGateway: _FakeSyncGateway(),
-                syncStateRepository: _FakeSyncStateRepository(),
-              ),
-            ),
-          ),
-        ),
-      );
-
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
-
-      await tester.tap(find.byTooltip('Folder actions'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Delete').last);
-      await tester.pumpAndSettle();
-
-      expect(find.text('Delete folder?'), findsOneWidget);
-      expect(folderRepository.deletedPaths, isEmpty);
-
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
-
-      expect(folderRepository.deletedPaths, isEmpty);
-
-      await tester.tap(find.byTooltip('Folder actions'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Delete').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Continue'));
-      await tester.pumpAndSettle();
-
-      expect(folderRepository.deletedPaths, ['Projects']);
-    },
-  );
-
-  testWidgets(
-    'empty folder deletes immediately without confirmation',
-    (tester) async {
-      tester.view.physicalSize = const Size(1400, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-
-      final folderRepository = _FakeFolderRepository(
-        initialFolders: [
-          Folder(
-            path: 'Projects',
-            parentPath: null,
-            createdAt: DateTime(2026, 1, 1),
-          ),
-        ],
-        deleteImpact: const FolderDeleteImpact(
-          noteCount: 0,
-          childFolderCount: 0,
-        ),
-      );
-      final noteRepository = _FakeNoteRepository();
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: NotesHomePage(
-            createNote: CreateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            createFolder: CreateFolder(repository: folderRepository),
-            deleteFolder: DeleteFolder(repository: folderRepository),
-            renameFolder: RenameFolder(repository: folderRepository),
-            moveNote: MoveNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            deleteNote: DeleteNote(repository: noteRepository),
-            restoreNote: RestoreNote(repository: noteRepository),
-            searchNotes: SearchNotes(repository: noteRepository),
-            folderRepository: folderRepository,
-            noteRepository: noteRepository,
-            authController: AuthController(authService: _FakeAuthService()),
-            syncController: SyncController(
-              runManualSync: RunManualSync(
-                noteRepository: noteRepository,
-                syncGateway: _FakeSyncGateway(),
-                syncStateRepository: _FakeSyncStateRepository(),
-              ),
-            ),
-          ),
-        ),
-      );
-
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
-
-      await tester.tap(find.byTooltip('Folder actions'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Delete').last);
-      await tester.pumpAndSettle();
-
-      expect(find.text('Delete folder?'), findsNothing);
-      expect(folderRepository.deletedPaths, ['Projects']);
-      expect(folderRepository.lastDeleteWasRecursive, isFalse);
-    },
-  );
-
-  testWidgets(
-    'note delete snackbar disappears after a few seconds',
-    (tester) async {
-      final noteRepository = _FakeNoteRepository(
-        initialActiveNotes: [
-          Note(
-            id: 'note-1',
-            title: 'Roadmap',
-            content: 'Plan the next release',
-            createdAt: DateTime(2026, 1, 1),
-            updatedAt: DateTime(2026, 1, 2),
-            syncStatus: SyncStatus.synced,
-            contentHash: 'hash-1',
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
             deviceId: 'device-1',
           ),
-        ],
-      );
-      final folderRepository = _FakeFolderRepository();
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: NotesHomePage(
-            createNote: CreateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            createFolder: CreateFolder(repository: folderRepository),
-            deleteFolder: DeleteFolder(repository: folderRepository),
-            renameFolder: RenameFolder(repository: folderRepository),
-            moveNote: MoveNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            deleteNote: DeleteNote(repository: noteRepository),
-            restoreNote: RestoreNote(repository: noteRepository),
-            searchNotes: SearchNotes(repository: noteRepository),
-            folderRepository: folderRepository,
-            noteRepository: noteRepository,
-            authController: AuthController(authService: _FakeAuthService()),
-            syncController: SyncController(
-              runManualSync: RunManualSync(
-                noteRepository: noteRepository,
-                syncGateway: _FakeSyncGateway(),
-                syncStateRepository: _FakeSyncStateRepository(),
-              ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
             ),
           ),
         ),
-      );
+      ),
+    );
 
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
 
-      await tester.tap(find.byTooltip('Folders'));
-      await tester.pumpAndSettle();
-      await tester.longPress(find.byKey(const ValueKey('sidebar-note-note-1')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Delete'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Folder actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete').last);
+    await tester.pumpAndSettle();
 
-      expect(find.text('"Roadmap" deleted'), findsOneWidget);
-      expect(find.text('Undo'), findsOneWidget);
+    expect(find.text('Delete folder?'), findsOneWidget);
+    expect(folderRepository.deletedPaths, isEmpty);
 
-      await tester.pump(const Duration(seconds: 5));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
 
-      expect(find.text('"Roadmap" deleted'), findsNothing);
-      expect(find.text('Undo'), findsNothing);
-    },
-  );
+    expect(folderRepository.deletedPaths, isEmpty);
+
+    await tester.tap(find.byTooltip('Folder actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
+    expect(folderRepository.deletedPaths, ['Projects']);
+  });
+
+  testWidgets('empty folder deletes immediately without confirmation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final folderRepository = _FakeFolderRepository(
+      initialFolders: [
+        Folder(
+          path: 'Projects',
+          parentPath: null,
+          createdAt: DateTime(2026, 1, 1),
+        ),
+      ],
+      deleteImpact: const FolderDeleteImpact(noteCount: 0, childFolderCount: 0),
+    );
+    final noteRepository = _FakeNoteRepository();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    await tester.tap(find.byTooltip('Folder actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete folder?'), findsNothing);
+    expect(folderRepository.deletedPaths, ['Projects']);
+    expect(folderRepository.lastDeleteWasRecursive, isFalse);
+  });
+
+  testWidgets('note delete snackbar disappears after a few seconds', (
+    tester,
+  ) async {
+    final noteRepository = _FakeNoteRepository(
+      initialActiveNotes: [
+        Note(
+          id: 'note-1',
+          title: 'Roadmap',
+          content: 'Plan the next release',
+          createdAt: DateTime(2026, 1, 1),
+          updatedAt: DateTime(2026, 1, 2),
+          syncStatus: SyncStatus.synced,
+          contentHash: 'hash-1',
+          deviceId: 'device-1',
+        ),
+      ],
+    );
+    final folderRepository = _FakeFolderRepository();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    await tester.tap(find.byTooltip('Folders'));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.byKey(const ValueKey('sidebar-note-note-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('"Roadmap" deleted'), findsOneWidget);
+    expect(find.text('Undo'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    expect(find.text('"Roadmap" deleted'), findsNothing);
+    expect(find.text('Undo'), findsNothing);
+  });
 
   testWidgets(
     'successful sync without conflicts does not show a result notice',
@@ -2792,8 +2755,9 @@ void main() {
             searchNotes: SearchNotes(repository: noteRepository),
             folderRepository: folderRepository,
             noteRepository: noteRepository,
-            authController:
-                AuthController(authService: _SignedInFakeAuthService()),
+            authController: AuthController(
+              authService: _SignedInFakeAuthService(),
+            ),
             syncController: syncController,
           ),
         ),
@@ -2817,8 +2781,9 @@ void main() {
 
     final noteRepository = _FakeNoteRepository();
     final folderRepository = _FakeFolderRepository();
-    final authController =
-        AuthController(authService: _SignedInFakeAuthService());
+    final authController = AuthController(
+      authService: _SignedInFakeAuthService(),
+    );
     await authController.restore();
     final runManualSync = _RecordingRunManualSync();
 
@@ -2832,10 +2797,7 @@ void main() {
           createFolder: CreateFolder(repository: folderRepository),
           deleteFolder: DeleteFolder(repository: folderRepository),
           renameFolder: RenameFolder(repository: folderRepository),
-          moveNote: MoveNote(
-            repository: noteRepository,
-            deviceId: 'device-1',
-          ),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
           updateNote: UpdateNote(
             repository: noteRepository,
             deviceId: 'device-1',
@@ -2860,6 +2822,116 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(runManualSync.callCount, 1);
+  });
+
+  testWidgets('desktop overflow menu exposes AI API keys', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await _pumpNotesHome(
+      tester,
+      noteRepository: _FakeNoteRepository(),
+      noteAiService: _FakeNoteAiService(),
+    );
+
+    await tester.tap(find.byTooltip('More app actions'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('AI API keys'), findsOneWidget);
+  });
+
+  testWidgets('mobile overflow menu exposes AI API keys', (tester) async {
+    tester.view.physicalSize = const Size(430, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await _pumpNotesHome(
+      tester,
+      noteRepository: _FakeNoteRepository(),
+      noteAiService: _FakeNoteAiService(),
+    );
+
+    await tester.tap(find.byTooltip('More app actions'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('AI API keys'), findsOneWidget);
+  });
+
+  testWidgets('desktop AI API keys sheet updates both keys', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final noteAiService = _FakeNoteAiService(
+      hasTranscriptionKey: true,
+      hasSummaryKey: true,
+    );
+    await _pumpNotesHome(
+      tester,
+      noteRepository: _FakeNoteRepository(),
+      noteAiService: noteAiService,
+    );
+
+    await tester.tap(find.byTooltip('More app actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('AI API keys'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('AI API keys'), findsOneWidget);
+    expect(find.text('Configured'), findsNWidgets(2));
+
+    await tester.enterText(find.byType(TextField).at(0), 'openai-new');
+    await tester.enterText(find.byType(TextField).at(1), 'deepseek-new');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(noteAiService.savedTranscriptionApiKey, 'openai-new');
+    expect(noteAiService.savedSummaryApiKey, 'deepseek-new');
+    expect(find.text('AI API keys updated.'), findsOneWidget);
+  });
+
+  testWidgets('mobile AI API keys sheet can update one key', (tester) async {
+    tester.view.physicalSize = const Size(430, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final noteAiService = _FakeNoteAiService(
+      hasTranscriptionKey: true,
+      hasSummaryKey: true,
+    );
+    await _pumpNotesHome(
+      tester,
+      noteRepository: _FakeNoteRepository(),
+      noteAiService: noteAiService,
+    );
+
+    await tester.tap(find.byTooltip('More app actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('AI API keys'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).at(0), 'openai-only');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(noteAiService.savedTranscriptionApiKey, 'openai-only');
+    expect(noteAiService.savedSummaryApiKey, isNull);
+  });
+
+  testWidgets('AI API keys menu reports missing AI service', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await _pumpNotesHome(tester, noteRepository: _FakeNoteRepository());
+
+    await tester.tap(find.byTooltip('More app actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('AI API keys'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('AI transcription is not configured.'), findsOneWidget);
   });
 
   testWidgets(
@@ -2918,79 +2990,77 @@ void main() {
 
       expect(find.text('Trash is empty.'), findsOneWidget);
       expect(
-          find.widgetWithText(FloatingActionButton, 'New note'), findsNothing);
+        find.widgetWithText(FloatingActionButton, 'New note'),
+        findsNothing,
+      );
     },
   );
 
-  testWidgets(
-    'desktop empty workspace context menu can create a folder',
-    (tester) async {
-      tester.view.physicalSize = const Size(1400, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
+  testWidgets('desktop empty workspace context menu can create a folder', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
 
-      final noteRepository = _FakeNoteRepository();
-      final folderRepository = _FakeFolderRepository();
+    final noteRepository = _FakeNoteRepository();
+    final folderRepository = _FakeFolderRepository();
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: NotesHomePage(
-            createNote: CreateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            createFolder: CreateFolder(repository: folderRepository),
-            deleteFolder: DeleteFolder(repository: folderRepository),
-            renameFolder: RenameFolder(repository: folderRepository),
-            moveNote: MoveNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            updateNote: UpdateNote(
-              repository: noteRepository,
-              deviceId: 'device-1',
-            ),
-            deleteNote: DeleteNote(repository: noteRepository),
-            restoreNote: RestoreNote(repository: noteRepository),
-            searchNotes: SearchNotes(repository: noteRepository),
-            folderRepository: folderRepository,
-            noteRepository: noteRepository,
-            authController: AuthController(authService: _FakeAuthService()),
-            syncController: SyncController(
-              runManualSync: RunManualSync(
-                noteRepository: noteRepository,
-                syncGateway: _FakeSyncGateway(),
-                syncStateRepository: _FakeSyncStateRepository(),
-              ),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesHomePage(
+          createNote: CreateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          createFolder: CreateFolder(repository: folderRepository),
+          deleteFolder: DeleteFolder(repository: folderRepository),
+          renameFolder: RenameFolder(repository: folderRepository),
+          moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
+          updateNote: UpdateNote(
+            repository: noteRepository,
+            deviceId: 'device-1',
+          ),
+          deleteNote: DeleteNote(repository: noteRepository),
+          restoreNote: RestoreNote(repository: noteRepository),
+          searchNotes: SearchNotes(repository: noteRepository),
+          folderRepository: folderRepository,
+          noteRepository: noteRepository,
+          authController: AuthController(authService: _FakeAuthService()),
+          syncController: SyncController(
+            runManualSync: RunManualSync(
+              noteRepository: noteRepository,
+              syncGateway: _FakeSyncGateway(),
+              syncStateRepository: _FakeSyncStateRepository(),
             ),
           ),
         ),
-      );
+      ),
+    );
 
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
 
-      final emptyWorkspace = find.byKey(
-        const ValueKey('desktop-sidebar-empty-space'),
-      );
-      final gesture = await tester.startGesture(
-        tester.getCenter(emptyWorkspace),
-        kind: PointerDeviceKind.mouse,
-        buttons: kSecondaryMouseButton,
-      );
-      await gesture.up();
-      await tester.pumpAndSettle();
+    final emptyWorkspace = find.byKey(
+      const ValueKey('desktop-sidebar-empty-space'),
+    );
+    final gesture = await tester.startGesture(
+      tester.getCenter(emptyWorkspace),
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.text('New folder'));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField).last, 'Projects');
-      await tester.tap(find.text('Create'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('New folder'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'Projects');
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
 
-      expect(folderRepository.createdPaths, contains('Projects'));
-      expect(find.text('Projects'), findsAtLeastNWidgets(1));
-    },
-  );
+    expect(folderRepository.createdPaths, contains('Projects'));
+    expect(find.text('Projects'), findsAtLeastNWidgets(1));
+  });
 
   testWidgets(
     'desktop sidebar empty space opens root menu even when notes exist',
@@ -3074,6 +3144,7 @@ Future<void> _pumpNotesHome(
   WidgetTester tester, {
   required _FakeNoteRepository noteRepository,
   _FakeFolderRepository? folderRepository,
+  NoteAiService? noteAiService,
 }) async {
   final resolvedFolderRepository = folderRepository ?? _FakeFolderRepository();
 
@@ -3087,10 +3158,7 @@ Future<void> _pumpNotesHome(
         createFolder: CreateFolder(repository: resolvedFolderRepository),
         deleteFolder: DeleteFolder(repository: resolvedFolderRepository),
         renameFolder: RenameFolder(repository: resolvedFolderRepository),
-        moveNote: MoveNote(
-          repository: noteRepository,
-          deviceId: 'device-1',
-        ),
+        moveNote: MoveNote(repository: noteRepository, deviceId: 'device-1'),
         updateNote: UpdateNote(
           repository: noteRepository,
           deviceId: 'device-1',
@@ -3100,6 +3168,7 @@ Future<void> _pumpNotesHome(
         searchNotes: SearchNotes(repository: noteRepository),
         folderRepository: resolvedFolderRepository,
         noteRepository: noteRepository,
+        noteAiService: noteAiService,
         authController: AuthController(authService: _FakeAuthService()),
         syncController: SyncController(
           runManualSync: RunManualSync(
@@ -3125,7 +3194,8 @@ class _FakeAuthService implements AuthService {
 
   @override
   Future<AuthSession> saveConnection(
-          SyncAccountCredentials credentials) async =>
+    SyncAccountCredentials credentials,
+  ) async =>
       const AuthSession(email: 'test@example.com', displayName: 'Test');
 
   @override
@@ -3142,11 +3212,45 @@ class _SignedInFakeAuthService implements AuthService {
 
   @override
   Future<AuthSession> saveConnection(
-          SyncAccountCredentials credentials) async =>
+    SyncAccountCredentials credentials,
+  ) async =>
       const AuthSession(email: 'test@example.com', displayName: 'Test');
 
   @override
   Future<void> clearConnection() async {}
+}
+
+class _FakeNoteAiService implements NoteAiService {
+  _FakeNoteAiService({
+    this.hasTranscriptionKey = false,
+    this.hasSummaryKey = false,
+  });
+
+  final bool hasTranscriptionKey;
+  final bool hasSummaryKey;
+  String? savedTranscriptionApiKey;
+  String? savedSummaryApiKey;
+
+  @override
+  Future<bool> hasTranscriptionApiKey() async => hasTranscriptionKey;
+
+  @override
+  Future<bool> hasSummaryApiKey() async => hasSummaryKey;
+
+  @override
+  Future<void> saveTranscriptionApiKey(String apiKey) async {
+    savedTranscriptionApiKey = apiKey;
+  }
+
+  @override
+  Future<void> saveSummaryApiKey(String apiKey) async {
+    savedSummaryApiKey = apiKey;
+  }
+
+  @override
+  Future<AiNoteResult> transcribeAndSummarize(File audioFile) async {
+    return const AiNoteResult(transcript: 'Transcript', summary: 'Summary');
+  }
 }
 
 class _FakeFolderRepository implements FolderRepository {
@@ -3181,7 +3285,9 @@ class _FakeFolderRepository implements FolderRepository {
 
   @override
   Future<RenameFolderResult> renameFolder(
-      String oldPath, String newPath) async {
+    String oldPath,
+    String newPath,
+  ) async {
     renamedPaths.add((oldPath, newPath));
     for (var index = 0; index < _folders.length; index++) {
       final folder = _folders[index];
@@ -3276,9 +3382,10 @@ class _FakeNoteRepository implements NoteRepository {
   @override
   Future<List<Note>> getByIds(Iterable<String> ids) async {
     final idSet = ids.toSet();
-    return [..._activeNotes, ..._deletedNotes]
-        .where((note) => idSet.contains(note.id))
-        .toList(growable: false);
+    return [
+      ..._activeNotes,
+      ..._deletedNotes,
+    ].where((note) => idSet.contains(note.id)).toList(growable: false);
   }
 
   @override
