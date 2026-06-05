@@ -290,9 +290,7 @@ class NotesHomePageState extends State<NotesHomePage> {
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall
-                                    ?.copyWith(
-                                      color: foregroundColor,
-                                    ),
+                                    ?.copyWith(color: foregroundColor),
                               ),
                             ),
                             if (details != null && details != summary) ...[
@@ -367,10 +365,7 @@ class NotesHomePageState extends State<NotesHomePage> {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  summary,
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
+                Text(summary, style: Theme.of(context).textTheme.titleSmall),
                 const SizedBox(height: 12),
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxHeight: 320),
@@ -421,6 +416,8 @@ class NotesHomePageState extends State<NotesHomePage> {
                         await _forceReuploadAllNotes();
                       case _MobileAppMenuAction.account:
                         await _showAccountSheet();
+                      case _MobileAppMenuAction.aiApiKeys:
+                        await _showAiApiKeysSheet();
                       case _MobileAppMenuAction.themeSystem:
                         _setThemeMode(ThemeMode.system);
                       case _MobileAppMenuAction.themeLight:
@@ -447,6 +444,10 @@ class NotesHomePageState extends State<NotesHomePage> {
                     const PopupMenuItem(
                       value: _MobileAppMenuAction.account,
                       child: Text('Account'),
+                    ),
+                    const PopupMenuItem(
+                      value: _MobileAppMenuAction.aiApiKeys,
+                      child: Text('AI API keys'),
                     ),
                     CheckedPopupMenuItem(
                       value: _MobileAppMenuAction.themeSystem,
@@ -571,9 +572,7 @@ class NotesHomePageState extends State<NotesHomePage> {
     );
   }
 
-  Widget _buildAppSyncStatusIndicator({
-    bool compact = false,
-  }) {
+  Widget _buildAppSyncStatusIndicator({bool compact = false}) {
     return AnimatedBuilder(
       animation: Listenable.merge([
         widget.authController,
@@ -672,6 +671,8 @@ class NotesHomePageState extends State<NotesHomePage> {
             await _runSync();
           case _TopBarMenuAction.forceReuploadAllNotes:
             await _forceReuploadAllNotes();
+          case _TopBarMenuAction.aiApiKeys:
+            await _showAiApiKeysSheet();
           case _TopBarMenuAction.themeSystem:
             _setThemeMode(ThemeMode.system);
           case _TopBarMenuAction.themeLight:
@@ -692,6 +693,10 @@ class NotesHomePageState extends State<NotesHomePage> {
         const PopupMenuItem(
           value: _TopBarMenuAction.forceReuploadAllNotes,
           child: Text('Force re-upload all notes'),
+        ),
+        const PopupMenuItem(
+          value: _TopBarMenuAction.aiApiKeys,
+          child: Text('AI API keys'),
         ),
         CheckedPopupMenuItem(
           value: _TopBarMenuAction.themeSystem,
@@ -760,9 +765,7 @@ class NotesHomePageState extends State<NotesHomePage> {
       context: context,
       showDragHandle: true,
       builder: (context) {
-        return AccountSheet(
-          authController: widget.authController,
-        );
+        return AccountSheet(authController: widget.authController);
       },
     );
 
@@ -773,6 +776,39 @@ class NotesHomePageState extends State<NotesHomePage> {
     final error = widget.authController.errorMessage;
     if (error != null) {
       _showTimedSnackBar(error);
+    }
+  }
+
+  Future<void> _showAiApiKeysSheet() async {
+    final aiService = widget.noteAiService;
+    if (aiService == null) {
+      _showTimedSnackBar('AI transcription is not configured.');
+      return;
+    }
+
+    final hasTranscriptionApiKey = await aiService.hasTranscriptionApiKey();
+    final hasSummaryApiKey = await aiService.hasSummaryApiKey();
+    if (!mounted) {
+      return;
+    }
+
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) {
+        return _AiApiKeysSheet(
+          aiService: aiService,
+          hasTranscriptionApiKey: hasTranscriptionApiKey,
+          hasSummaryApiKey: hasSummaryApiKey,
+        );
+      },
+    );
+    if (!mounted) {
+      return;
+    }
+    if (saved == true) {
+      _showTimedSnackBar('AI API keys updated.');
     }
   }
 
@@ -970,9 +1006,7 @@ class NotesHomePageState extends State<NotesHomePage> {
 
   Future<void> _forceReuploadAllNotes() async {
     final prepareAllNotesForSync = widget.prepareAllNotesForSync ??
-        PrepareAllNotesForSync(
-          repository: widget.noteRepository,
-        );
+        PrepareAllNotesForSync(repository: widget.noteRepository);
     final preparedCount = await prepareAllNotesForSync();
     if (!mounted) {
       return;
@@ -1075,9 +1109,7 @@ class NotesHomePageState extends State<NotesHomePage> {
       return;
     }
 
-    _showTimedSnackBar(
-      'Could not open attachments folder: ${directory.path}',
-    );
+    _showTimedSnackBar('Could not open attachments folder: ${directory.path}');
   }
 
   Future<void> _delete(Note note) async {
@@ -1115,7 +1147,9 @@ class NotesHomePageState extends State<NotesHomePage> {
         return;
       }
       await _moveNoteToFolderPath(
-          note, destination.isEmpty ? null : destination);
+        note,
+        destination.isEmpty ? null : destination,
+      );
       return;
     }
 
@@ -1263,9 +1297,7 @@ class NotesHomePageState extends State<NotesHomePage> {
         _showTimedSnackBar(successMessage);
         return true;
       case RenameFolderResult.notFound:
-        _showTimedSnackBar(
-          'Move failed: "${folder.path}" no longer exists',
-        );
+        _showTimedSnackBar('Move failed: "${folder.path}" no longer exists');
         return false;
       case RenameFolderResult.invalidDestination:
         _showTimedSnackBar(
@@ -1281,7 +1313,9 @@ class NotesHomePageState extends State<NotesHomePage> {
   }
 
   Future<void> _moveFolderToParentPath(
-      Folder folder, String? parentPath) async {
+    Folder folder,
+    String? parentPath,
+  ) async {
     final nextPath = _joinFolderPath(parentPath, folder.name);
     if (nextPath == folder.path) {
       return;
@@ -1459,10 +1493,7 @@ class NotesHomePageState extends State<NotesHomePage> {
         behavior: SnackBarBehavior.floating,
         action: actionLabel == null
             ? null
-            : SnackBarAction(
-                label: actionLabel,
-                onPressed: onAction ?? () {},
-              ),
+            : SnackBarAction(label: actionLabel, onPressed: onAction ?? () {}),
       ),
     );
 
@@ -1524,19 +1555,13 @@ class NotesHomePageState extends State<NotesHomePage> {
     final action = await _showPopupMenu<_NoteMenuAction>(
       position: position,
       items: [
-        const PopupMenuItem(
-          value: _NoteMenuAction.open,
-          child: Text('Open'),
-        ),
+        const PopupMenuItem(value: _NoteMenuAction.open, child: Text('Open')),
         if (_isConflictCopy(note))
           const PopupMenuItem(
             value: _NoteMenuAction.resolveConflict,
             child: Text('Resolve conflict'),
           ),
-        const PopupMenuItem(
-          value: _NoteMenuAction.move,
-          child: Text('Move'),
-        ),
+        const PopupMenuItem(value: _NoteMenuAction.move, child: Text('Move')),
         const PopupMenuItem(
           value: _NoteMenuAction.delete,
           child: Text('Delete'),
@@ -1570,10 +1595,7 @@ class NotesHomePageState extends State<NotesHomePage> {
     final action = await _showPopupMenu<_NoteMenuAction>(
       position: position,
       items: const [
-        PopupMenuItem(
-          value: _NoteMenuAction.restore,
-          child: Text('Restore'),
-        ),
+        PopupMenuItem(value: _NoteMenuAction.restore, child: Text('Restore')),
       ],
     );
 
@@ -1884,9 +1906,7 @@ class NotesHomePageState extends State<NotesHomePage> {
               color: colorScheme.outlineVariant.withValues(alpha: 0.65),
             ),
           ],
-          Expanded(
-            child: _buildDesktopContent(),
-          ),
+          Expanded(child: _buildDesktopContent()),
         ],
       ),
     );
@@ -1900,9 +1920,7 @@ class NotesHomePageState extends State<NotesHomePage> {
 
   Widget _buildDesktopEditorPane() {
     if (_desktopEditorSession == null) {
-      return _DesktopEditorPlaceholder(
-        selectedFolderPath: _selectedFolderPath,
-      );
+      return _DesktopEditorPlaceholder(selectedFolderPath: _selectedFolderPath);
     }
 
     final session = _desktopEditorSession!;
@@ -2019,10 +2037,7 @@ class _DesktopEditorSession {
   final Note? note;
   final String? initialFolderPath;
 
-  _DesktopEditorSession copyWith({
-    Note? note,
-    String? initialFolderPath,
-  }) {
+  _DesktopEditorSession copyWith({Note? note, String? initialFolderPath}) {
     return _DesktopEditorSession(
       sessionId: sessionId,
       note: note ?? this.note,
@@ -2032,9 +2047,7 @@ class _DesktopEditorSession {
 }
 
 class _DesktopEditorPlaceholder extends StatelessWidget {
-  const _DesktopEditorPlaceholder({
-    required this.selectedFolderPath,
-  });
+  const _DesktopEditorPlaceholder({required this.selectedFolderPath});
 
   final String? selectedFolderPath;
 
@@ -2197,17 +2210,17 @@ class _DesktopSidebarTree extends StatelessWidget {
                             width: 30,
                             height: 30,
                             decoration: BoxDecoration(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .primaryContainer,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.primaryContainer,
                               borderRadius: BorderRadius.circular(9),
                             ),
                             child: Icon(
                               Icons.edit_note_rounded,
                               size: 18,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onPrimaryContainer,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onPrimaryContainer,
                             ),
                           ),
                           const SizedBox(width: 10),
@@ -2221,9 +2234,7 @@ class _DesktopSidebarTree extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Expanded(
-                    child: content,
-                  ),
+                  Expanded(child: content),
                 ],
               );
             },
@@ -2780,7 +2791,8 @@ class _SidebarFolderTile extends StatelessWidget {
                         child: hasChildren
                             ? IconButton(
                                 key: ValueKey(
-                                    'sidebar-folder-toggle-${folder.path}'),
+                                  'sidebar-folder-toggle-${folder.path}',
+                                ),
                                 onPressed: onToggleExpanded,
                                 tooltip: expanded
                                     ? 'Collapse folder'
@@ -2897,18 +2909,9 @@ class _SidebarFolderTile extends StatelessWidget {
           value: _FolderMenuAction.createFolder,
           child: Text('New folder'),
         ),
-        PopupMenuItem(
-          value: _FolderMenuAction.move,
-          child: Text('Move'),
-        ),
-        PopupMenuItem(
-          value: _FolderMenuAction.rename,
-          child: Text('Rename'),
-        ),
-        PopupMenuItem(
-          value: _FolderMenuAction.delete,
-          child: Text('Delete'),
-        ),
+        PopupMenuItem(value: _FolderMenuAction.move, child: Text('Move')),
+        PopupMenuItem(value: _FolderMenuAction.rename, child: Text('Rename')),
+        PopupMenuItem(value: _FolderMenuAction.delete, child: Text('Delete')),
       ],
     );
 
@@ -3053,10 +3056,7 @@ class _SidebarNoteTile extends StatelessWidget {
           child: buildTile(),
         ),
       ),
-      childWhenDragging: Opacity(
-        opacity: 0.55,
-        child: buildTile(),
-      ),
+      childWhenDragging: Opacity(opacity: 0.55, child: buildTile()),
       child: buildTile(),
     );
   }
@@ -3103,9 +3103,7 @@ class _SidebarTreeGuide extends StatelessWidget {
 }
 
 class _SidebarNoteSyncIndicator extends StatelessWidget {
-  const _SidebarNoteSyncIndicator({
-    required this.status,
-  });
+  const _SidebarNoteSyncIndicator({required this.status});
 
   final SyncStatus status;
 
@@ -3137,11 +3135,7 @@ class _SidebarNoteSyncIndicator extends StatelessWidget {
 
     return Tooltip(
       message: tooltip,
-      child: Icon(
-        icon,
-        size: 16,
-        color: color,
-      ),
+      child: Icon(icon, size: 16, color: color),
     );
   }
 }
@@ -3149,6 +3143,7 @@ class _SidebarNoteSyncIndicator extends StatelessWidget {
 enum _TopBarMenuAction {
   syncNow,
   forceReuploadAllNotes,
+  aiApiKeys,
   themeSystem,
   themeLight,
   themeDark,
@@ -3230,16 +3225,19 @@ class _NotesList extends StatelessWidget {
                   child: Container(
                     decoration: BoxDecoration(
                       color: isConflictCopy
-                          ? colorScheme.tertiaryContainer
-                              .withValues(alpha: 0.36)
+                          ? colorScheme.tertiaryContainer.withValues(
+                              alpha: 0.36,
+                            )
                           : mobileLayout
                               ? colorScheme.surface
                               : colorScheme.surfaceContainerLow,
-                      borderRadius:
-                          BorderRadius.circular(mobileLayout ? 18 : 14),
+                      borderRadius: BorderRadius.circular(
+                        mobileLayout ? 18 : 14,
+                      ),
                       border: Border.all(
-                        color: colorScheme.outlineVariant
-                            .withValues(alpha: mobileLayout ? 0.45 : 0.55),
+                        color: colorScheme.outlineVariant.withValues(
+                          alpha: mobileLayout ? 0.45 : 0.55,
+                        ),
                       ),
                       boxShadow: mobileLayout
                           ? [
@@ -3331,8 +3329,9 @@ class _NotesList extends StatelessWidget {
                             ],
                           )
                         : ListTile(
-                            hoverColor:
-                                colorScheme.primary.withValues(alpha: 0.18),
+                            hoverColor: colorScheme.primary.withValues(
+                              alpha: 0.18,
+                            ),
                             contentPadding: EdgeInsets.zero,
                             title: Row(
                               children: [
@@ -3341,8 +3340,9 @@ class _NotesList extends StatelessWidget {
                                     title,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style:
-                                        Theme.of(context).textTheme.titleMedium,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleMedium,
                                   ),
                                 ),
                                 const SizedBox(width: 8),
@@ -3376,8 +3376,9 @@ class _NotesList extends StatelessWidget {
                                     secondaryLine,
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
-                                    style:
-                                        Theme.of(context).textTheme.bodySmall,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodySmall,
                                   ),
                                 ],
                               ),
@@ -3448,10 +3449,9 @@ class _MobileChromeSurface extends StatelessWidget {
         color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: Theme.of(context)
-              .colorScheme
-              .outlineVariant
-              .withValues(alpha: 0.65),
+          color: Theme.of(
+            context,
+          ).colorScheme.outlineVariant.withValues(alpha: 0.65),
         ),
         boxShadow: [
           BoxShadow(
@@ -3461,10 +3461,7 @@ class _MobileChromeSurface extends StatelessWidget {
           ),
         ],
       ),
-      child: Padding(
-        padding: padding,
-        child: child,
-      ),
+      child: Padding(padding: padding, child: child),
     );
   }
 }
@@ -3473,12 +3470,175 @@ enum _MobileAppMenuAction {
   syncNow,
   forceReuploadAllNotes,
   account,
+  aiApiKeys,
   themeSystem,
   themeLight,
   themeDark,
   noteTextSize,
   importObsidianNotes,
   showAttachmentsFolder,
+}
+
+class _AiApiKeysSheet extends StatefulWidget {
+  const _AiApiKeysSheet({
+    required this.aiService,
+    required this.hasTranscriptionApiKey,
+    required this.hasSummaryApiKey,
+  });
+
+  final NoteAiService aiService;
+  final bool hasTranscriptionApiKey;
+  final bool hasSummaryApiKey;
+
+  @override
+  State<_AiApiKeysSheet> createState() => _AiApiKeysSheetState();
+}
+
+class _AiApiKeysSheetState extends State<_AiApiKeysSheet> {
+  final TextEditingController _openAiController = TextEditingController();
+  final TextEditingController _deepSeekController = TextEditingController();
+  bool _isSaving = false;
+  String? _errorMessage;
+
+  @override
+  void dispose() {
+    _openAiController.dispose();
+    _deepSeekController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveKeys() async {
+    final openAiKey = _openAiController.text.trim();
+    final deepSeekKey = _deepSeekController.text.trim();
+    if (openAiKey.isEmpty && deepSeekKey.isEmpty) {
+      Navigator.of(context).pop(false);
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+      _errorMessage = null;
+    });
+
+    try {
+      if (openAiKey.isNotEmpty) {
+        await widget.aiService.saveTranscriptionApiKey(openAiKey);
+      }
+      if (deepSeekKey.isNotEmpty) {
+        await widget.aiService.saveSummaryApiKey(deepSeekKey);
+      }
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isSaving = false;
+        _errorMessage = 'Could not save AI API keys.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(20, 8, 20, 28 + bottomInset),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'AI API keys',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 16),
+            _AiApiKeyField(
+              controller: _openAiController,
+              label: 'OpenAI transcription key',
+              isConfigured: widget.hasTranscriptionApiKey,
+              enabled: !_isSaving,
+              onSubmitted: (_) => _saveKeys(),
+            ),
+            const SizedBox(height: 16),
+            _AiApiKeyField(
+              controller: _deepSeekController,
+              label: 'DeepSeek summary key',
+              isConfigured: widget.hasSummaryApiKey,
+              enabled: !_isSaving,
+              onSubmitted: (_) => _saveKeys(),
+            ),
+            if (_errorMessage != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _errorMessage!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed:
+                      _isSaving ? null : () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _isSaving ? null : _saveKeys,
+                  child: _isSaving
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Save'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AiApiKeyField extends StatelessWidget {
+  const _AiApiKeyField({
+    required this.controller,
+    required this.label,
+    required this.isConfigured,
+    required this.enabled,
+    required this.onSubmitted,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final bool isConfigured;
+  final bool enabled;
+  final ValueChanged<String> onSubmitted;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      enabled: enabled,
+      obscureText: true,
+      decoration: InputDecoration(
+        labelText: label,
+        helperText: isConfigured ? 'Configured' : 'Not configured',
+        border: const OutlineInputBorder(),
+      ),
+      textInputAction: TextInputAction.done,
+      onSubmitted: enabled ? onSubmitted : null,
+    );
+  }
 }
 
 class _AppSyncStatusChip extends StatelessWidget {
@@ -3627,10 +3787,7 @@ class _AppSyncStatusChip extends StatelessWidget {
 }
 
 class _SyncStatusChip extends StatelessWidget {
-  const _SyncStatusChip({
-    required this.status,
-    this.compact = false,
-  });
+  const _SyncStatusChip({required this.status, this.compact = false});
 
   final SyncStatus status;
   final bool compact;
@@ -3677,11 +3834,7 @@ class _SyncStatusChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: compact ? 14 : 15,
-            color: foregroundColor,
-          ),
+          Icon(icon, size: compact ? 14 : 15, color: foregroundColor),
           const SizedBox(width: 6),
           Text(
             label,
@@ -3719,11 +3872,7 @@ class _TopBarEditorStatusBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 15,
-            color: color,
-          ),
+          Icon(icon, size: 15, color: color),
           const SizedBox(width: 6),
           Text(
             label,
@@ -3820,10 +3969,7 @@ class _MobileActionTile extends StatelessWidget {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 12),
       leading: Icon(icon, color: color),
-      title: Text(
-        label,
-        style: color == null ? null : TextStyle(color: color),
-      ),
+      title: Text(label, style: color == null ? null : TextStyle(color: color)),
       onTap: onTap,
     );
   }
@@ -3932,10 +4078,7 @@ class _ConflictResolutionSheet extends StatelessWidget {
                 ),
               ),
               if (originalNote != null)
-                _ConflictVersionSummary(
-                  label: 'Original',
-                  note: originalNote,
-                ),
+                _ConflictVersionSummary(label: 'Original', note: originalNote),
               _ConflictVersionSummary(
                 label: 'Preserved conflict copy',
                 note: conflictNote,
@@ -3951,32 +4094,34 @@ class _ConflictResolutionSheet extends StatelessWidget {
               _MobileActionTile(
                 icon: Icons.open_in_new,
                 label: 'Open conflict copy',
-                onTap: () => Navigator.of(context).pop(
-                  _ConflictResolutionAction.openConflictCopy,
-                ),
+                onTap: () => Navigator.of(
+                  context,
+                ).pop(_ConflictResolutionAction.openConflictCopy),
               ),
               if (originalNote != null)
                 _MobileActionTile(
                   icon: Icons.article_outlined,
                   label: 'Open original',
-                  onTap: () => Navigator.of(context)
-                      .pop(_ConflictResolutionAction.openOriginal),
+                  onTap: () => Navigator.of(
+                    context,
+                  ).pop(_ConflictResolutionAction.openOriginal),
                 ),
               if (originalNote != null)
                 _MobileActionTile(
                   icon: Icons.check_circle_outline,
                   label: 'Keep original',
-                  onTap: () => Navigator.of(context)
-                      .pop(_ConflictResolutionAction.keepOriginal),
+                  onTap: () => Navigator.of(
+                    context,
+                  ).pop(_ConflictResolutionAction.keepOriginal),
                 ),
               _MobileActionTile(
                 icon: Icons.check_circle,
                 label: originalNote == null
                     ? 'Convert to normal note'
                     : 'Keep conflict copy',
-                onTap: () => Navigator.of(context).pop(
-                  _ConflictResolutionAction.keepConflictCopy,
-                ),
+                onTap: () => Navigator.of(
+                  context,
+                ).pop(_ConflictResolutionAction.keepConflictCopy),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -3994,10 +4139,7 @@ class _ConflictResolutionSheet extends StatelessWidget {
 }
 
 class _ConflictVersionSummary extends StatelessWidget {
-  const _ConflictVersionSummary({
-    required this.label,
-    required this.note,
-  });
+  const _ConflictVersionSummary({required this.label, required this.note});
 
   final String label;
   final Note note;
@@ -4044,10 +4186,7 @@ class _ConflictVersionSummary extends StatelessWidget {
 }
 
 class _ConflictMetadataLine extends StatelessWidget {
-  const _ConflictMetadataLine({
-    required this.label,
-    required this.value,
-  });
+  const _ConflictMetadataLine({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -4091,10 +4230,7 @@ class _ConflictChangesView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Changes',
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
+          Text('Changes', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 8),
           if (diff.entries.isEmpty)
             Text(
@@ -4110,9 +4246,7 @@ class _ConflictChangesView extends StatelessWidget {
 }
 
 class _ConflictDiffLines extends StatelessWidget {
-  const _ConflictDiffLines({
-    required this.diff,
-  });
+  const _ConflictDiffLines({required this.diff});
 
   final _ConflictLineDiff diff;
 
@@ -4137,9 +4271,7 @@ class _ConflictDiffLines extends StatelessWidget {
 }
 
 class _ConflictDiffLine extends StatelessWidget {
-  const _ConflictDiffLine({
-    required this.entry,
-  });
+  const _ConflictDiffLine({required this.entry});
 
   final _ConflictLineDiffEntry entry;
 
@@ -4178,9 +4310,7 @@ class _ConflictDiffLine extends StatelessWidget {
 }
 
 class _ConflictPreview extends StatelessWidget {
-  const _ConflictPreview({
-    required this.note,
-  });
+  const _ConflictPreview({required this.note});
 
   final Note note;
 
@@ -4191,10 +4321,7 @@ class _ConflictPreview extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Preview',
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
+          Text('Preview', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 8),
           Text(
             _conflictContentPreview(note.content),
@@ -4228,19 +4355,12 @@ class _FolderDestinationTile extends StatelessWidget {
     return ListTile(
       key: ValueKey('move-note-folder-$label'),
       selected: selected,
-      contentPadding: EdgeInsets.only(
-        left: 20 + (depth * 20),
-        right: 16,
-      ),
+      contentPadding: EdgeInsets.only(left: 20 + (depth * 20), right: 16),
       leading: Icon(selected ? Icons.check : Icons.folder_outlined),
       title: Text(label),
       subtitle: subtitle == null
           ? null
-          : Text(
-              subtitle!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+          : Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis),
       onTap: onTap,
     );
   }
@@ -4433,10 +4553,7 @@ class _ConflictLineDiff {
 }
 
 class _ConflictLineDiffEntry {
-  const _ConflictLineDiffEntry._({
-    required this.type,
-    required this.text,
-  });
+  const _ConflictLineDiffEntry._({required this.type, required this.text});
 
   factory _ConflictLineDiffEntry.added(String text) {
     return _ConflictLineDiffEntry._(
@@ -4456,10 +4573,7 @@ class _ConflictLineDiffEntry {
   final String text;
 }
 
-enum _ConflictLineDiffEntryType {
-  added,
-  removed,
-}
+enum _ConflictLineDiffEntryType { added, removed }
 
 String _formatTimestamp(Note note) {
   final timestamp = note.deletedAt ?? note.updatedAt;
@@ -4490,13 +4604,7 @@ const _monthNames = <String>[
   'Dec',
 ];
 
-enum _NoteMenuAction {
-  open,
-  resolveConflict,
-  move,
-  delete,
-  restore,
-}
+enum _NoteMenuAction { open, resolveConflict, move, delete, restore }
 
 enum _ConflictResolutionAction {
   openConflictCopy,
@@ -4505,23 +4613,11 @@ enum _ConflictResolutionAction {
   keepConflictCopy,
 }
 
-enum _FolderMenuAction {
-  createNote,
-  createFolder,
-  move,
-  rename,
-  delete,
-}
+enum _FolderMenuAction { createNote, createFolder, move, rename, delete }
 
-enum _RootSidebarMenuAction {
-  createNote,
-  createFolder,
-}
+enum _RootSidebarMenuAction { createNote, createFolder }
 
-enum _WorkspaceSection {
-  notes,
-  trash,
-}
+enum _WorkspaceSection { notes, trash }
 
 sealed class _DesktopSidebarDragData {
   const _DesktopSidebarDragData();
