@@ -157,6 +157,11 @@ class NoteEditorPageState extends State<NoteEditorPage>
     final isSameNote = _persistedNote?.id == incomingNote.id;
 
     if (editorHasFocus && isSameNote) {
+      if (_isStaleFocusedNoteUpdate(incomingNote)) {
+        _notifyStatusChanged();
+        return;
+      }
+
       final hasUnsavedChanges = _hasUnsavedChanges;
       final persistedNote = _persistedNote;
       final persistedSnapshot =
@@ -166,17 +171,7 @@ class NoteEditorPageState extends State<NoteEditorPage>
           incomingSnapshot != persistedSnapshot;
 
       if (remoteChangedUnderEdit) {
-        _autosaveTimer?.cancel();
-        _blockedExternalNoteUpdate = incomingNote;
-        if (mounted) {
-          setState(() {
-            _saveErrorMessage =
-                'Sync updated this note. Reopen it before editing.';
-          });
-        } else {
-          _saveErrorMessage =
-              'Sync updated this note. Reopen it before editing.';
-        }
+        unawaited(_flushPendingChanges());
         _notifyStatusChanged();
         return;
       }
@@ -207,6 +202,19 @@ class NoteEditorPageState extends State<NoteEditorPage>
       incomingNote,
       snapshot: incomingSnapshot,
     );
+  }
+
+  bool _isStaleFocusedNoteUpdate(Note incomingNote) {
+    final persistedNote = _persistedNote;
+    if (persistedNote == null || persistedNote.id != incomingNote.id) {
+      return false;
+    }
+
+    final incomingSnapshot = _snapshotFromNote(incomingNote);
+    final persistedSnapshot = _snapshotFromNote(persistedNote);
+    return incomingSnapshot != persistedSnapshot &&
+        incomingNote.deviceId == persistedNote.deviceId &&
+        incomingNote.updatedAt.isBefore(persistedNote.updatedAt);
   }
 
   void _handleTextChanged() {
@@ -2642,6 +2650,7 @@ class _MarkdownEditingController extends TextEditingController {
   final List<TextEditingValue> _undoHistory = <TextEditingValue>[];
   final List<TextEditingValue> _redoHistory = <TextEditingValue>[];
   bool _isApplyingHistoryChange = false;
+  int? _lastValidSelectionOffset;
 
   @override
   set value(TextEditingValue newValue) {
@@ -2652,6 +2661,12 @@ class _MarkdownEditingController extends TextEditingController {
         _undoHistory.removeAt(0);
       }
       _redoHistory.clear();
+    }
+    if (newValue.selection.isValid) {
+      _lastValidSelectionOffset = newValue.selection.extentOffset.clamp(
+        0,
+        newValue.text.length,
+      );
     }
     super.value = newValue;
   }
@@ -3063,11 +3078,9 @@ class _MarkdownEditingController extends TextEditingController {
 
   int get _activeLineIndex {
     final selection = value.selection;
-    if (!selection.isValid) {
-      return text.split('\n').length - 1;
-    }
-
-    final safeOffset = selection.extentOffset.clamp(0, text.length);
+    final safeOffset = selection.isValid
+        ? selection.extentOffset.clamp(0, text.length)
+        : (_lastValidSelectionOffset ?? text.length).clamp(0, text.length);
     return '\n'.allMatches(text.substring(0, safeOffset)).length;
   }
 }
@@ -3519,11 +3532,7 @@ List<InlineSpan> _buildInactiveInlineMarkdownSpans(
 }
 
 TextStyle _hiddenMarkdownMarkerStyle(TextStyle baseStyle) {
-  return baseStyle.copyWith(
-    color: Colors.transparent,
-    fontSize: 0.1,
-    height: 1,
-  );
+  return _hiddenMarkdownMarkerWidthPreservingStyle(baseStyle);
 }
 
 TextStyle _hiddenMarkdownMarkerWidthPreservingStyle(TextStyle baseStyle) {

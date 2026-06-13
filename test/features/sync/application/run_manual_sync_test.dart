@@ -300,6 +300,62 @@ void main() {
     expect(repository.upsertedRemoteIds, ['same']);
   });
 
+  test(
+      'preserves pending local edits when local content does not match its hash',
+      () async {
+    const localContent = 'local draft after failed sync';
+    const remoteContent = 'remote version';
+    final repository = _FakeNoteRepository(
+      localNotes: [
+        Note(
+          id: 'pending-inconsistent',
+          title: 'pending-inconsistent',
+          content: localContent,
+          createdAt: DateTime.utc(2026, 3, 24, 10),
+          updatedAt: DateTime.utc(2026, 3, 24, 11),
+          syncStatus: SyncStatus.pendingUpload,
+          contentHash: computeContentHash('stale content'),
+          baseContentHash: computeContentHash('base content'),
+          deviceId: 'device-a',
+          remoteFileId: 'remote-pending-inconsistent',
+        ),
+      ],
+    );
+    final gateway = _FakeSyncGateway(
+      remoteNotes: [
+        _remoteNote(
+          id: 'pending-inconsistent',
+          content: remoteContent,
+          remoteFileId: 'remote-pending-inconsistent',
+        ),
+      ],
+    );
+    final useCase = RunManualSync(
+      noteRepository: repository,
+      syncGateway: gateway,
+      syncStateRepository: _FakeSyncStateRepository(initialToken: 'token-1'),
+      uuid: const _FixedUuid('pending-inconsistent-conflict-copy'),
+    );
+
+    final result = await useCase();
+
+    expect(result.uploadedCount, 1);
+    expect(result.downloadedCount, 0);
+    expect(result.conflictCount, 1);
+    expect(repository.upsertedRemoteIds, isEmpty);
+    expect(gateway.uploadedNoteIds,
+        ['pending-inconsistent-conflict-copy', 'pending-inconsistent']);
+    expect(repository.createdConflictCopies.single.content, remoteContent);
+    final repairedLocalNote = repository.updatedNotes.singleWhere(
+      (note) => note.id == 'pending-inconsistent',
+    );
+    expect(
+      repairedLocalNote.contentHash,
+      computeContentHash(localContent),
+    );
+    expect(repository.syncedIds, ['pending-inconsistent']);
+  });
+
   test('preserves remote metadata when local metadata also changed', () async {
     const content = 'same content';
     final repository = _FakeNoteRepository(

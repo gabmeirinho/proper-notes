@@ -144,8 +144,8 @@ void main() {
     final content = spans[1] as TextSpan;
     expect(marker.text, '# ');
     expect(marker.style?.color, Colors.transparent);
-    expect(marker.style?.fontSize, 0.1);
     expect(content.text, 'Heading');
+    expect(marker.style?.fontSize, content.style?.fontSize);
     expect(content.style?.fontWeight, FontWeight.w800);
     expect(spans.map((span) => (span as TextSpan).text).join(), '# Heading');
   });
@@ -381,6 +381,56 @@ void main() {
     );
 
     expect(afterCaretRect.left, greaterThan(beforeCaretRect.left));
+  });
+
+  testWidgets(
+      'incoming sync update while editing does not block local autosave',
+      (tester) async {
+    final repository = _RecordingNoteRepository();
+    final originalNote = Note(
+      id: 'note-sync-during-edit',
+      title: 'Original title',
+      content: 'Original content',
+      documentJson: documentJsonFromEditableText('Original content'),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'original-hash',
+      baseContentHash: 'original-hash',
+      deviceId: 'device-1',
+    );
+    final remoteUpdate = originalNote.copyWith(
+      title: 'Remote title',
+      content: 'Remote content',
+      documentJson: documentJsonFromEditableText('Remote content'),
+      updatedAt: DateTime.utc(2026, 1, 2),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'remote-hash',
+      baseContentHash: 'remote-hash',
+      deviceId: 'device-2',
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(repository: repository, note: originalNote),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(_bodyField());
+    await tester.enterText(_bodyField(), 'Local draft survives sync');
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await tester.pumpWidget(
+      _buildEditor(repository: repository, note: remoteUpdate),
+    );
+    await tester.pumpAndSettle();
+
+    expect(repository.updatedNotes, hasLength(1));
+    expect(repository.updatedNotes.single.id, originalNote.id);
+    expect(repository.updatedNotes.single.content, 'Local draft survives sync');
+    expect(repository.updatedNotes.single.syncStatus, SyncStatus.pendingUpload);
+    expect(tester.widget<TextField>(_bodyField()).controller?.text,
+        'Local draft survives sync');
+    expect(find.textContaining('Reopen it before editing'), findsNothing);
   });
 
   testWidgets('inline checklist span preserves raw markdown length',
@@ -2439,7 +2489,7 @@ void main() {
     );
   });
 
-  testWidgets('blocks autosave when sync updates the open note under an edit',
+  testWidgets('saves local edits when sync updates the open note under an edit',
       (tester) async {
     final repository = _RecordingNoteRepository();
     final originalNote = Note(
@@ -2473,10 +2523,53 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 900));
 
-    expect(repository.updatedNotes, isEmpty);
+    expect(repository.updatedNotes, hasLength(1));
     expect(
-      find.text('Reopen needed'),
-      findsOneWidget,
+        repository.updatedNotes.single.content, 'User typed on stale content');
+    expect(repository.updatedNotes.single.syncStatus, SyncStatus.pendingUpload);
+    expect(find.text('Reopen needed'), findsNothing);
+  });
+
+  testWidgets('ignores stale same-note updates after a newer focused save',
+      (tester) async {
+    final repository = _RecordingNoteRepository();
+    final originalNote = Note(
+      id: 'note-stale-save-echo',
+      title: 'Stale echo',
+      content: 'Draft',
+      documentJson: documentJsonFromEditableText('Draft'),
+      createdAt: DateTime.utc(2026),
+      updatedAt: DateTime.utc(2026),
+      syncStatus: SyncStatus.synced,
+      contentHash: 'draft-hash',
+      deviceId: 'device-1',
+      baseContentHash: 'draft-hash',
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(repository: repository, note: originalNote),
+    );
+    await tester.tap(_bodyField());
+    await tester.enterText(_bodyField(), 'Draft with newer local text');
+    await tester.pump(const Duration(milliseconds: 900));
+    await tester.pumpAndSettle();
+
+    final bodyField = tester.widget<TextField>(_bodyField());
+    bodyField.controller!.selection = TextSelection.collapsed(
+      offset: bodyField.controller!.text.length,
+    );
+    await tester.pump();
+
+    await tester.pumpWidget(
+      _buildEditor(repository: repository, note: originalNote),
+    );
+    await tester.pumpAndSettle();
+
+    final updatedBodyField = tester.widget<TextField>(_bodyField());
+    expect(updatedBodyField.controller?.text, 'Draft with newer local text');
+    expect(
+      updatedBodyField.controller?.selection.baseOffset,
+      'Draft with newer local text'.length,
     );
   });
 }
