@@ -104,6 +104,22 @@ class RunManualSync {
       }
 
       if (_hasInconsistentLocalContent(localNote)) {
+        if (_shouldUploadLocalPendingNote(localNote)) {
+          await _createAndSyncRemoteConflictCopy(
+            remoteNote: remoteNote,
+            fallbackTitle: localNote.title,
+          );
+          final repairedLocalNote = localNote.copyWith(
+            contentHash: computeContentHash(localNote.content),
+          );
+          await _noteRepository.update(repairedLocalNote);
+          final uploaded = await _syncGateway.upsertNote(repairedLocalNote);
+          await _markSynced(localNote: repairedLocalNote, remoteNote: uploaded);
+          uploadedCount += 1;
+          conflictCount += 1;
+          continue;
+        }
+
         await _noteRepository.upsertRemoteNote(remoteNote);
         downloadedCount += 1;
         continue;
